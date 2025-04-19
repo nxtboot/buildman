@@ -564,7 +564,8 @@ def run_builder(builder, commits, board_selected, args):
         builder.show_summary(commits, board_selected)
     else:
         fail, warned, excs = builder.build_boards(
-            commits, board_selected, args.keep_outputs, args.verbose)
+            commits, board_selected, args.keep_outputs, args.verbose,
+            args.fragments)
         if excs:
             return 102
         if fail:
