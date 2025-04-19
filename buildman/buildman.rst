@@ -1126,27 +1126,23 @@ later comparison.
 defconfig fragments
 -------------------
 
-Buildman provides some initial support for configuration fragments. It can scan
-these when present in defconfig files and handle the resuiting Kconfig
-correctly. Thus it is possible to build a board which has a ``#include`` in the
-defconfig file.
+A comma-separated list of configuration fragments can be added via the
+--fragments parameter to all processed defconfig files, e.g.
 
-For now, Buildman simply includes the files to produce a single output file,
-using the C preprocessor. It does not call the ``merge_config.sh`` script. The
-redefined/redundant logic in that script could fairly easily be repeated in
-Buildman, to detect potential problems. For now it is not clear that this is
-useful.
+.. code-block:: bash
+
+    buildman -k qemu-riscv64_smode --fragments acpi.config
+
+Buildman invokes ``make`` passing the defconfig file and the fragment files as
+target arguments. In ``scripts/kconfig/Makefile`` the script ``merge_config.sh``
+is called for each fragment file to add it to the configuration.
+
+Buildman also supports configuration fragments that are included in defconfig
+files via an ``#include`` statement. It can scan these and handle the resulting
+Kconfig correctly.
 
 To specify the C preprocessor to use, set the ``CPP`` environment variable. The
 default is ``cpp``.
-
-Note that Buildman does not support adding fragments to existing boards, e.g.
-like::
-
-    make qemu_riscv64_defconfig acpi.config
-
-This is partly because there is no way for Buildman to know which fragments are
-valid on which boards.
 
 Building with clang
 -------------------
