@@ -21,6 +21,7 @@ from buildman import cfgutil
 from buildman import toolchain
 from buildman.builder import Builder
 from patman import patchstream
+import qconfig
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -765,6 +766,11 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
                               not args.print_arch and not args.print_prefix)
         if isinstance(brds, int):
             return brds
+
+        if args.extend:
+            dbase = qconfig.ensure_database(
+                args.threads or multiprocessing.cpu_count())
+            brds.parse_all_extended(dbase)
 
     selected, why_selected, board_warnings = determine_boards(
         brds, args.terms, col, args.boards, args.exclude)

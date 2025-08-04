@@ -173,6 +173,8 @@ def add_after_m(parser):
     parser.add_argument('-x', '--exclude', dest='exclude',
           type=str, action='append',
           help='Specify a list of boards to exclude, separated by comma')
+    parser.add_argument('-X', '--extend', action='store_true',
+          default=False, help='Include boards based on fragments (configs/*.buildman)')
     parser.add_argument('-y', '--filter-dtb-warnings', action='store_true',
           default=False,
           help='Filter out device-tree-compiler warnings from output')

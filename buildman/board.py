@@ -6,7 +6,8 @@
 
 class Board:
     """A particular board that we can build"""
-    def __init__(self, status, arch, cpu, soc, vendor, board_name, target, cfg_name):
+    def __init__(self, status, arch, cpu, soc, vendor, board_name, target,
+                 cfg_name, extended=None, orig_target=None):
         """Create a new board type.
 
         Args:
@@ -18,8 +19,11 @@ class Board:
             board_name: Name of board (e.g. integrator)
             target: Target name (use make <target>_defconfig to configure)
             cfg_name: Config-file name (in includes/configs/)
+            extended (boards.Extended): Extended board, if this board is one
+            orig_target (str): Name of target this extended board is based on
         """
         self.target = target
+        self.status = status
         self.arch = arch
         self.cpu = cpu
         self.soc = soc
@@ -29,3 +33,5 @@ class Board:
         self.props = [self.target, self.arch, self.cpu, self.board_name,
                       self.vendor, self.soc, self.cfg_name]
         self.build_it = False
+        self.extended = extended
+        self.orig_target = orig_target

@@ -19,6 +19,7 @@ import time
 from buildman import board
 from buildman import kconfiglib
 
+import qconfig
 from u_boot_pylib import command
 from u_boot_pylib.terminal import print_clear, tprint
 from u_boot_pylib import tools
@@ -906,6 +907,96 @@ class Boards:
         self.format_and_output(params_list, output)
         return not warnings
 
+    def parse_all_extended(self, dbase):
+        """Parse any .buildman files to find boards composed of fragments
+
+        Args:
+            dbase (tuple):
+                set of all config options seen (each a str)
+                set of all defconfigs seen (each a str)
+                dict of configs for each defconfig:
+                    key: defconfig name, e.g. "MPC8548CDS_legacy_defconfig"
+                    value: dict:
+                        key: CONFIG option
+                        value: Value of option
+                dict of defconfigs for each config:
+                    key: CONFIG option
+                    value: set of boards using that option
+        """
+        for fname in glob.glob('configs/*.buildman'):
+            self.parse_extended(dbase, fname)
+
+    def find_by_target(self, target):
+        """Find a board given its target name
+
+        Args:
+            target (str): Target string to search for
+
+        Return:
+            Board: board found
+
+        Raises:
+            ValueError: Board was not found
+        """
+        for b in self._boards:
+            if b.target == target:
+                return b
+
+        targets = [b.target for b in self._boards]
+        for t in sorted(targets):
+            print(t)
+        raise ValueError(f"Board '{target}' not found")
+
+    def parse_extended(self, dbase, fname):
+        """Parse a single 'extended' file"""
+        result = ExtendedParser.parse_file(fname)
+        for ext in result:
+            ext_boards = self.scan_extended(dbase, ext)
+            for name in ext_boards:
+                # Find the base board
+                brd = self.find_by_target(name)
+                newb = board.Board(brd.status, brd.arch, brd.cpu, brd.soc,
+                                   brd.vendor, brd.board_name,
+                                   f'{ext.name},{brd.target}',
+                                   brd.cfg_name, ext, brd.target)
+
+                self.add_board(newb)
+
+    def scan_extended(self, dbase, ext):
+        """Scan for extended boards"""
+        # First check the fragments
+        frags = []
+        for frag in ext.fragments:
+            fname = os.path.join(f'configs/{frag}.config')
+            frags.append(tools.read_file(fname, binary=False))
+
+        # Now get a list of defconfigs (without the _defconfig suffix)
+        defconfigs = set()
+        cfg_list = []
+        for first, val in ext.targets:
+            if first == 'regex':
+                pattern = f'configs/{val}'
+                fnames = glob.glob(pattern)
+                if not fnames:
+                    print(f"'Warning: No configs matching '{pattern}'")
+                for fname in fnames:
+                    m_cfg = re.match(r'^configs/(.*)_defconfig$', fname)
+                    defconfigs.add(m_cfg.group(1))
+            else:
+                if val == 'n':
+                    cfg_list.append(f'~{first}')
+                elif val == 'y':
+                    cfg_list.append(f'{first}')
+                else:
+                    cfg_list.append(f'{first}={val}')
+
+        # Search for boards with the given configs
+        boards = qconfig.find_config(dbase, cfg_list)
+        if defconfigs:
+            boards &= defconfigs
+
+        return boards
+
 
 class ExtendedParser:
     """Parser for extended-board (.buildman) files"""
@@ -946,7 +1037,12 @@ class ExtendedParser:
         return parser.extended
 
     def parse(self, fname, data):
-        """Parse the file"""
+        """Parse the file
+
+        Args:
+            fname (str): Filename to parse (used for error messages)
+            data (str): Contents of the file
+        """
         self.start()
         for seq, line in enumerate(data.splitlines()):
             linenum = seq + 1
