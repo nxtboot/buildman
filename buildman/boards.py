@@ -5,7 +5,7 @@
 
 """Maintains a list of boards and allows them to be selected"""
 
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import errno
 import fnmatch
 import glob
@@ -34,6 +34,8 @@ COMMENT_BLOCK = f'''#
 # Status, Arch, CPU, SoC, Vendor, Board, Target, Config, Maintainers
 
 '''
+
+Extended = namedtuple('Extended', 'name,desc,fragments,targets')
 
 
 def try_remove(fname):
@@ -903,3 +905,88 @@ class Boards:
             print(warn, file=sys.stderr)
         self.format_and_output(params_list, output)
         return not warnings
+
+
+class ExtendedParser:
+    """Parser for extended-board (.buildman) files"""
+    def __init__(self):
+        self.extended = []
+        self.name = None
+        self.fragments = []
+        self.targets = []
+        self.in_targets = False
+        self.desc = None
+
+    def start(self):
+        """Start a new extended board"""
+        self.name = None
+        self.fragments = []
+        self.targets = []
+        self.in_targets = False
+        self.desc = None
+
+    def finish(self):
+        """Finish any pending extended board"""
+        if self.name:
+            self.extended.append(Extended(self.name, self.desc, self.fragments,
+                                          self.targets))
+            self.start()
+
+    @staticmethod
+    def parse_file(fname):
+        """Parse a file and return the result"""
+        return ExtendedParser.parse_data(fname,
+                                         tools.read_file(fname, binary=False))
+
+    @staticmethod
+    def parse_data(fname, data):
+        """Parse a file and return the result"""
+        parser = ExtendedParser()
+        parser.parse(fname, data)
+        return parser.extended
+
+    def parse(self, fname, data):
+        """Parse the file"""
+        self.start()
+        for seq, line in enumerate(data.splitlines()):
+            linenum = seq + 1
+            if not line.strip() or line[0] == '#':
+                continue
+            if line[0] == ' ':
+                if not self.in_targets:
+                    raise ValueError(f'{fname}:{linenum}: Unexpected indent')
+                if '=' in line:
+                    pair = line.split('=')
+                    if len(pair) != 2:
+                        raise ValueError(f'{fname}:{linenum}: Invalid CONFIG syntax')
+                    first, rest = pair
+                    cfg = first.strip()
+                    value = rest.strip()
+                    self.targets.append([cfg, value])
+                else:
+                    target = line.strip()
+                    if ' ' in target:
+                        raise ValueError(f'{fname}:{linenum}: Invalid target regex')
+                    self.targets.append(['regex', line.strip()])
+            else:
+                pair = line.split(':')
+                if len(pair) != 2:
+                    raise ValueError(f'{fname}:{linenum}: Invalid tag')
+                tag, rest = pair
+                value = rest.strip()
+                if tag == 'name':
+                    self.finish()
+                    if ' ' in value:
+                        raise ValueError(f'{fname}:{linenum}: Invalid name')
+                    self.name = value
+                elif tag == 'desc':
+                    self.desc = value
+                elif tag == 'fragment':
+                    self.fragments.append(value)
+                elif tag == 'targets':
+                    self.in_targets = True
+                else:
+                    raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
+
+        self.finish()
+        return self.extended
