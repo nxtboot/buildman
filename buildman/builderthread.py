@@ -420,7 +420,13 @@ class BuilderThread(threading.Thread):
 
         args, cwd, src_dir = self._build_args(brd, out_dir, out_rel_dir,
                                               work_dir, commit_upto)
-        config_args = [f'{brd.target}_defconfig']
+        if brd.extended:
+            config_args = [f'{brd.orig_target}_defconfig']
+            for frag in brd.extended.fragments:
+                fname = os.path.join(f'{frag}.config')
+                config_args.append(fname)
+        else:
+            config_args = [f'{brd.target}_defconfig']
         if fragments != None:
             config_args.extend(fragments.split(','))
         config_out = io.StringIO()
