@@ -1789,7 +1789,8 @@ class Builder:
                 shutil.rmtree(dirname)
             terminal.print_clear()
 
-    def build_boards(self, commits, board_selected, keep_outputs, verbose):
+    def build_boards(self, commits, board_selected, keep_outputs, verbose,
+                     fragments):
         """Build all commits for a list of boards
 
         Args:
@@ -1798,6 +1799,7 @@ class Builder:
                     value is Board object
             keep_outputs: True to save build output files
             verbose: Display build results as they are completed
+            fragments (str): config fragments added to defconfig
         Returns:
             Tuple containing:
                 - number of boards that failed to build
@@ -1827,6 +1829,7 @@ class Builder:
             job.keep_outputs = keep_outputs
             job.work_in_output = self.work_in_output
             job.adjust_cfg = self.adjust_cfg
+            job.fragments = fragments
             job.step = self._step
             if self.num_threads:
                 self.queue.put(job)

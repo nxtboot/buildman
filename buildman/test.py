@@ -237,7 +237,7 @@ class TestBuild(unittest.TestCase):
         # Build the boards for the pre-defined commits and warnings/errors
         # associated with each. This calls our Make() to inject the fake output.
         build.build_boards(self.commits, board_selected, keep_outputs=False,
-                           verbose=False)
+                           verbose=False, fragments='')
         lines = terminal.get_print_test_lines()
         count = 0
         for line in lines:

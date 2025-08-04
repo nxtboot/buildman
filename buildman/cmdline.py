@@ -63,6 +63,8 @@ def add_upto_m(parser):
           help="Fetch a toolchain for architecture FETCH_ARCH ('list' to list)."
               ' You can also fetch several toolchains separate by comma, or'
               " 'all' to download all")
+    parser.add_argument('--fragments', type=str,
+          help="Comma separated list of configuration fragments to be applied")
     parser.add_argument(
           '--full-check', action='store_true',
           help='Check maintainer entries and TARGET configs')
@@ -171,6 +173,8 @@ def add_after_m(parser):
     parser.add_argument('-x', '--exclude', dest='exclude',
           type=str, action='append',
           help='Specify a list of boards to exclude, separated by comma')
+    parser.add_argument('-X', '--extend', action='store_true',
+          default=False, help='Include boards based on fragments (configs/*.buildman)')
     parser.add_argument('-y', '--filter-dtb-warnings', action='store_true',
           default=False,
           help='Filter out device-tree-compiler warnings from output')

@@ -14,6 +14,7 @@ import unittest
 
 from buildman import board
 from buildman import boards
+from buildman.boards import Extended
 from buildman import bsettings
 from buildman import cmdline
 from buildman import control
@@ -798,6 +799,21 @@ Some images are invalid'''
         lines = self.check_command('-L')[0]
         self.assertIn(b'NO_LTO=1', lines[0])
 
+    def testFragments(self):
+        """Test passing of configuration fragments to the make command"""
+        # Single fragment passed as argument
+        extra_args = ['board0', '--fragments', 'f1.config']
+        lines, cfg_data = self.check_command(*extra_args)
+        self.assertRegex(lines[0].decode('utf-8'),
+                         r'make O=/.*board0_defconfig\s+f1\.config',
+                         'Test single fragment')
+        # Multiple fragments passed as comma-separated list
+        extra_args = ['board0', '--fragments', 'f1.config,f2.config']
+        lines, cfg_data = self.check_command(*extra_args)
+        self.assertRegex(lines[0].decode('utf-8'),
+                         r'make O=/.*board0_defconfig\s+f1\.config\s+f2\.config',
+                         'Test multiple fragments')
+
     def testReproducible(self):
         """Test that the -r flag works"""
         lines, cfg_data = self.check_command('-r')
@@ -1162,3 +1178,91 @@ CONFIG_SOC="fred"
 
         # It should appear at the end of the build line
         self.assertEqual(b'u-boot.dtb', lines[1].split()[-1])
+
+    def test_extended(self):
+        """Test parsing of extended (.buildman) files"""
+        data = '''
+name: acpi_boards
+desc: Build RISC-V QEMU builds with ACPI
+fragment: acpi
+targets:
+  qemu_riscv*
+
+name: am62x_dfu
+desc: Build Android variant of 'k3' boards, with DFU
+fragment: am62x_r5_usbdfu
+fragment: am62x_a53_android
+targets:
+  CONFIG_SYS_SOC="k3"
+'''
+        fname = os.path.join(self._base_dir, 'try.buildman')
+        tools.write_file(fname, data.encode('utf-8'))
+        result = boards.ExtendedParser.parse_file(fname)
+        self.maxDiff = None
+        self.assertEqual([
+            Extended(name='acpi_boards',
+                     desc='Build RISC-V QEMU builds with ACPI',
+                     fragments=['acpi'],
+                     targets=[
+                         ['regex', 'qemu_riscv*']]),
+            Extended(name='am62x_dfu',
+                     desc="Build Android variant of 'k3' boards, with DFU",
+                     fragments=['am62x_r5_usbdfu', 'am62x_a53_android'],
+                     targets=[
+                         ['CONFIG_SYS_SOC', '"k3"']]
+                     )], result)
+
+    def test_extended_bad_indent(self):
+        """Test unexpected indentation"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('mary', ' name: fred')
+        self.assertEqual('mary:1: Unexpected indent',
+                         str(exc.exception))
+
+    def test_extended_invalid_config(self):
+        """Test a bad CONFIG_xxx= line"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('anna', '''
+name: joan
+targets:
+  CONFIG_SOMETHING=val="
+''')
+        self.assertEqual('anna:4: Invalid CONFIG syntax',
+                         str(exc.exception))
+
+    def test_extended_invalid_target(self):
+        """Test a bad target regex"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('john', '''
+name: fred
+targets:
+  qemu* *riscv
+''')
+        self.assertEqual('john:4: Invalid target regex',
+                         str(exc.exception))
+
+    def test_extended_invalid_tag(self):
+        """Test a bad tag"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('hannah', '''
+name: frank :was here
+''')
+        self.assertEqual('hannah:2: Invalid tag',
+                         str(exc.exception))
+
+    def test_extended_unknown_tag(self):
+        """Test a unknown tag"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('susan', '''
+name: allan
+something: me
+''')
+        self.assertEqual("susan:3: Unknown tag 'something'",
+                         str(exc.exception))
+
+    def test_extended_bad_name(self):
+        """Test a name with an invalid char"""
+        with self.assertRaises(ValueError) as exc:
+            boards.ExtendedParser.parse_data('bert', 'name: katie was here')
+        self.assertEqual('bert:1: Invalid name',
+                         str(exc.exception))

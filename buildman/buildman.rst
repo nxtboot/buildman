@@ -1126,27 +1126,79 @@ later comparison.
 defconfig fragments
 -------------------
 
-Buildman provides some initial support for configuration fragments. It can scan
-these when present in defconfig files and handle the resuiting Kconfig
-correctly. Thus it is possible to build a board which has a ``#include`` in the
-defconfig file.
+A comma-separated list of configuration fragments can be added via the
+--fragments parameter to all processed defconfig files, e.g.
 
-For now, Buildman simply includes the files to produce a single output file,
-using the C preprocessor. It does not call the ``merge_config.sh`` script. The
-redefined/redundant logic in that script could fairly easily be repeated in
-Buildman, to detect potential problems. For now it is not clear that this is
-useful.
+.. code-block:: bash
+
+    buildman -k qemu-riscv64_smode --fragments acpi.config
+
+Buildman invokes ``make`` passing the defconfig file and the fragment files as
+target arguments. In ``scripts/kconfig/Makefile`` the script ``merge_config.sh``
+is called for each fragment file to add it to the configuration.
+
+Buildman also supports configuration fragments that are included in defconfig
+files via an ``#include`` statement. It can scan these and handle the resulting
+Kconfig correctly.
 
 To specify the C preprocessor to use, set the ``CPP`` environment variable. The
 default is ``cpp``.
 
-Note that Buildman does not support adding fragments to existing boards, e.g.
-like::
+Specifying the build matrix with fragments
+------------------------------------------
 
-    make qemu_riscv64_defconfig acpi.config
+In order to build boards which can use fragments, Buildman needs to know which
+fragments are valid with which boards.
 
-This is partly because there is no way for Buildman to know which fragments are
-valid on which boards.
+In ``defconfig/``, files with a '.buildman' suffix are used to effectively
+create new boards for Buildman to build. All such files are processed, but it
+might be best to put all the information in a single file for now, e.g.
+``extended.buildman``.
+
+The syntax consists of a number of sections, each introduced by a name. For each
+section the fragment file is named. This name cannot include spaces. When
+applied to a board, a new 'extended' board is created, its name consisting of
+the original name, with one or more of these names prepended, with a comma
+between each. For example, if the base board is `am62x_beagleplay_a53`, with
+a name of `am62x_dfu` an extended board called `am62x_dfu,am62x_beagleplay_a53`
+is created, which can be selected by buildman just like a normal board.
+
+A `desc` field provides a human-readable description, ignored by buildman.
+
+The behaviour of the extented config must be specified. First, the fragments
+which make it up must be listed, on separate `fragment: <config>' lines, where
+<config> specifies the fragment file in the defconfigs directory, with an
+implied `.config` suffix. So a fragment of `acpi` indicates that
+`configs/acpi.config` should be added to the base defconfig for the board.
+Multiple fragments can be specified. When building, fragments are applied in
+the order they are specified.
+
+Following the fragments, the targets which can accept that fragment are
+specified, either by their board name, with wildcards, or a set of ``CONFIG``
+options to check. All ``CONFIG`` options must match for a board to be included
+in the set. The syntax is `CONFIG_<config>=<value>` where `<config>` is the
+Kconfig name and `<value>` is the value. Strings must be quoted. For boolean
+options, use a value of `y` or `n`.
+
+For example::
+
+   name: acpi_boards
+   desc: Build RISC-V QEMU builds with ACPI
+   fragment: acpi
+   targets:
+     qemu_riscv*
+
+   name: am62x_dfu
+   desc: Build Android variant of 'k3' boards, with DFU
+   fragment: am62x_r5_usbdfu
+   fragment: am62x_a53_android
+   targets:
+     CONFIG_SYS_SOC="k3"
+
+Buildman normally ignores these files. To request that Buildman process these
+extended new 'boards', use the ``-X / --extend`` option. Note that this may
+significantly increase the number of boards which Buildman builds, so you may
+need to add additional terms to limit this.
 
 Building with clang
 -------------------

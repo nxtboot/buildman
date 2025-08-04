@@ -5,7 +5,7 @@
 
 """Maintains a list of boards and allows them to be selected"""
 
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import errno
 import fnmatch
 import glob
@@ -19,6 +19,7 @@ import time
 from buildman import board
 from buildman import kconfiglib
 
+import qconfig
 from u_boot_pylib import command
 from u_boot_pylib.terminal import print_clear, tprint
 from u_boot_pylib import tools
@@ -34,6 +35,8 @@ COMMENT_BLOCK = f'''#
 # Status, Arch, CPU, SoC, Vendor, Board, Target, Config, Maintainers
 
 '''
+
+Extended = namedtuple('Extended', 'name,desc,fragments,targets')
 
 
 def try_remove(fname):
@@ -903,3 +906,183 @@ class Boards:
             print(warn, file=sys.stderr)
         self.format_and_output(params_list, output)
         return not warnings
+
+    def parse_all_extended(self, dbase):
+        """Parse any .buildman files to find boards composed of fragments
+
+        Args:
+            dbase (tuple):
+                set of all config options seen (each a str)
+                set of all defconfigs seen (each a str)
+                dict of configs for each defconfig:
+                    key: defconfig name, e.g. "MPC8548CDS_legacy_defconfig"
+                    value: dict:
+                        key: CONFIG option
+                        value: Value of option
+                dict of defconfigs for each config:
+                    key: CONFIG option
+                    value: set of boards using that option
+        """
+        for fname in glob.glob('configs/*.buildman'):
+            self.parse_extended(dbase, fname)
+
+    def find_by_target(self, target):
+        """Find a board given its target name
+
+        Args:
+            target (str): Target string to search for
+
+        Return:
+            Board: board found
+
+        Raises:
+            ValueError: Board was not found
+        """
+        for b in self._boards:
+            if b.target == target:
+                return b
+
+        targets = [b.target for b in self._boards]
+        for t in sorted(targets):
+            print(t)
+        raise ValueError(f"Board '{target}' not found")
+
+    def parse_extended(self, dbase, fname):
+        """Parse a single 'extended' file"""
+        result = ExtendedParser.parse_file(fname)
+        for ext in result:
+            ext_boards = self.scan_extended(dbase, ext)
+            for name in ext_boards:
+                # Find the base board
+                brd = self.find_by_target(name)
+                newb = board.Board(brd.status, brd.arch, brd.cpu, brd.soc,
+                                   brd.vendor, brd.board_name,
+                                   f'{ext.name},{brd.target}',
+                                   brd.cfg_name, ext, brd.target)
+
+                self.add_board(newb)
+
+    def scan_extended(self, dbase, ext):
+        """Scan for extended boards"""
+        # First check the fragments
+        frags = []
+        for frag in ext.fragments:
+            fname = os.path.join(f'configs/{frag}.config')
+            frags.append(tools.read_file(fname, binary=False))
+
+        # Now get a list of defconfigs (without the _defconfig suffix)
+        defconfigs = set()
+        cfg_list = []
+        for first, val in ext.targets:
+            if first == 'regex':
+                pattern = f'configs/{val}'
+                fnames = glob.glob(pattern)
+                if not fnames:
+                    print(f"'Warning: No configs matching '{pattern}'")
+                for fname in fnames:
+                    m_cfg = re.match(r'^configs/(.*)_defconfig$', fname)
+                    defconfigs.add(m_cfg.group(1))
+            else:
+                if val == 'n':
+                    cfg_list.append(f'~{first}')
+                elif val == 'y':
+                    cfg_list.append(f'{first}')
+                else:
+                    cfg_list.append(f'{first}={val}')
+
+        # Search for boards with the given configs
+        boards = qconfig.find_config(dbase, cfg_list)
+        if defconfigs:
+            boards &= defconfigs
+
+        return boards
+
+
+class ExtendedParser:
+    """Parser for extended-board (.buildman) files"""
+    def __init__(self):
+        self.extended = []
+        self.name = None
+        self.fragments = []
+        self.targets = []
+        self.in_targets = False
+        self.desc = None
+
+    def start(self):
+        """Start a new extended board"""
+        self.name = None
+        self.fragments = []
+        self.targets = []
+        self.in_targets = False
+        self.desc = None
+
+    def finish(self):
+        """Finish any pending extended board"""
+        if self.name:
+            self.extended.append(Extended(self.name, self.desc, self.fragments,
+                                          self.targets))
+            self.start()
+
+    @staticmethod
+    def parse_file(fname):
+        """Parse a file and return the result"""
+        return ExtendedParser.parse_data(fname,
+                                         tools.read_file(fname, binary=False))
+
+    @staticmethod
+    def parse_data(fname, data):
+        """Parse a file and return the result"""
+        parser = ExtendedParser()
+        parser.parse(fname, data)
+        return parser.extended
+
+    def parse(self, fname, data):
+        """Parse the file
+
+        Args:
+            fname (str): Filename to parse (used for error messages)
+            data (str): Contents of the file
+        """
+        self.start()
+        for seq, line in enumerate(data.splitlines()):
+            linenum = seq + 1
+            if not line.strip() or line[0] == '#':
+                continue
+            if line[0] == ' ':
+                if not self.in_targets:
+                    raise ValueError(f'{fname}:{linenum}: Unexpected indent')
+                if '=' in line:
+                    pair = line.split('=')
+                    if len(pair) != 2:
+                        raise ValueError(f'{fname}:{linenum}: Invalid CONFIG syntax')
+                    first, rest = pair
+                    cfg = first.strip()
+                    value = rest.strip()
+                    self.targets.append([cfg, value])
+                else:
+                    target = line.strip()
+                    if ' ' in target:
+                        raise ValueError(f'{fname}:{linenum}: Invalid target regex')
+                    self.targets.append(['regex', line.strip()])
+            else:
+                pair = line.split(':')
+                if len(pair) != 2:
+                    raise ValueError(f'{fname}:{linenum}: Invalid tag')
+                tag, rest = pair
+                value = rest.strip()
+                if tag == 'name':
+                    self.finish()
+                    if ' ' in value:
+                        raise ValueError(f'{fname}:{linenum}: Invalid name')
+                    self.name = value
+                elif tag == 'desc':
+                    self.desc = value
+                elif tag == 'fragment':
+                    self.fragments.append(value)
+                elif tag == 'targets':
+                    self.in_targets = True
+                else:
+                    raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
+
+        self.finish()
+        return self.extended

@@ -389,7 +389,7 @@ class BuilderThread(threading.Thread):
 
     def _config_and_build(self, commit_upto, brd, work_dir, do_config, mrproper,
                           config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                          result):
+                          fragments, result):
         """Do the build, configuring first if necessary
 
         Args:
@@ -404,6 +404,7 @@ class BuilderThread(threading.Thread):
             out_dir (str): Output directory for the build, or None to use
                current
             out_rel_dir (str): Output directory relatie to the current dir
+            fragments (str): config fragments added to defconfig
             result (CommandResult): Previous result
 
         Returns:
@@ -419,7 +420,15 @@ class BuilderThread(threading.Thread):
 
         args, cwd, src_dir = self._build_args(brd, out_dir, out_rel_dir,
                                               work_dir, commit_upto)
-        config_args = [f'{brd.target}_defconfig']
+        if brd.extended:
+            config_args = [f'{brd.orig_target}_defconfig']
+            for frag in brd.extended.fragments:
+                fname = os.path.join(f'{frag}.config')
+                config_args.append(fname)
+        else:
+            config_args = [f'{brd.target}_defconfig']
+        if fragments != None:
+            config_args.extend(fragments.split(','))
         config_out = io.StringIO()
 
         _remove_old_outputs(out_dir)
@@ -458,7 +467,7 @@ class BuilderThread(threading.Thread):
 
     def run_commit(self, commit_upto, brd, work_dir, do_config, mrproper,
                    config_only, force_build, force_build_failures,
-                   work_in_output, adjust_cfg):
+                   work_in_output, adjust_cfg, fragments):
         """Build a particular commit.
 
         If the build is already done, and we are not forcing a build, we skip
@@ -483,6 +492,7 @@ class BuilderThread(threading.Thread):
                      ~C to disable C
                      C=val to set the value of C (val must have quotes if C is
                          a string Kconfig
+            fragments (str): config fragments added to defconfig
 
         Returns:
             tuple containing:
@@ -512,7 +522,7 @@ class BuilderThread(threading.Thread):
                 result, do_config = self._config_and_build(
                     commit_upto, brd, work_dir, do_config, mrproper,
                     config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                    result)
+                    fragments, result)
             result.already_done = False
 
         result.toolchain = self.toolchain
@@ -710,7 +720,7 @@ class BuilderThread(threading.Thread):
                         self.builder.config_only,
                         force_build or self.builder.force_build,
                         self.builder.force_build_failures,
-                        job.work_in_output, job.adjust_cfg)
+                        job.work_in_output, job.adjust_cfg, job.fragments)
                 failed = result.return_code or result.stderr
                 did_config = do_config
                 if failed and not do_config and not self.mrproper:
@@ -721,7 +731,7 @@ class BuilderThread(threading.Thread):
                             brd, work_dir, True,
                             self.mrproper or self.builder.fallback_mrproper,
                             False, True, False, job.work_in_output,
-                            job.adjust_cfg)
+                            job.adjust_cfg, job.fragments)
                         did_config = True
                 if not self.builder.force_reconfig:
                     do_config = request_config
@@ -767,14 +777,14 @@ class BuilderThread(threading.Thread):
             result, request_config = self.run_commit(None, brd, work_dir, True,
                         self.mrproper, self.builder.config_only, True,
                         self.builder.force_build_failures, job.work_in_output,
-                        job.adjust_cfg)
+                        job.adjust_cfg, job.fragments)
             failed = result.return_code or result.stderr
             if failed and not self.mrproper:
                 result, request_config = self.run_commit(None, brd, work_dir,
                             True, self.builder.fallback_mrproper,
                             self.builder.config_only, True,
                             self.builder.force_build_failures,
-                            job.work_in_output, job.adjust_cfg)
+                            job.work_in_output, job.adjust_cfg, job.fragments)
 
             result.commit_upto = 0
             self._write_result(result, job.keep_outputs, job.work_in_output)
