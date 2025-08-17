@@ -650,6 +650,7 @@ class TestBuild(unittest.TestCase):
 
     def testMakeEnvironment(self):
         """Test the MakeEnvironment function"""
+        os.environ.pop('CROSS_COMPILE', None)
         tc = self.toolchains.Select('arm')
         env = tc.MakeEnvironment(False)
         self.assertEqual(env[b'CROSS_COMPILE'], b'arm-linux-')
