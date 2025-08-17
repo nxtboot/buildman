@@ -1030,14 +1030,14 @@ class TestBuild(unittest.TestCase):
 
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
                                     dtc_skip=True)
-            toolchain = self.toolchains.Select('arm')
-            env = build.make_environment(toolchain)
+            tch = self.toolchains.Select('arm')
+            env = build.make_environment(tch)
             self.assertIn(b'DTC', env)
 
             # Try the normal case, i.e. not skipping the dtc build
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-            toolchain = self.toolchains.Select('arm')
-            env = build.make_environment(toolchain)
+            tch = self.toolchains.Select('arm')
+            env = build.make_environment(tch)
             self.assertNotIn(b'DTC', env)
         finally:
             os.environ['PATH'] = old_path
