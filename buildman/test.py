@@ -1012,6 +1012,7 @@ class TestBuild(unittest.TestCase):
 
     def test_skip_dtc(self):
         """Test skipping building the dtc tool"""
+        os.environ.pop('DTC', None)
         old_path = os.getenv('PATH')
         try:
             os.environ['PATH'] = self.base_dir
