@@ -247,8 +247,8 @@ class KconfigScanner:
 
         temp = None
         if b'#include' in tools.read_file(defconfig):
-            cmd = [
-                os.getenv('CPP', 'cpp'),
+            cpp = os.getenv('CPP', 'cpp').split()
+            cmd = cpp + [
                 '-nostdinc', '-P',
                 '-I', self._srctree,
                 '-undef',

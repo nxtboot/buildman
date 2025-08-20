@@ -650,6 +650,7 @@ class TestBuild(unittest.TestCase):
 
     def testMakeEnvironment(self):
         """Test the MakeEnvironment function"""
+        os.environ.pop('CROSS_COMPILE', None)
         tc = self.toolchains.Select('arm')
         env = tc.MakeEnvironment(False)
         self.assertEqual(env[b'CROSS_COMPILE'], b'arm-linux-')
@@ -1012,6 +1013,7 @@ class TestBuild(unittest.TestCase):
 
     def test_skip_dtc(self):
         """Test skipping building the dtc tool"""
+        os.environ.pop('DTC', None)
         old_path = os.getenv('PATH')
         try:
             os.environ['PATH'] = self.base_dir
@@ -1029,14 +1031,14 @@ class TestBuild(unittest.TestCase):
 
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
                                     dtc_skip=True)
-            toolchain = self.toolchains.Select('arm')
-            env = build.make_environment(toolchain)
+            tch = self.toolchains.Select('arm')
+            env = build.make_environment(tch)
             self.assertIn(b'DTC', env)
 
             # Try the normal case, i.e. not skipping the dtc build
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-            toolchain = self.toolchains.Select('arm')
-            env = build.make_environment(toolchain)
+            tch = self.toolchains.Select('arm')
+            env = build.make_environment(tch)
             self.assertNotIn(b'DTC', env)
         finally:
             os.environ['PATH'] = old_path

@@ -427,7 +427,8 @@ class TestFunctional(unittest.TestCase):
             return self._HandleCommandSize(args)
         elif cmd.endswith( 'cpp'):
             return self._HandleCommandCpp(args)
-
+        elif cmd == 'gcc' and args[0] == '-E':
+            return self._HandleCommandCpp(args[1:])
         if not result:
             # Not handled, so abort
             print('unknown command', kwargs)
