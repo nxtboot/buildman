@@ -1385,8 +1385,8 @@ shows an error::
 
 One major caveat with this feature with branches (-b) is that buildman does not
 name the output directories differently when you change the configuration, so
-doing the same build again with different configuration will not trigger a
-rebuild. You can use -f to work around that.
+doing the same build with a different configuration will not trigger a rebuild.
+You can use -f to work around that.
 
 
 Kconfig change detection
@@ -1468,7 +1468,7 @@ directory.
 Build summary
 -------------
 
-When buildman finishes it shows a summary, something like this::
+When Buildman finishes, it displays a summary, similar to the following:
 
     Completed: 5 total built, duration 0:00:21, rate 0.24
 
