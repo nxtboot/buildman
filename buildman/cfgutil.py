@@ -134,7 +134,7 @@ def convert_list_to_dict(adjust_cfg_list):
     Args:
         adjust_cfg_list (list of str): List of changes to make to .config file
             before building. Each is one of (where C is the config option with
-            or without the CONFIG_ prefix)
+            or without the CONFIG_ prefix). Items can be comma-separated.
 
                 C to enable C
                 ~C to disable C
@@ -154,12 +154,17 @@ def convert_list_to_dict(adjust_cfg_list):
         ValueError: if an item in adjust_cfg_list has invalid syntax
     """
     result = {}
-    for cfg in adjust_cfg_list or []:
-        m_cfg = RE_CFG.match(cfg)
-        if not m_cfg:
-            raise ValueError(f"Invalid CONFIG adjustment '{cfg}'")
-        negate, _, opt, val = m_cfg.groups()
-        result[opt] = f'%s{opt}%s' % (negate or '', val or '')
+    for item in adjust_cfg_list or []:
+        # Split by comma to support comma-separated values
+        for cfg in item.split(','):
+            cfg = cfg.strip()
+            if not cfg:
+                continue
+            m_cfg = RE_CFG.match(cfg)
+            if not m_cfg:
+                raise ValueError(f"Invalid CONFIG adjustment '{cfg}'")
+            negate, _, opt, val = m_cfg.groups()
+            result[opt] = f'%s{opt}%s' % (negate or '', val or '')
 
     return result
 

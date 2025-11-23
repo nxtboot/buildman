@@ -24,7 +24,8 @@ def add_upto_m(parser):
     """
     # Available JqzZ
     parser.add_argument('-a', '--adjust-cfg', type=str, action='append',
-          help='Adjust the Kconfig settings in .config before building')
+          help='Adjust the Kconfig settings in .config before building. ' +
+               'Supports comma-separated values')
     parser.add_argument('-A', '--print-prefix', action='store_true',
           help='Print the tool-chain prefix for a board (CROSS_COMPILE=)')
     parser.add_argument('-b', '--branch', type=str,

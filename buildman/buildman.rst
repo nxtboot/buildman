@@ -1307,6 +1307,19 @@ You can disable options by preceding them with tilde (~). You can specify the
 
     buildman -a CMD_SETEXPR_FMT -a ~CMDLINE
 
+You can also use comma-separated values to specify multiple options in a single
+argument:
+
+.. code-block:: bash
+
+    buildman -a CMD_SETEXPR_FMT,~CMDLINE
+
+or mix both styles:
+
+.. code-block:: bash
+
+    buildman -a CMD_SETEXPR_FMT,~CMDLINE -a BOOTSTD_FULL
+
 Some options have values, in which case you can change them:
 
 .. code-block:: bash

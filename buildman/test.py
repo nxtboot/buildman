@@ -780,6 +780,18 @@ class TestBuild(unittest.TestCase):
              'CONFIG_ANNA="anna"'])
         self.assertEqual(expect, actual)
 
+        # Test comma-separated values
+        actual = cfgutil.convert_list_to_dict(
+            ['FRED,~MARY,JOHN=0x123', 'ALICE="alice"',
+             'CONFIG_AMY,~CONFIG_ABE', 'CONFIG_MARK=0x456,CONFIG_ANNA="anna"'])
+        self.assertEqual(expect, actual)
+
+        # Test mixed comma-separated and individual values
+        actual = cfgutil.convert_list_to_dict(
+            ['FRED,~MARY', 'JOHN=0x123', 'ALICE="alice",CONFIG_AMY',
+             '~CONFIG_ABE,CONFIG_MARK=0x456', 'CONFIG_ANNA="anna"'])
+        self.assertEqual(expect, actual)
+
     def test_check_cfg_file(self):
         """Test check_cfg_file detects conflicts as expected"""
         # Check failure to disable CONFIG
