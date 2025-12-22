@@ -15,6 +15,7 @@ from buildman import board
 from buildman import boards
 from buildman import bsettings
 from buildman import builder
+from buildman import builderthread
 from buildman import cfgutil
 from buildman import control
 from buildman import toolchain
@@ -1094,6 +1095,85 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('', next(lines))
         self.assertEqual('', next(lines))
         self.assertEqual('##done', next(lines))
+
+    def testKconfigChangedSince(self):
+        """Test the kconfig_changed_since() function"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a reference file
+            ref_file = os.path.join(tmpdir, 'done')
+            with open(ref_file, 'w') as f:
+                f.write('0\n')
+
+            # Test with no Kconfig files - should return False
+            self.assertFalse(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # Wait a bit to ensure timestamp difference
+            time.sleep(0.1)
+
+            # Create a Kconfig file newer than the reference
+            kconfig = os.path.join(tmpdir, 'Kconfig')
+            with open(kconfig, 'w') as f:
+                f.write('config TEST\n')
+
+            # Should now return True since Kconfig is newer
+            self.assertTrue(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # Create a new reference file (newer than Kconfig)
+            time.sleep(0.1)
+            with open(ref_file, 'w') as f:
+                f.write('0\n')
+
+            # Should now return False since reference is newer
+            self.assertFalse(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # Test with non-existent reference file
+            self.assertFalse(
+                builderthread.kconfig_changed_since(
+                    os.path.join(tmpdir, 'nonexistent'), tmpdir))
+
+            # Test with Kconfig in subdirectory
+            subdir = os.path.join(tmpdir, 'sub')
+            os.makedirs(subdir)
+            time.sleep(0.1)
+            with open(os.path.join(subdir, 'Kconfig.sub'), 'w') as f:
+                f.write('config SUBTEST\n')
+
+            # Should return True due to newer Kconfig.sub in subdir
+            self.assertTrue(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # Create a new reference file (newer than all Kconfig files)
+            time.sleep(0.1)
+            with open(ref_file, 'w') as f:
+                f.write('0\n')
+
+            # Should now return False
+            self.assertFalse(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # Test with defconfig file - need target parameter
+            configs_dir = os.path.join(tmpdir, 'configs')
+            os.makedirs(configs_dir)
+            time.sleep(0.1)
+            with open(os.path.join(configs_dir, 'sandbox_defconfig'), 'w') as f:
+                f.write('CONFIG_SANDBOX=y\n')
+
+            # Without target, defconfig is not checked
+            self.assertFalse(
+                builderthread.kconfig_changed_since(ref_file, tmpdir))
+
+            # With matching target, defconfig is checked
+            self.assertTrue(
+                builderthread.kconfig_changed_since(ref_file, tmpdir,
+                                                    'sandbox'))
+
+            # With non-matching target, defconfig is not checked
+            self.assertFalse(
+                builderthread.kconfig_changed_since(ref_file, tmpdir,
+                                                    'other_board'))
 
 
 if __name__ == "__main__":

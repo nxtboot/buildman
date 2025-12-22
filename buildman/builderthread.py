@@ -24,6 +24,41 @@ from u_boot_pylib import tools
 RETURN_CODE_RETRY = -1
 BASE_ELF_FILENAMES = ['u-boot', 'spl/u-boot-spl', 'tpl/u-boot-tpl']
 
+
+def kconfig_changed_since(fname, srcdir='.', target=None):
+    """Check if any Kconfig or defconfig files are newer than the given file.
+
+    Args:
+        fname (str): Path to file to compare against (typically '.config')
+        srcdir (str): Source directory to search for Kconfig/defconfig files
+        target (str): Board target name; if provided, only check that board's
+            defconfig file (e.g. 'sandbox' checks 'configs/sandbox_defconfig')
+
+    Returns:
+        bool: True if any Kconfig* file (or the board's defconfig) in srcdir
+            is newer than fname, False otherwise. Also returns False if fname
+            doesn't exist.
+    """
+    if not os.path.exists(fname):
+        return False
+    ref_time = os.path.getmtime(fname)
+
+    # Check the board's specific defconfig if target is provided
+    if target:
+        defconfig = os.path.join(srcdir, 'configs', f'{target}_defconfig')
+        if os.path.exists(defconfig):
+            if os.path.getmtime(defconfig) > ref_time:
+                return True
+
+    # Check all Kconfig files
+    for dirpath, _, filenames in os.walk(srcdir):
+        for filename in filenames:
+            if filename.startswith('Kconfig'):
+                filepath = os.path.join(dirpath, filename)
+                if os.path.getmtime(filepath) > ref_time:
+                    return True
+    return False
+
 # Common extensions for images
 COMMON_EXTS = ['.bin', '.rom', '.itb', '.img']
 
@@ -321,6 +356,7 @@ class BuilderThread(threading.Thread):
         result = command.CommandResult()
         done_file = self.builder.get_done_file(commit_upto, brd.target)
         result.already_done = os.path.exists(done_file)
+        result.kconfig_reconfig = False
         will_build = (force_build or force_build_failures or
             not result.already_done)
         if result.already_done:
@@ -342,6 +378,7 @@ class BuilderThread(threading.Thread):
                 elif not force_build:
                     # The build passed, so no need to build it again
                     will_build = False
+
         return will_build, result
 
     def _decide_dirs(self, brd, work_dir, work_in_output):
@@ -507,6 +544,7 @@ class BuilderThread(threading.Thread):
         will_build, result = self._read_done_file(commit_upto, brd, force_build,
                                                   force_build_failures)
 
+        kconfig_reconfig = False
         if will_build:
             # We are going to have to build it. First, get a toolchain
             if not self.toolchain:
@@ -519,11 +557,21 @@ class BuilderThread(threading.Thread):
 
             if self.toolchain:
                 commit = self._checkout(commit_upto, work_dir)
+
+                # Check if Kconfig files have changed since last config
+                if self.builder.kconfig_check:
+                    config_file = os.path.join(out_dir, '.config')
+                    if kconfig_changed_since(config_file, work_dir,
+                                             brd.target):
+                        kconfig_reconfig = True
+                        do_config = True
+
                 result, do_config = self._config_and_build(
                     commit_upto, brd, work_dir, do_config, mrproper,
                     config_only, adjust_cfg, commit, out_dir, out_rel_dir,
                     fragments, result)
             result.already_done = False
+            result.kconfig_reconfig = kconfig_reconfig
 
         result.toolchain = self.toolchain
         result.brd = brd

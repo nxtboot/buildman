@@ -11,11 +11,13 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from buildman import board
 from buildman import boards
 from buildman.boards import Extended
 from buildman import bsettings
+from buildman import builderthread
 from buildman import cmdline
 from buildman import control
 from buildman import toolchain
@@ -1267,4 +1269,52 @@ something: me
             boards.ExtendedParser.parse_data('bert', 'name: katie was here')
         self.assertEqual('bert:1: Invalid name',
                          str(exc.exception))
+
+    def test_kconfig_change(self):
+        """Test that Kconfig change detection triggers reconfig"""
+        # Track calls to kconfig_changed_since
+        call_count = [0]
+        config_exists = [False]
+
+        def mock_kconfig_changed(fname, srcdir='.', target=None):
+            call_count[0] += 1
+            # Return True only if .config exists (i.e. not the first build)
+            # The first build has no .config to compare against
+            exists = os.path.exists(fname)
+            if exists:
+                config_exists[0] = True
+            return exists
+
+        # Run buildman with kconfig checking enabled
+        with mock.patch.object(builderthread, 'kconfig_changed_since',
+                               mock_kconfig_changed):
+            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir)
+
+        # Verify kconfig_changed_since was called
+        self.assertGreater(call_count[0], 0)
+
+        # Each board should have one reconfig (for the second commit)
+        # First commit has no .config, so no reconfig
+        # Second commit has .config from first commit, so reconfig triggered
+        self.assertEqual(len(BOARDS), self._builder.kconfig_reconfig)
+
+    def test_kconfig_change_disabled(self):
+        """Test that -Z flag disables Kconfig change detection"""
+        call_count = [0]
+
+        def mock_kconfig_changed(fname, srcdir='.', target=None):
+            call_count[0] += 1
+            return True  # Would trigger reconfig if checking was enabled
+
+        # Run buildman with kconfig checking disabled (-Z)
+        with mock.patch.object(builderthread, 'kconfig_changed_since',
+                               mock_kconfig_changed):
+            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
+                             '-Z')
+
+        # Verify kconfig_changed_since was NOT called (feature disabled)
+        self.assertEqual(0, call_count[0])
+
+        # No reconfigs should be triggered
+        self.assertEqual(0, self._builder.kconfig_reconfig)
 
