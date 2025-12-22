@@ -1267,3 +1267,4 @@ something: me
             boards.ExtendedParser.parse_data('bert', 'name: katie was here')
         self.assertEqual('bert:1: Invalid name',
                          str(exc.exception))
+

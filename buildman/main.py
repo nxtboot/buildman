@@ -41,6 +41,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
     # pylint: disable=C0415
     from buildman import func_test
     from buildman import test
+    from buildman import test_boards
 
     test_name = args.terms and args.terms[0] or None
     if skip_net_tests:
@@ -50,7 +51,8 @@ def run_tests(skip_net_tests, debug, verbose, args):
     # 'entry' module.
     result = test_util.run_test_suites(
         'buildman', debug, verbose, False, False, args.threads, test_name, [],
-        [test.TestBuild, func_test.TestFunctional, 'buildman.toolchain'])
+        [test.TestBuild, func_test.TestFunctional, test_boards.TestBoards,
+         'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)
 
