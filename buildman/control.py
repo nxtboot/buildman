@@ -821,6 +821,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
             reproducible_builds=args.reproducible_builds,
             force_build = args.force_build,
             force_build_failures = args.force_build_failures,
+            kconfig_check = args.kconfig_check,
             force_reconfig = args.force_reconfig, in_tree = args.in_tree,
             force_config_on_failure=not args.quick, make_func=make_func,
             dtc_skip=args.dtc_skip, build_target=args.target)

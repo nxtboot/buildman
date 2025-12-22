@@ -164,6 +164,7 @@ class Builder:
 
     Public members: (many should ->private)
         already_done: Number of builds already completed
+        kconfig_reconfig: Number of builds triggered by Kconfig changes
         base_dir: Base directory to use for builder
         checkout: True to check out source, False to skip that step.
             This is used for testing.
@@ -263,7 +264,8 @@ class Builder:
                  work_in_output=False, test_thread_exceptions=False,
                  adjust_cfg=None, allow_missing=False, no_lto=False,
                  reproducible_builds=False, force_build=False,
-                 force_build_failures=False, force_reconfig=False,
+                 force_build_failures=False, kconfig_check=True,
+                 force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
                  dtc_skip=False, build_target=None):
         """Create a new Builder object
@@ -309,6 +311,8 @@ class Builder:
             force_build (bool): Rebuild even commits that are already built
             force_build_failures (bool): Rebuild commits that have not been
                 built, or failed to build
+            kconfig_check (bool): Check if Kconfig files have changed and force
+                a rebuild if so (default True)
             force_reconfig (bool): Reconfigure on each commit
             in_tree (bool): Bulid in tree instead of out-of-tree
             force_config_on_failure (bool): Reconfigure the build before
@@ -330,6 +334,7 @@ class Builder:
         self.num_threads = num_threads
         self.num_jobs = num_jobs
         self.already_done = 0
+        self.kconfig_reconfig = 0
         self.force_build = False
         self.git_dir = git_dir
         self._show_unknown = show_unknown
@@ -354,6 +359,7 @@ class Builder:
         self.reproducible_builds = reproducible_builds
         self.force_build = force_build
         self.force_build_failures = force_build_failures
+        self.kconfig_check = kconfig_check
         self.force_reconfig = force_reconfig
         self.in_tree = in_tree
         self.force_config_on_failure = force_config_on_failure
@@ -567,6 +573,8 @@ class Builder:
                 self.warned += 1
             if result.already_done:
                 self.already_done += 1
+            if result.kconfig_reconfig:
+                self.kconfig_reconfig += 1
             if self._verbose:
                 terminal.print_clear()
                 boards_selected = {target : result.brd}
@@ -1849,11 +1857,15 @@ class Builder:
             tprint()
 
             msg = 'Completed: %d total built' % self.count
-            if self.already_done:
-                msg += ' (%d previously' % self.already_done
-            if self.already_done != self.count:
-                msg += ', %d newly' % (self.count - self.already_done)
-            msg += ')'
+            if self.already_done or self.kconfig_reconfig:
+                parts = []
+                if self.already_done:
+                    parts.append('%d previously' % self.already_done)
+                if self.already_done != self.count:
+                    parts.append('%d newly' % (self.count - self.already_done))
+                if self.kconfig_reconfig:
+                    parts.append('%d reconfig' % self.kconfig_reconfig)
+                msg += ' (' + ', '.join(parts) + ')'
             duration = datetime.now() - self._start_time
             if duration > timedelta(microseconds=1000000):
                 if duration.microseconds >= 500000:

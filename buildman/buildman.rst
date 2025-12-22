@@ -1350,6 +1350,26 @@ doing the same build again with different configuration will not trigger a
 rebuild. You can use -f to work around that.
 
 
+Kconfig change detection
+------------------------
+
+Buildman automatically detects when Kconfig or defconfig files have changed
+since a previous build. If any Kconfig* file or the board's specific defconfig
+file is newer than the build's 'done' file, buildman will force a
+reconfiguration even if the build was previously successful. This ensures that
+configuration changes are properly applied without requiring manual use of -C.
+
+This feature is enabled by default. To disable it, use -Z (--no-kconfig-check).
+
+The build summary shows how many builds were triggered by configuration
+changes::
+
+   Completed: 10 total built (5 previously, 5 newly, 2 reconfig)
+
+In this example, 2 of the 5 new builds required reconfiguration because
+Kconfig or defconfig files had changed since the previous build.
+
+
 Other options
 -------------
 
