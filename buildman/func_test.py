@@ -1285,10 +1285,13 @@ something: me
                 config_exists[0] = True
             return exists
 
-        # Run buildman with kconfig checking enabled
+        # Run buildman with kconfig checking enabled. Use -T4 to ensure each
+        # board gets its own thread, avoiding .config leaking between boards
+        # when a thread processes multiple boards (which happens with <4 CPUs)
         with mock.patch.object(builderthread, 'kconfig_changed_since',
                                mock_kconfig_changed):
-            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir)
+            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
+                             '-T4')
 
         # Verify kconfig_changed_since was called
         self.assertGreater(call_count[0], 0)

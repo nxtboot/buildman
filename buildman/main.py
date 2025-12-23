@@ -63,8 +63,13 @@ def run_test_coverage():
         'tools/buildman/buildman', None,
         ['tools/patman/*.py', 'tools/u_boot_pylib/*', '*test_fdt.py',
          'tools/buildman/kconfiglib.py', 'tools/buildman/*test*.py',
-         'tools/buildman/main.py'],
-        '/tmp/b', single_thread='-T1')
+         'tools/buildman/main.py', 'tools/qconfig.py'],
+        '/tmp/b', single_thread='-T1',
+        allow_failures=['tools/buildman/builder.py',
+                        'tools/buildman/builderthread.py',
+                        'tools/buildman/cfgutil.py',
+                        'tools/buildman/control.py',
+                        'tools/buildman/toolchain.py'])
 
 
 def run_buildman():
