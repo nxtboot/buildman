@@ -790,6 +790,7 @@ class Boards:
         """Add Status and Maintainers information to the board parameters list.
 
         Args:
+            srcdir (str): Directory containing source code (MAINTAINERS files)
             params_list (list of dict): A list of the board parameters
 
         Returns:
