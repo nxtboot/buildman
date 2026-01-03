@@ -785,6 +785,55 @@ class Boards:
                 params_list.append(params)
                 warnings.update(warn)
 
+    @staticmethod
+    def _collect_defconfigs(config_dir):
+        """Collect all defconfig files from a directory
+
+        Args:
+            config_dir (str): Directory containing the defconfig files
+
+        Returns:
+            list of str: Paths to all defconfig files found
+        """
+        all_defconfigs = []
+        for (dirpath, _, filenames) in os.walk(config_dir):
+            for filename in fnmatch.filter(filenames, '*_defconfig'):
+                if fnmatch.fnmatch(filename, '.*'):
+                    continue
+                all_defconfigs.append(os.path.join(dirpath, filename))
+        return all_defconfigs
+
+    def _start_scanners(self, all_defconfigs, srcdir, jobs, warn_targets):
+        """Start parallel defconfig scanning processes
+
+        Args:
+            all_defconfigs (list of str): Paths to defconfig files to scan
+            srcdir (str): Directory containing source code (Kconfig files)
+            jobs (int): The number of jobs to run simultaneously
+            warn_targets (bool): True to warn about missing or duplicate
+                CONFIG_TARGET options
+
+        Returns:
+            tuple:
+                list of Process: Running scanner processes
+                list of Queue: Queues for receiving results
+        """
+        total_boards = len(all_defconfigs)
+        processes = []
+        queues = []
+        for i in range(jobs):
+            defconfigs = all_defconfigs[total_boards * i // jobs :
+                                        total_boards * (i + 1) // jobs]
+            que = multiprocessing.Queue(maxsize=-1)
+            proc = multiprocessing.Process(
+                target=self.scan_defconfigs_for_multiprocess,
+                args=(srcdir, que, defconfigs, warn_targets))
+            proc.start()
+            processes.append(proc)
+            queues.append(que)
+
+        return processes, queues
+
     def scan_defconfigs(self, config_dir, srcdir, jobs=1, warn_targets=False):
         """Collect board parameters for all defconfig files.
 
@@ -805,26 +854,9 @@ class Boards:
                     value: string value of the key
                 list of str: List of warnings recorded
         """
-        all_defconfigs = []
-        for (dirpath, _, filenames) in os.walk(config_dir):
-            for filename in fnmatch.filter(filenames, '*_defconfig'):
-                if fnmatch.fnmatch(filename, '.*'):
-                    continue
-                all_defconfigs.append(os.path.join(dirpath, filename))
-
-        total_boards = len(all_defconfigs)
-        processes = []
-        queues = []
-        for i in range(jobs):
-            defconfigs = all_defconfigs[total_boards * i // jobs :
-                                        total_boards * (i + 1) // jobs]
-            que = multiprocessing.Queue(maxsize=-1)
-            proc = multiprocessing.Process(
-                target=self.scan_defconfigs_for_multiprocess,
-                args=(srcdir, que, defconfigs, warn_targets))
-            proc.start()
-            processes.append(proc)
-            queues.append(que)
+        all_defconfigs = self._collect_defconfigs(config_dir)
+        processes, queues = self._start_scanners(all_defconfigs, srcdir, jobs,
+                                                 warn_targets)
 
         # The resulting data should be accumulated to these lists
         params_list = []
