@@ -322,7 +322,7 @@ class KconfigScanner:
         if params['arch'] == 'riscv':
             try:
                 value = self._conf.syms.get('ARCH_RV32I').str_value
-            except:
+            except AttributeError:
                 value = ''
             if value == 'y':
                 params['arch'] = 'riscv32'
