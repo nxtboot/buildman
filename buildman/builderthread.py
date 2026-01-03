@@ -769,7 +769,7 @@ class BuilderThread(threading.Thread):
                         force_build or self.builder.force_build,
                         self.builder.force_build_failures,
                         job.work_in_output, job.adjust_cfg, job.fragments)
-                failed = result.return_code or result.stderr
+                failed = result.return_code
                 did_config = do_config
                 if failed and not do_config and not self.mrproper:
                     # If our incremental build failed, try building again
@@ -826,7 +826,7 @@ class BuilderThread(threading.Thread):
                         self.mrproper, self.builder.config_only, True,
                         self.builder.force_build_failures, job.work_in_output,
                         job.adjust_cfg, job.fragments)
-            failed = result.return_code or result.stderr
+            failed = result.return_code
             if failed and not self.mrproper:
                 result, request_config = self.run_commit(None, brd, work_dir,
                             True, self.builder.fallback_mrproper,

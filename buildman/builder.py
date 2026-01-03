@@ -575,7 +575,10 @@ class Builder:
                 self.already_done += 1
             if result.kconfig_reconfig:
                 self.kconfig_reconfig += 1
-            if self._verbose:
+            if self._ide:
+                if result.stderr:
+                    sys.stderr.write(result.stderr)
+            elif self._verbose:
                 terminal.print_clear()
                 boards_selected = {target : result.brd}
                 self.reset_result_summary(boards_selected)
@@ -1440,9 +1443,12 @@ class Builder:
 
         # For the IDE mode, print out all the output
         if self._ide:
-            outcome = board_dict[target]
-            for line in outcome.err_lines:
-                sys.stderr.write(line)
+            for target in board_dict:
+                if target not in board_selected:
+                    continue
+                outcome = board_dict[target]
+                for line in outcome.err_lines:
+                    sys.stderr.write(line)
 
         # Display results by arch
         elif any((ok_boards, warn_boards, err_boards, unknown_boards, new_boards,
