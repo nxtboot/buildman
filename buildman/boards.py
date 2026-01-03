@@ -56,6 +56,50 @@ def try_remove(fname):
             raise
 
 
+def _check_srcdir_is_current(ctime, srcdir):
+    """Check if any Kconfig or MAINTAINERS files are newer than ctime
+
+    Args:
+        ctime (float): Reference time to compare against
+        srcdir (str): Directory containing Kconfig and MAINTAINERS files
+
+    Returns:
+        bool: True if all files are older than ctime
+    """
+    for (dirpath, _, filenames) in os.walk(srcdir):
+        for filename in filenames:
+            if (fnmatch.fnmatch(filename, '*~') or
+                not fnmatch.fnmatch(filename, 'Kconfig*') and
+                not filename == 'MAINTAINERS'):
+                continue
+            filepath = os.path.join(dirpath, filename)
+            if ctime < os.path.getctime(filepath):
+                return False
+    return True
+
+
+def _check_output_is_current(output, config_dir):
+    """Check if output references any removed boards
+
+    Args:
+        output (str): Path to the output file
+        config_dir (str): Directory containing defconfig files
+
+    Returns:
+        bool: True if all referenced boards still exist
+    """
+    with open(output, encoding="utf-8") as inf:
+        for line in inf:
+            if 'Options,' in line:
+                return False
+            if line[0] == '#' or line == '\n':
+                continue
+            defconfig = line.split()[6] + '_defconfig'
+            if not os.path.exists(os.path.join(config_dir, defconfig)):
+                return False
+    return True
+
+
 def output_is_new(output, config_dir, srcdir):
     """Check if the output file is up to date.
 
@@ -75,7 +119,6 @@ def output_is_new(output, config_dir, srcdir):
     Raises:
         OSError: output file exists but could not be opened
     """
-    # pylint: disable=too-many-branches
     try:
         ctime = os.path.getctime(output)
     except OSError as exception:
@@ -92,27 +135,11 @@ def output_is_new(output, config_dir, srcdir):
             if ctime < os.path.getctime(filepath):
                 return False
 
-    for (dirpath, _, filenames) in os.walk(srcdir):
-        for filename in filenames:
-            if (fnmatch.fnmatch(filename, '*~') or
-                not fnmatch.fnmatch(filename, 'Kconfig*') and
-                not filename == 'MAINTAINERS'):
-                continue
-            filepath = os.path.join(dirpath, filename)
-            if ctime < os.path.getctime(filepath):
-                return False
+    if not _check_srcdir_is_current(ctime, srcdir):
+        return False
 
-    # Detect a board that has been removed since the current board database
-    # was generated
-    with open(output, encoding="utf-8") as inf:
-        for line in inf:
-            if 'Options,' in line:
-                return False
-            if line[0] == '#' or line == '\n':
-                continue
-            defconfig = line.split()[6] + '_defconfig'
-            if not os.path.exists(os.path.join(config_dir, defconfig)):
-                return False
+    if not _check_output_is_current(output, config_dir):
+        return False
 
     return True
 
