@@ -1114,24 +1114,37 @@ class ExtendedParser:
                             f'{fname}:{linenum}: Invalid target regex')
                     self.targets.append(['regex', line.strip()])
             else:
-                pair = line.split(':')
-                if len(pair) != 2:
-                    raise ValueError(f'{fname}:{linenum}: Invalid tag')
-                tag, rest = pair
-                value = rest.strip()
-                if tag == 'name':
-                    self.finish()
-                    if ' ' in value:
-                        raise ValueError(f'{fname}:{linenum}: Invalid name')
-                    self.name = value
-                elif tag == 'desc':
-                    self.desc = value
-                elif tag == 'fragment':
-                    self.fragments.append(value)
-                elif tag == 'targets':
-                    self.in_targets = True
-                else:
-                    raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
+                self._parse_tag(fname, linenum, line)
 
         self.finish()
         return self.extended
+
+    def _parse_tag(self, fname, linenum, line):
+        """Parse a tag line (one not starting with a space)
+
+        Args:
+            fname (str): Filename (for error messages)
+            linenum (int): Line number (for error messages)
+            line (str): Line to parse
+
+        Raises:
+            ValueError: Invalid syntax
+        """
+        pair = line.split(':')
+        if len(pair) != 2:
+            raise ValueError(f'{fname}:{linenum}: Invalid tag')
+        tag, rest = pair
+        value = rest.strip()
+        if tag == 'name':
+            self.finish()
+            if ' ' in value:
+                raise ValueError(f'{fname}:{linenum}: Invalid name')
+            self.name = value
+        elif tag == 'desc':
+            self.desc = value
+        elif tag == 'fragment':
+            self.fragments.append(value)
+        elif tag == 'targets':
+            self.in_targets = True
+        else:
+            raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
