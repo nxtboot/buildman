@@ -301,6 +301,19 @@ class KconfigScanner:
 
         params['target'] = expect_target
 
+        self._fixup_arch(params)
+
+        return params, warnings
+
+    def _fixup_arch(self, params):
+        """Fix up architecture names
+
+        Handle cases where the architecture name needs adjustment based on
+        CPU type or other configuration.
+
+        Args:
+            params (dict): Board parameters to update in place
+        """
         # fix-up for aarch64
         if params['arch'] == 'arm' and params['cpu'] == 'armv8':
             params['arch'] = 'aarch64'
@@ -315,8 +328,6 @@ class KconfigScanner:
                 params['arch'] = 'riscv32'
             else:
                 params['arch'] = 'riscv64'
-
-        return params, warnings
 
 
 class MaintainersDatabase:
