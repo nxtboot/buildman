@@ -687,6 +687,53 @@ class Boards:
             terms.append(term)
         return terms
 
+    @staticmethod
+    def _check_board(brd, terms, brds, found, exclude_list, result):
+        """Check whether to include or exclude a board
+
+        Checks the various terms and decides whether to build it or not.
+
+        If it is built, add the board to the result[term] list so we know
+        which term caused it to be built. Add it to result['all'] also.
+
+        Keep a list of boards we found in 'found', so we can report boards
+        which appear in self._boards but not in brds.
+
+        Args:
+            brd (Board): Board to check
+            terms (list of Term): Terms to match against
+            brds (list of str): List of board names to build, or None
+            found (list of str): List to append found board names to
+            exclude_list (list of Expr): Expressions for boards to exclude
+            result (OrderedDict): Dict to store results in
+        """
+        matching_term = None
+        build_it = False
+        if terms:
+            for term in terms:
+                if term.matches(brd.props):
+                    matching_term = str(term)
+                    build_it = True
+                    break
+        elif brds:
+            if brd.target in brds:
+                build_it = True
+                found.append(brd.target)
+        else:
+            build_it = True
+
+        # Check that it is not specifically excluded
+        for expr in exclude_list:
+            if expr.matches(brd.props):
+                build_it = False
+                break
+
+        if build_it:
+            brd.build_it = True
+            if matching_term:
+                result[matching_term].append(brd.target)
+            result['all'].append(brd.target)
+
     def select_boards(self, args, exclude=None, brds=None):
         """Mark boards selected based on args
 
@@ -710,48 +757,6 @@ class Boards:
                     argument
                 list of str: Errors/warnings found
         """
-        def _check_board(brd):
-            """Check whether to include or exclude a board
-
-            Checks the various terms and decide whether to build it or not (the
-            'build_it' variable).
-
-            If it is built, add the board to the result[term] list so we know
-            which term caused it to be built. Add it to result['all'] also.
-
-            Keep a list of boards we found in 'found', so we can report boards
-            which appear in self._boards but not in brds.
-
-            Args:
-                brd (Board): Board to check
-            """
-            matching_term = None
-            build_it = False
-            if terms:
-                for term in terms:
-                    if term.matches(brd.props):
-                        matching_term = str(term)
-                        build_it = True
-                        break
-            elif brds:
-                if brd.target in brds:
-                    build_it = True
-                    found.append(brd.target)
-            else:
-                build_it = True
-
-            # Check that it is not specifically excluded
-            for expr in exclude_list:
-                if expr.matches(brd.props):
-                    build_it = False
-                    break
-
-            if build_it:
-                brd.build_it = True
-                if matching_term:
-                    result[matching_term].append(brd.target)
-                result['all'].append(brd.target)
-
         result = OrderedDict()
         warnings = []
         terms = self._build_terms(args)
@@ -767,7 +772,7 @@ class Boards:
 
         found = []
         for brd in self._boards:
-            _check_board(brd)
+            self._check_board(brd, terms, brds, found, exclude_list, result)
 
         if brds:
             remaining = set(brds) - set(found)
