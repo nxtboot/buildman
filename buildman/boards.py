@@ -3,6 +3,8 @@
 # Author: Simon Glass <sjg@chromium.org>
 # Author: Masahiro Yamada <yamada.m@jp.panasonic.com>
 
+# pylint: disable=too-many-lines
+
 """Maintains a list of boards and allows them to be selected"""
 
 from collections import OrderedDict, namedtuple
@@ -268,6 +270,7 @@ class KconfigScanner:
                 '-x', 'assembler-with-cpp',
                 defconfig]
             stdout = command.output(*cmd, capture_stderr=True)
+            # pylint: disable=consider-using-with
             temp = tempfile.NamedTemporaryFile(prefix='buildman-')
             tools.write_file(temp.name, stdout, False)
             fname = temp.name
@@ -523,7 +526,7 @@ class MaintainersDatabase:
         maintainers = []
         status = '-'
         with open(fname, encoding="utf-8") as inf:
-            for linenum, line in enumerate(inf):
+            for _, line in enumerate(inf):
                 # Check also commented maintainers
                 if line[:3] == '#M:':
                     line = line[1:]
@@ -688,6 +691,7 @@ class Boards:
         return terms
 
     @staticmethod
+    # pylint: disable=too-many-arguments
     def _check_board(brd, terms, brds, found, exclude_list, result):
         """Check whether to include or exclude a board
 
@@ -1076,7 +1080,12 @@ class Boards:
         raise ValueError(f"Board '{target}' not found")
 
     def parse_extended(self, dbase, fname):
-        """Parse a single 'extended' file"""
+        """Parse a single 'extended' file
+
+        Args:
+            dbase (tuple): Database of defconfigs from qconfig
+            fname (str): Path to the extended-board file to parse
+        """
         result = ExtendedParser.parse_file(fname)
         for ext in result:
             ext_boards = self.scan_extended(dbase, ext)
