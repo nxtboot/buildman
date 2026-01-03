@@ -294,21 +294,7 @@ class KconfigScanner:
 
         # Check there is exactly one TARGET_xxx set
         if warn_targets:
-            target = None
-            for name, sym in self._conf.syms.items():
-                if name.startswith('TARGET_') and sym.str_value == 'y':
-                    tname = name[7:].lower()
-                    if target:
-                        warnings.append(
-                            f'WARNING: {leaf}: Duplicate TARGET_xxx: '
-                            f'{target} and {tname}')
-                    else:
-                        target = tname
-
-            if not target:
-                cfg_name = expect_target.replace('-', '_').upper()
-                warnings.append(
-                    f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
+            warnings += self._check_targets(leaf, expect_target)
 
         params['target'] = expect_target
 
@@ -339,6 +325,35 @@ class KconfigScanner:
                 params['arch'] = 'riscv32'
             else:
                 params['arch'] = 'riscv64'
+
+    def _check_targets(self, leaf, expect_target):
+        """Check that exactly one TARGET_xxx option is set
+
+        Args:
+            leaf (str): Leaf name of defconfig file (for warnings)
+            expect_target (str): Expected target name
+
+        Returns:
+            list of str: List of warnings found
+        """
+        warnings = []
+        target = None
+        for name, sym in self._conf.syms.items():
+            if name.startswith('TARGET_') and sym.str_value == 'y':
+                tname = name[7:].lower()
+                if target:
+                    warnings.append(
+                        f'WARNING: {leaf}: Duplicate TARGET_xxx: '
+                        f'{target} and {tname}')
+                else:
+                    target = tname
+
+        if not target:
+            cfg_name = expect_target.replace('-', '_').upper()
+            warnings.append(
+                f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
+
+        return warnings
 
 
 class MaintainersDatabase:
