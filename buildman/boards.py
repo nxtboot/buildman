@@ -3,6 +3,8 @@
 # Author: Simon Glass <sjg@chromium.org>
 # Author: Masahiro Yamada <yamada.m@jp.panasonic.com>
 
+# pylint: disable=too-many-lines
+
 """Maintains a list of boards and allows them to be selected"""
 
 from collections import OrderedDict, namedtuple
@@ -56,6 +58,50 @@ def try_remove(fname):
             raise
 
 
+def _check_srcdir_is_current(ctime, srcdir):
+    """Check if any Kconfig or MAINTAINERS files are newer than ctime
+
+    Args:
+        ctime (float): Reference time to compare against
+        srcdir (str): Directory containing Kconfig and MAINTAINERS files
+
+    Returns:
+        bool: True if all files are older than ctime
+    """
+    for (dirpath, _, filenames) in os.walk(srcdir):
+        for filename in filenames:
+            if (fnmatch.fnmatch(filename, '*~') or
+                not fnmatch.fnmatch(filename, 'Kconfig*') and
+                not filename == 'MAINTAINERS'):
+                continue
+            filepath = os.path.join(dirpath, filename)
+            if ctime < os.path.getctime(filepath):
+                return False
+    return True
+
+
+def _check_output_is_current(output, config_dir):
+    """Check if output references any removed boards
+
+    Args:
+        output (str): Path to the output file
+        config_dir (str): Directory containing defconfig files
+
+    Returns:
+        bool: True if all referenced boards still exist
+    """
+    with open(output, encoding="utf-8") as inf:
+        for line in inf:
+            if 'Options,' in line:
+                return False
+            if line[0] == '#' or line == '\n':
+                continue
+            defconfig = line.split()[6] + '_defconfig'
+            if not os.path.exists(os.path.join(config_dir, defconfig)):
+                return False
+    return True
+
+
 def output_is_new(output, config_dir, srcdir):
     """Check if the output file is up to date.
 
@@ -69,13 +115,12 @@ def output_is_new(output, config_dir, srcdir):
         srcdir (str): Directory containing Kconfig and MAINTAINERS files
 
     Returns:
-        True if the given output file exists and is newer than any of
-        *_defconfig, MAINTAINERS and Kconfig*.  False otherwise.
+        bool: True if the given output file exists and is newer than any of
+            *_defconfig, MAINTAINERS and Kconfig*.  False otherwise.
 
     Raises:
         OSError: output file exists but could not be opened
     """
-    # pylint: disable=too-many-branches
     try:
         ctime = os.path.getctime(output)
     except OSError as exception:
@@ -92,27 +137,11 @@ def output_is_new(output, config_dir, srcdir):
             if ctime < os.path.getctime(filepath):
                 return False
 
-    for (dirpath, _, filenames) in os.walk(srcdir):
-        for filename in filenames:
-            if (fnmatch.fnmatch(filename, '*~') or
-                not fnmatch.fnmatch(filename, 'Kconfig*') and
-                not filename == 'MAINTAINERS'):
-                continue
-            filepath = os.path.join(dirpath, filename)
-            if ctime < os.path.getctime(filepath):
-                return False
+    if not _check_srcdir_is_current(ctime, srcdir):
+        return False
 
-    # Detect a board that has been removed since the current board database
-    # was generated
-    with open(output, encoding="utf-8") as inf:
-        for line in inf:
-            if 'Options,' in line:
-                return False
-            if line[0] == '#' or line == '\n':
-                continue
-            defconfig = line.split()[6] + '_defconfig'
-            if not os.path.exists(os.path.join(config_dir, defconfig)):
-                return False
+    if not _check_output_is_current(output, config_dir):
+        return False
 
     return True
 
@@ -134,8 +163,9 @@ class Expr:
 
         Args:
            props (list of str): List of properties to check
+
         Returns:
-           True if any of the properties match the regular expression
+           bool: True if any of the properties match the regular expression
         """
         for prop in props:
             if self._re.match(prop):
@@ -175,8 +205,9 @@ class Term:
 
         Args:
            props (list of str): List of properties to check
+
         Returns:
-           True if all of the expressions in the Term match, else False
+           bool: True if all of the expressions in the Term match, else False
         """
         for expr in self._expr_list:
             if not expr.matches(props):
@@ -220,6 +251,38 @@ class KconfigScanner:
         if self._tmpfile:
             try_remove(self._tmpfile)
 
+    def _load_defconfig(self, defconfig):
+        """Load a defconfig file, preprocessing if needed
+
+        If the defconfig contains #include directives, run the C
+        preprocessor to expand them before loading.
+
+        Args:
+            defconfig (str): Path to the defconfig file
+        """
+        temp = None
+        if b'#include' in tools.read_file(defconfig):
+            cpp = os.getenv('CPP', 'cpp').split()
+            cmd = cpp + [
+                '-nostdinc', '-P',
+                '-I', self._srctree,
+                '-undef',
+                '-x', 'assembler-with-cpp',
+                defconfig]
+            stdout = command.output(*cmd, capture_stderr=True)
+            # pylint: disable=consider-using-with
+            temp = tempfile.NamedTemporaryFile(prefix='buildman-')
+            tools.write_file(temp.name, stdout, False)
+            fname = temp.name
+            tout.info(f'Processing #include to produce {defconfig}')
+        else:
+            fname = defconfig
+
+        self._conf.load_config(fname)
+        if temp:
+            del temp
+        self._tmpfile = None
+
     def scan(self, defconfig, warn_targets):
         """Load a defconfig file to obtain board parameters.
 
@@ -245,27 +308,7 @@ class KconfigScanner:
         expect_target, match, rear = leaf.partition('_defconfig')
         assert match and not rear, f'{leaf} : invalid defconfig'
 
-        temp = None
-        if b'#include' in tools.read_file(defconfig):
-            cpp = os.getenv('CPP', 'cpp').split()
-            cmd = cpp + [
-                '-nostdinc', '-P',
-                '-I', self._srctree,
-                '-undef',
-                '-x', 'assembler-with-cpp',
-                defconfig]
-            stdout = command.output(*cmd, capture_stderr=True)
-            temp = tempfile.NamedTemporaryFile(prefix='buildman-')
-            tools.write_file(temp.name, stdout, False)
-            fname = temp.name
-            tout.info(f'Processing #include to produce {defconfig}')
-        else:
-            fname = defconfig
-
-        self._conf.load_config(fname)
-        if temp:
-            del temp
-        self._tmpfile = None
+        self._load_defconfig(defconfig)
 
         params = {}
         warnings = []
@@ -281,22 +324,23 @@ class KconfigScanner:
 
         # Check there is exactly one TARGET_xxx set
         if warn_targets:
-            target = None
-            for name, sym in self._conf.syms.items():
-                if name.startswith('TARGET_') and sym.str_value == 'y':
-                    tname = name[7:].lower()
-                    if target:
-                        warnings.append(
-                            f'WARNING: {leaf}: Duplicate TARGET_xxx: {target} and {tname}')
-                    else:
-                        target = tname
-
-            if not target:
-                cfg_name = expect_target.replace('-', '_').upper()
-                warnings.append(f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
+            warnings += self._check_targets(leaf, expect_target)
 
         params['target'] = expect_target
 
+        self._fixup_arch(params)
+
+        return params, warnings
+
+    def _fixup_arch(self, params):
+        """Fix up architecture names
+
+        Handle cases where the architecture name needs adjustment based on
+        CPU type or other configuration.
+
+        Args:
+            params (dict): Board parameters to update in place
+        """
         # fix-up for aarch64
         if params['arch'] == 'arm' and params['cpu'] == 'armv8':
             params['arch'] = 'aarch64'
@@ -305,14 +349,41 @@ class KconfigScanner:
         if params['arch'] == 'riscv':
             try:
                 value = self._conf.syms.get('ARCH_RV32I').str_value
-            except:
+            except AttributeError:
                 value = ''
             if value == 'y':
                 params['arch'] = 'riscv32'
             else:
                 params['arch'] = 'riscv64'
 
-        return params, warnings
+    def _check_targets(self, leaf, expect_target):
+        """Check that exactly one TARGET_xxx option is set
+
+        Args:
+            leaf (str): Leaf name of defconfig file (for warnings)
+            expect_target (str): Expected target name
+
+        Returns:
+            list of str: List of warnings found
+        """
+        warnings = []
+        target = None
+        for name, sym in self._conf.syms.items():
+            if name.startswith('TARGET_') and sym.str_value == 'y':
+                tname = name[7:].lower()
+                if target:
+                    warnings.append(
+                        f'WARNING: {leaf}: Duplicate TARGET_xxx: '
+                        f'{target} and {tname}')
+                else:
+                    target = tname
+
+        if not target:
+            cfg_name = expect_target.replace('-', '_').upper()
+            warnings.append(
+                f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
+
+        return warnings
 
 
 class MaintainersDatabase:
@@ -380,6 +451,60 @@ class MaintainersDatabase:
         self.warnings.append(f"WARNING: no maintainers for '{target}'")
         return ''
 
+    def _add_targets(self, targets, status, maintainers):
+        """Add targets to the database
+
+        Args:
+            targets (list of str): List of target names
+            status (str): Board status
+            maintainers (list of str): List of maintainers
+        """
+        for target in targets:
+            self.database[target] = (status, maintainers)
+
+    @staticmethod
+    def _handle_f_tag(srcdir, rest, targets):
+        """Handle F: tag - expand wildcard and filter by defconfig
+
+        Args:
+            srcdir (str): Source directory
+            rest (str): Remainder of line after 'F:'
+            targets (list of str): List to append targets to
+        """
+        glob_path = os.path.join(srcdir, rest)
+        for item in glob.glob(glob_path):
+            front, match, rear = item.partition('configs/')
+            if front.endswith('/'):
+                front = front[:-1]
+            if front == srcdir and match:
+                front, match, rear = rear.rpartition('_defconfig')
+                if match and not rear:
+                    targets.append(front)
+
+    @staticmethod
+    def _handle_n_tag(srcdir, rest, targets):
+        """Handle N: tag - scan configs dir and match with regex
+
+        Args:
+            srcdir (str): Source directory
+            rest (str): Remainder of line after 'N:'
+            targets (list of str): List to append targets to
+        """
+        walk_path = os.walk(os.path.join(srcdir, 'configs'))
+        for dirpath, _, fnames in walk_path:
+            for cfg in fnames:
+                path = os.path.join(dirpath, cfg)[len(srcdir) + 1:]
+                front, match, rear = path.partition('configs/')
+                if front or not match:
+                    continue
+                front, match, rear = rear.rpartition('_defconfig')
+
+                # Use this entry if it matches the defconfig file
+                # without the _defconfig suffix. For example
+                # 'am335x.*' matches am335x_guardian_defconfig
+                if match and not rear and re.search(rest, front):
+                    targets.append(front)
+
     def parse_file(self, srcdir, fname):
         """Parse a MAINTAINERS file.
 
@@ -397,21 +522,11 @@ class MaintainersDatabase:
             srcdir (str): Directory containing source code (Kconfig files)
             fname (str): MAINTAINERS file to be parsed
         """
-        def add_targets(linenum):
-            """Add any new targets
-
-            Args:
-                linenum (int): Current line number
-            """
-            if targets:
-                for target in targets:
-                    self.database[target] = (status, maintainers)
-
         targets = []
         maintainers = []
         status = '-'
         with open(fname, encoding="utf-8") as inf:
-            for linenum, line in enumerate(inf):
+            for _, line in enumerate(inf):
                 # Check also commented maintainers
                 if line[:3] == '#M:':
                     line = line[1:]
@@ -419,41 +534,17 @@ class MaintainersDatabase:
                 if tag == 'M:':
                     maintainers.append(rest)
                 elif tag == 'F:':
-                    # expand wildcard and filter by 'configs/*_defconfig'
-                    glob_path = os.path.join(srcdir, rest)
-                    for item in glob.glob(glob_path):
-                        front, match, rear = item.partition('configs/')
-                        if front.endswith('/'):
-                            front = front[:-1]
-                        if front == srcdir and match:
-                            front, match, rear = rear.rpartition('_defconfig')
-                            if match and not rear:
-                                targets.append(front)
+                    self._handle_f_tag(srcdir, rest, targets)
                 elif tag == 'S:':
                     status = rest
                 elif tag == 'N:':
-                    # Just scan the configs directory since that's all we care
-                    # about
-                    walk_path = os.walk(os.path.join(srcdir, 'configs'))
-                    for dirpath, _, fnames in walk_path:
-                        for cfg in fnames:
-                            path = os.path.join(dirpath, cfg)[len(srcdir) + 1:]
-                            front, match, rear = path.partition('configs/')
-                            if front or not match:
-                                continue
-                            front, match, rear = rear.rpartition('_defconfig')
-
-                            # Use this entry if it matches the defconfig file
-                            # without the _defconfig suffix. For example
-                            # 'am335x.*' matches am335x_guardian_defconfig
-                            if match and not rear and re.search(rest, front):
-                                targets.append(front)
+                    self._handle_n_tag(srcdir, rest, targets)
                 elif line == '\n':
-                    add_targets(linenum)
+                    self._add_targets(targets, status, maintainers)
                     targets = []
                     maintainers = []
                     status = '-'
-        add_targets(linenum)
+        self._add_targets(targets, status, maintainers)
 
 
 class Boards:
@@ -502,7 +593,7 @@ class Boards:
         """Return a list of available boards.
 
         Returns:
-            List of Board objects
+            list of Board: List of Board objects
         """
         return self._boards
 
@@ -523,7 +614,8 @@ class Boards:
         """Return a dictionary containing the selected boards
 
         Returns:
-            List of Board objects that are marked selected
+            OrderedDict: Boards that are marked selected (key=target,
+                value=Board)
         """
         board_dict = OrderedDict()
         for brd in self._boards:
@@ -535,7 +627,7 @@ class Boards:
         """Return a list of selected boards
 
         Returns:
-            List of Board objects that are marked selected
+            list of Board: Board objects that are marked selected
         """
         return [brd for brd in self._boards if brd.build_it]
 
@@ -543,7 +635,7 @@ class Boards:
         """Return a list of selected boards
 
         Returns:
-            List of board names that are marked selected
+            list of str: Board names that are marked selected
         """
         return [brd.target for brd in self._boards if brd.build_it]
 
@@ -598,6 +690,54 @@ class Boards:
             terms.append(term)
         return terms
 
+    @staticmethod
+    # pylint: disable=too-many-arguments
+    def _check_board(brd, terms, brds, found, exclude_list, result):
+        """Check whether to include or exclude a board
+
+        Checks the various terms and decides whether to build it or not.
+
+        If it is built, add the board to the result[term] list so we know
+        which term caused it to be built. Add it to result['all'] also.
+
+        Keep a list of boards we found in 'found', so we can report boards
+        which appear in self._boards but not in brds.
+
+        Args:
+            brd (Board): Board to check
+            terms (list of Term): Terms to match against
+            brds (list of str): List of board names to build, or None
+            found (list of str): List to append found board names to
+            exclude_list (list of Expr): Expressions for boards to exclude
+            result (OrderedDict): Dict to store results in
+        """
+        matching_term = None
+        build_it = False
+        if terms:
+            for term in terms:
+                if term.matches(brd.props):
+                    matching_term = str(term)
+                    build_it = True
+                    break
+        elif brds:
+            if brd.target in brds:
+                build_it = True
+                found.append(brd.target)
+        else:
+            build_it = True
+
+        # Check that it is not specifically excluded
+        for expr in exclude_list:
+            if expr.matches(brd.props):
+                build_it = False
+                break
+
+        if build_it:
+            brd.build_it = True
+            if matching_term:
+                result[matching_term].append(brd.target)
+            result['all'].append(brd.target)
+
     def select_boards(self, args, exclude=None, brds=None):
         """Mark boards selected based on args
 
@@ -616,53 +756,11 @@ class Boards:
             brds (list of Board): List of boards to build, or None/[] for all
 
         Returns:
-            Tuple
-                Dictionary which holds the list of boards which were selected
-                    due to each argument, arranged by argument.
-                List of errors found
+            tuple:
+                OrderedDict: Boards selected due to each argument, keyed by
+                    argument
+                list of str: Errors/warnings found
         """
-        def _check_board(brd):
-            """Check whether to include or exclude a board
-
-            Checks the various terms and decide whether to build it or not (the
-            'build_it' variable).
-
-            If it is built, add the board to the result[term] list so we know
-            which term caused it to be built. Add it to result['all'] also.
-
-            Keep a list of boards we found in 'found', so we can report boards
-            which appear in self._boards but not in brds.
-
-            Args:
-                brd (Board): Board to check
-            """
-            matching_term = None
-            build_it = False
-            if terms:
-                for term in terms:
-                    if term.matches(brd.props):
-                        matching_term = str(term)
-                        build_it = True
-                        break
-            elif brds:
-                if brd.target in brds:
-                    build_it = True
-                    found.append(brd.target)
-            else:
-                build_it = True
-
-            # Check that it is not specifically excluded
-            for expr in exclude_list:
-                if expr.matches(brd.props):
-                    build_it = False
-                    break
-
-            if build_it:
-                brd.build_it = True
-                if matching_term:
-                    result[matching_term].append(brd.target)
-                result['all'].append(brd.target)
-
         result = OrderedDict()
         warnings = []
         terms = self._build_terms(args)
@@ -678,7 +776,7 @@ class Boards:
 
         found = []
         for brd in self._boards:
-            _check_board(brd)
+            self._check_board(brd, terms, brds, found, exclude_list, result)
 
         if brds:
             remaining = set(brds) - set(found)
@@ -723,6 +821,55 @@ class Boards:
                 params_list.append(params)
                 warnings.update(warn)
 
+    @staticmethod
+    def _collect_defconfigs(config_dir):
+        """Collect all defconfig files from a directory
+
+        Args:
+            config_dir (str): Directory containing the defconfig files
+
+        Returns:
+            list of str: Paths to all defconfig files found
+        """
+        all_defconfigs = []
+        for (dirpath, _, filenames) in os.walk(config_dir):
+            for filename in fnmatch.filter(filenames, '*_defconfig'):
+                if fnmatch.fnmatch(filename, '.*'):
+                    continue
+                all_defconfigs.append(os.path.join(dirpath, filename))
+        return all_defconfigs
+
+    def _start_scanners(self, all_defconfigs, srcdir, jobs, warn_targets):
+        """Start parallel defconfig scanning processes
+
+        Args:
+            all_defconfigs (list of str): Paths to defconfig files to scan
+            srcdir (str): Directory containing source code (Kconfig files)
+            jobs (int): The number of jobs to run simultaneously
+            warn_targets (bool): True to warn about missing or duplicate
+                CONFIG_TARGET options
+
+        Returns:
+            tuple:
+                list of Process: Running scanner processes
+                list of Queue: Queues for receiving results
+        """
+        total_boards = len(all_defconfigs)
+        processes = []
+        queues = []
+        for i in range(jobs):
+            defconfigs = all_defconfigs[total_boards * i // jobs :
+                                        total_boards * (i + 1) // jobs]
+            que = multiprocessing.Queue(maxsize=-1)
+            proc = multiprocessing.Process(
+                target=self.scan_defconfigs_for_multiprocess,
+                args=(srcdir, que, defconfigs, warn_targets))
+            proc.start()
+            processes.append(proc)
+            queues.append(que)
+
+        return processes, queues
+
     def scan_defconfigs(self, config_dir, srcdir, jobs=1, warn_targets=False):
         """Collect board parameters for all defconfig files.
 
@@ -743,33 +890,16 @@ class Boards:
                     value: string value of the key
                 list of str: List of warnings recorded
         """
-        all_defconfigs = []
-        for (dirpath, _, filenames) in os.walk(config_dir):
-            for filename in fnmatch.filter(filenames, '*_defconfig'):
-                if fnmatch.fnmatch(filename, '.*'):
-                    continue
-                all_defconfigs.append(os.path.join(dirpath, filename))
-
-        total_boards = len(all_defconfigs)
-        processes = []
-        queues = []
-        for i in range(jobs):
-            defconfigs = all_defconfigs[total_boards * i // jobs :
-                                        total_boards * (i + 1) // jobs]
-            que = multiprocessing.Queue(maxsize=-1)
-            proc = multiprocessing.Process(
-                target=self.scan_defconfigs_for_multiprocess,
-                args=(srcdir, que, defconfigs, warn_targets))
-            proc.start()
-            processes.append(proc)
-            queues.append(que)
+        all_defconfigs = self._collect_defconfigs(config_dir)
+        processes, queues = self._start_scanners(all_defconfigs, srcdir, jobs,
+                                                 warn_targets)
 
         # The resulting data should be accumulated to these lists
         params_list = []
         warnings = set()
 
-        # Data in the queues should be retrieved preriodically.
-        # Otherwise, the queues would become full and subprocesses would get stuck.
+        # Data in the queues should be retrieved preriodically. Otherwise,
+        # the queues would become full and subprocesses would get stuck.
         while any(p.is_alive() for p in processes):
             self.read_queues(queues, params_list, warnings)
             # sleep for a while until the queues are filled
@@ -790,6 +920,7 @@ class Boards:
         """Add Status and Maintainers information to the board parameters list.
 
         Args:
+            srcdir (str): Directory containing source code (MAINTAINERS files)
             params_list (list of dict): A list of the board parameters
 
         Returns:
@@ -884,7 +1015,8 @@ class Boards:
             output (str): The name of the output file
             jobs (int): The number of jobs to run simultaneously
             force (bool): Force to generate the output even if it is new
-            quiet (bool): True to avoid printing a message if nothing needs doing
+            quiet (bool): True to avoid printing a message if nothing needs
+                doing
 
         Returns:
             bool: True if all is well, False if there were warnings
@@ -948,7 +1080,12 @@ class Boards:
         raise ValueError(f"Board '{target}' not found")
 
     def parse_extended(self, dbase, fname):
-        """Parse a single 'extended' file"""
+        """Parse a single 'extended' file
+
+        Args:
+            dbase (tuple): Database of defconfigs from qconfig
+            fname (str): Path to the extended-board file to parse
+        """
         result = ExtendedParser.parse_file(fname)
         for ext in result:
             ext_boards = self.scan_extended(dbase, ext)
@@ -963,7 +1100,15 @@ class Boards:
                 self.add_board(newb)
 
     def scan_extended(self, dbase, ext):
-        """Scan for extended boards"""
+        """Scan for extended boards
+
+        Args:
+            dbase (tuple): Database of defconfigs
+            ext (Extended): Extended-board definition
+
+        Returns:
+            set of str: Set of board names matching the extended definition
+        """
         # First check the fragments
         frags = []
         for frag in ext.fragments:
@@ -1025,13 +1170,28 @@ class ExtendedParser:
 
     @staticmethod
     def parse_file(fname):
-        """Parse a file and return the result"""
+        """Parse a file and return the result
+
+        Args:
+            fname (str): Filename to parse
+
+        Returns:
+            list of Extended: List of extended-board definitions
+        """
         return ExtendedParser.parse_data(fname,
                                          tools.read_file(fname, binary=False))
 
     @staticmethod
     def parse_data(fname, data):
-        """Parse a file and return the result"""
+        """Parse a file and return the result
+
+        Args:
+            fname (str): Filename (for error messages)
+            data (str): Contents of the file
+
+        Returns:
+            list of Extended: List of extended-board definitions
+        """
         parser = ExtendedParser()
         parser.parse(fname, data)
         return parser.extended
@@ -1042,6 +1202,12 @@ class ExtendedParser:
         Args:
             fname (str): Filename to parse (used for error messages)
             data (str): Contents of the file
+
+        Returns:
+            list of Extended: List of extended-board definitions
+
+        Raises:
+            ValueError: Invalid syntax in file
         """
         self.start()
         for seq, line in enumerate(data.splitlines()):
@@ -1054,7 +1220,8 @@ class ExtendedParser:
                 if '=' in line:
                     pair = line.split('=')
                     if len(pair) != 2:
-                        raise ValueError(f'{fname}:{linenum}: Invalid CONFIG syntax')
+                        raise ValueError(
+                            f'{fname}:{linenum}: Invalid CONFIG syntax')
                     first, rest = pair
                     cfg = first.strip()
                     value = rest.strip()
@@ -1062,27 +1229,41 @@ class ExtendedParser:
                 else:
                     target = line.strip()
                     if ' ' in target:
-                        raise ValueError(f'{fname}:{linenum}: Invalid target regex')
+                        raise ValueError(
+                            f'{fname}:{linenum}: Invalid target regex')
                     self.targets.append(['regex', line.strip()])
             else:
-                pair = line.split(':')
-                if len(pair) != 2:
-                    raise ValueError(f'{fname}:{linenum}: Invalid tag')
-                tag, rest = pair
-                value = rest.strip()
-                if tag == 'name':
-                    self.finish()
-                    if ' ' in value:
-                        raise ValueError(f'{fname}:{linenum}: Invalid name')
-                    self.name = value
-                elif tag == 'desc':
-                    self.desc = value
-                elif tag == 'fragment':
-                    self.fragments.append(value)
-                elif tag == 'targets':
-                    self.in_targets = True
-                else:
-                    raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
+                self._parse_tag(fname, linenum, line)
 
         self.finish()
         return self.extended
+
+    def _parse_tag(self, fname, linenum, line):
+        """Parse a tag line (one not starting with a space)
+
+        Args:
+            fname (str): Filename (for error messages)
+            linenum (int): Line number (for error messages)
+            line (str): Line to parse
+
+        Raises:
+            ValueError: Invalid syntax
+        """
+        pair = line.split(':')
+        if len(pair) != 2:
+            raise ValueError(f'{fname}:{linenum}: Invalid tag')
+        tag, rest = pair
+        value = rest.strip()
+        if tag == 'name':
+            self.finish()
+            if ' ' in value:
+                raise ValueError(f'{fname}:{linenum}: Invalid name')
+            self.name = value
+        elif tag == 'desc':
+            self.desc = value
+        elif tag == 'fragment':
+            self.fragments.append(value)
+        elif tag == 'targets':
+            self.in_targets = True
+        else:
+            raise ValueError(f"{fname}:{linenum}: Unknown tag '{tag}'")
