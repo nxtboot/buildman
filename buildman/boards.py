@@ -69,8 +69,8 @@ def output_is_new(output, config_dir, srcdir):
         srcdir (str): Directory containing Kconfig and MAINTAINERS files
 
     Returns:
-        True if the given output file exists and is newer than any of
-        *_defconfig, MAINTAINERS and Kconfig*.  False otherwise.
+        bool: True if the given output file exists and is newer than any of
+            *_defconfig, MAINTAINERS and Kconfig*.  False otherwise.
 
     Raises:
         OSError: output file exists but could not be opened
@@ -134,8 +134,9 @@ class Expr:
 
         Args:
            props (list of str): List of properties to check
+
         Returns:
-           True if any of the properties match the regular expression
+           bool: True if any of the properties match the regular expression
         """
         for prop in props:
             if self._re.match(prop):
@@ -175,8 +176,9 @@ class Term:
 
         Args:
            props (list of str): List of properties to check
+
         Returns:
-           True if all of the expressions in the Term match, else False
+           bool: True if all of the expressions in the Term match, else False
         """
         for expr in self._expr_list:
             if not expr.matches(props):
@@ -287,13 +289,15 @@ class KconfigScanner:
                     tname = name[7:].lower()
                     if target:
                         warnings.append(
-                            f'WARNING: {leaf}: Duplicate TARGET_xxx: {target} and {tname}')
+                            f'WARNING: {leaf}: Duplicate TARGET_xxx: '
+                            f'{target} and {tname}')
                     else:
                         target = tname
 
             if not target:
                 cfg_name = expect_target.replace('-', '_').upper()
-                warnings.append(f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
+                warnings.append(
+                    f'WARNING: {leaf}: No TARGET_{cfg_name} enabled')
 
         params['target'] = expect_target
 
@@ -502,7 +506,7 @@ class Boards:
         """Return a list of available boards.
 
         Returns:
-            List of Board objects
+            list of Board: List of Board objects
         """
         return self._boards
 
@@ -523,7 +527,8 @@ class Boards:
         """Return a dictionary containing the selected boards
 
         Returns:
-            List of Board objects that are marked selected
+            OrderedDict: Boards that are marked selected (key=target,
+                value=Board)
         """
         board_dict = OrderedDict()
         for brd in self._boards:
@@ -535,7 +540,7 @@ class Boards:
         """Return a list of selected boards
 
         Returns:
-            List of Board objects that are marked selected
+            list of Board: Board objects that are marked selected
         """
         return [brd for brd in self._boards if brd.build_it]
 
@@ -543,7 +548,7 @@ class Boards:
         """Return a list of selected boards
 
         Returns:
-            List of board names that are marked selected
+            list of str: Board names that are marked selected
         """
         return [brd.target for brd in self._boards if brd.build_it]
 
@@ -616,10 +621,10 @@ class Boards:
             brds (list of Board): List of boards to build, or None/[] for all
 
         Returns:
-            Tuple
-                Dictionary which holds the list of boards which were selected
-                    due to each argument, arranged by argument.
-                List of errors found
+            tuple:
+                OrderedDict: Boards selected due to each argument, keyed by
+                    argument
+                list of str: Errors/warnings found
         """
         def _check_board(brd):
             """Check whether to include or exclude a board
@@ -768,8 +773,8 @@ class Boards:
         params_list = []
         warnings = set()
 
-        # Data in the queues should be retrieved preriodically.
-        # Otherwise, the queues would become full and subprocesses would get stuck.
+        # Data in the queues should be retrieved preriodically. Otherwise,
+        # the queues would become full and subprocesses would get stuck.
         while any(p.is_alive() for p in processes):
             self.read_queues(queues, params_list, warnings)
             # sleep for a while until the queues are filled
@@ -885,7 +890,8 @@ class Boards:
             output (str): The name of the output file
             jobs (int): The number of jobs to run simultaneously
             force (bool): Force to generate the output even if it is new
-            quiet (bool): True to avoid printing a message if nothing needs doing
+            quiet (bool): True to avoid printing a message if nothing needs
+                doing
 
         Returns:
             bool: True if all is well, False if there were warnings
@@ -964,7 +970,15 @@ class Boards:
                 self.add_board(newb)
 
     def scan_extended(self, dbase, ext):
-        """Scan for extended boards"""
+        """Scan for extended boards
+
+        Args:
+            dbase (tuple): Database of defconfigs
+            ext (Extended): Extended-board definition
+
+        Returns:
+            set of str: Set of board names matching the extended definition
+        """
         # First check the fragments
         frags = []
         for frag in ext.fragments:
@@ -1026,13 +1040,28 @@ class ExtendedParser:
 
     @staticmethod
     def parse_file(fname):
-        """Parse a file and return the result"""
+        """Parse a file and return the result
+
+        Args:
+            fname (str): Filename to parse
+
+        Returns:
+            list of Extended: List of extended-board definitions
+        """
         return ExtendedParser.parse_data(fname,
                                          tools.read_file(fname, binary=False))
 
     @staticmethod
     def parse_data(fname, data):
-        """Parse a file and return the result"""
+        """Parse a file and return the result
+
+        Args:
+            fname (str): Filename (for error messages)
+            data (str): Contents of the file
+
+        Returns:
+            list of Extended: List of extended-board definitions
+        """
         parser = ExtendedParser()
         parser.parse(fname, data)
         return parser.extended
@@ -1043,6 +1072,12 @@ class ExtendedParser:
         Args:
             fname (str): Filename to parse (used for error messages)
             data (str): Contents of the file
+
+        Returns:
+            list of Extended: List of extended-board definitions
+
+        Raises:
+            ValueError: Invalid syntax in file
         """
         self.start()
         for seq, line in enumerate(data.splitlines()):
@@ -1055,7 +1090,8 @@ class ExtendedParser:
                 if '=' in line:
                     pair = line.split('=')
                     if len(pair) != 2:
-                        raise ValueError(f'{fname}:{linenum}: Invalid CONFIG syntax')
+                        raise ValueError(
+                            f'{fname}:{linenum}: Invalid CONFIG syntax')
                     first, rest = pair
                     cfg = first.strip()
                     value = rest.strip()
@@ -1063,7 +1099,8 @@ class ExtendedParser:
                 else:
                     target = line.strip()
                     if ' ' in target:
-                        raise ValueError(f'{fname}:{linenum}: Invalid target regex')
+                        raise ValueError(
+                            f'{fname}:{linenum}: Invalid target regex')
                     self.targets.append(['regex', line.strip()])
             else:
                 pair = line.split(':')
