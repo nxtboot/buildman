@@ -222,6 +222,37 @@ class KconfigScanner:
         if self._tmpfile:
             try_remove(self._tmpfile)
 
+    def _load_defconfig(self, defconfig):
+        """Load a defconfig file, preprocessing if needed
+
+        If the defconfig contains #include directives, run the C
+        preprocessor to expand them before loading.
+
+        Args:
+            defconfig (str): Path to the defconfig file
+        """
+        temp = None
+        if b'#include' in tools.read_file(defconfig):
+            cpp = os.getenv('CPP', 'cpp').split()
+            cmd = cpp + [
+                '-nostdinc', '-P',
+                '-I', self._srctree,
+                '-undef',
+                '-x', 'assembler-with-cpp',
+                defconfig]
+            stdout = command.output(*cmd, capture_stderr=True)
+            temp = tempfile.NamedTemporaryFile(prefix='buildman-')
+            tools.write_file(temp.name, stdout, False)
+            fname = temp.name
+            tout.info(f'Processing #include to produce {defconfig}')
+        else:
+            fname = defconfig
+
+        self._conf.load_config(fname)
+        if temp:
+            del temp
+        self._tmpfile = None
+
     def scan(self, defconfig, warn_targets):
         """Load a defconfig file to obtain board parameters.
 
@@ -247,27 +278,7 @@ class KconfigScanner:
         expect_target, match, rear = leaf.partition('_defconfig')
         assert match and not rear, f'{leaf} : invalid defconfig'
 
-        temp = None
-        if b'#include' in tools.read_file(defconfig):
-            cpp = os.getenv('CPP', 'cpp').split()
-            cmd = cpp + [
-                '-nostdinc', '-P',
-                '-I', self._srctree,
-                '-undef',
-                '-x', 'assembler-with-cpp',
-                defconfig]
-            stdout = command.output(*cmd, capture_stderr=True)
-            temp = tempfile.NamedTemporaryFile(prefix='buildman-')
-            tools.write_file(temp.name, stdout, False)
-            fname = temp.name
-            tout.info(f'Processing #include to produce {defconfig}')
-        else:
-            fname = defconfig
-
-        self._conf.load_config(fname)
-        if temp:
-            del temp
-        self._tmpfile = None
+        self._load_defconfig(defconfig)
 
         params = {}
         warnings = []
