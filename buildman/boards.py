@@ -421,6 +421,60 @@ class MaintainersDatabase:
         self.warnings.append(f"WARNING: no maintainers for '{target}'")
         return ''
 
+    def _add_targets(self, targets, status, maintainers):
+        """Add targets to the database
+
+        Args:
+            targets (list of str): List of target names
+            status (str): Board status
+            maintainers (list of str): List of maintainers
+        """
+        for target in targets:
+            self.database[target] = (status, maintainers)
+
+    @staticmethod
+    def _handle_f_tag(srcdir, rest, targets):
+        """Handle F: tag - expand wildcard and filter by defconfig
+
+        Args:
+            srcdir (str): Source directory
+            rest (str): Remainder of line after 'F:'
+            targets (list of str): List to append targets to
+        """
+        glob_path = os.path.join(srcdir, rest)
+        for item in glob.glob(glob_path):
+            front, match, rear = item.partition('configs/')
+            if front.endswith('/'):
+                front = front[:-1]
+            if front == srcdir and match:
+                front, match, rear = rear.rpartition('_defconfig')
+                if match and not rear:
+                    targets.append(front)
+
+    @staticmethod
+    def _handle_n_tag(srcdir, rest, targets):
+        """Handle N: tag - scan configs dir and match with regex
+
+        Args:
+            srcdir (str): Source directory
+            rest (str): Remainder of line after 'N:'
+            targets (list of str): List to append targets to
+        """
+        walk_path = os.walk(os.path.join(srcdir, 'configs'))
+        for dirpath, _, fnames in walk_path:
+            for cfg in fnames:
+                path = os.path.join(dirpath, cfg)[len(srcdir) + 1:]
+                front, match, rear = path.partition('configs/')
+                if front or not match:
+                    continue
+                front, match, rear = rear.rpartition('_defconfig')
+
+                # Use this entry if it matches the defconfig file
+                # without the _defconfig suffix. For example
+                # 'am335x.*' matches am335x_guardian_defconfig
+                if match and not rear and re.search(rest, front):
+                    targets.append(front)
+
     def parse_file(self, srcdir, fname):
         """Parse a MAINTAINERS file.
 
@@ -438,16 +492,6 @@ class MaintainersDatabase:
             srcdir (str): Directory containing source code (Kconfig files)
             fname (str): MAINTAINERS file to be parsed
         """
-        def add_targets(linenum):
-            """Add any new targets
-
-            Args:
-                linenum (int): Current line number
-            """
-            if targets:
-                for target in targets:
-                    self.database[target] = (status, maintainers)
-
         targets = []
         maintainers = []
         status = '-'
@@ -460,41 +504,17 @@ class MaintainersDatabase:
                 if tag == 'M:':
                     maintainers.append(rest)
                 elif tag == 'F:':
-                    # expand wildcard and filter by 'configs/*_defconfig'
-                    glob_path = os.path.join(srcdir, rest)
-                    for item in glob.glob(glob_path):
-                        front, match, rear = item.partition('configs/')
-                        if front.endswith('/'):
-                            front = front[:-1]
-                        if front == srcdir and match:
-                            front, match, rear = rear.rpartition('_defconfig')
-                            if match and not rear:
-                                targets.append(front)
+                    self._handle_f_tag(srcdir, rest, targets)
                 elif tag == 'S:':
                     status = rest
                 elif tag == 'N:':
-                    # Just scan the configs directory since that's all we care
-                    # about
-                    walk_path = os.walk(os.path.join(srcdir, 'configs'))
-                    for dirpath, _, fnames in walk_path:
-                        for cfg in fnames:
-                            path = os.path.join(dirpath, cfg)[len(srcdir) + 1:]
-                            front, match, rear = path.partition('configs/')
-                            if front or not match:
-                                continue
-                            front, match, rear = rear.rpartition('_defconfig')
-
-                            # Use this entry if it matches the defconfig file
-                            # without the _defconfig suffix. For example
-                            # 'am335x.*' matches am335x_guardian_defconfig
-                            if match and not rear and re.search(rest, front):
-                                targets.append(front)
+                    self._handle_n_tag(srcdir, rest, targets)
                 elif line == '\n':
-                    add_targets(linenum)
+                    self._add_targets(targets, status, maintainers)
                     targets = []
                     maintainers = []
                     status = '-'
-        add_targets(linenum)
+        self._add_targets(targets, status, maintainers)
 
 
 class Boards:
