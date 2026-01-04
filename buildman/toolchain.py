@@ -8,8 +8,9 @@ import glob
 from html.parser import HTMLParser
 import os
 import sys
-import tempfile
-import urllib.request, urllib.error, urllib.parse
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from buildman import bsettings
 from u_boot_pylib import command
@@ -48,8 +49,8 @@ class MyHTMLParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         """Handle a start tag in the HTML being parsed"""
         if tag == 'a':
-            for tag, value in attrs:
-                if tag == 'href':
+            for attr, value in attrs:
+                if attr == 'href':
                     if value and value.endswith('.xz'):
                         self.links.append(value)
                         if self._re_arch.search(value):
@@ -70,6 +71,7 @@ class Toolchain:
             normal one
         ok (bool): True if the toolchain works, False otherwise
     """
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def __init__(self, fname, test, verbose=False, priority=PRIORITY_CALC,
                  arch=None, override_toolchain=None):
         """Create a new toolchain object.
@@ -145,16 +147,16 @@ class Toolchain:
             '-none-linux-gnueabi', '-none-linux-gnueabihf', '-uclinux',
             '-none-eabi', '-gentoo-linux-gnu', '-linux-gnueabi',
             '-linux-gnueabihf', '-le-linux', '-uclinux']
-        for prio in range(len(priority_list)):
-            if priority_list[prio] in fname:
+        for prio, item in enumerate(priority_list):
+            if item in fname:
                 return PRIORITY_CALC + prio
         return PRIORITY_CALC + prio
 
-    def get_wrapper(self, show_warning=True):
+    def get_wrapper(self):
         """Get toolchain wrapper from the setting file.
         """
         value = ''
-        for name, value in bsettings.get_items('toolchain-wrapper'):
+        for _, value in bsettings.get_items('toolchain-wrapper'):
             if not value:
                 print("Warning: Wrapper not found")
         if value:
@@ -177,17 +179,16 @@ class Toolchain:
             if (base == '' and self.cross == ''):
                 return ''
             return wrapper + os.path.join(base, self.cross)
-        elif which == VAR_PATH:
+        if which == VAR_PATH:
             return self.path
-        elif which == VAR_ARCH:
+        if which == VAR_ARCH:
             return self.arch
-        elif which == VAR_MAKE_ARGS:
+        if which == VAR_MAKE_ARGS:
             args = self.make_args()
             if args:
                 return ' '.join(args)
             return ''
-        else:
-            raise ValueError(f'Unknown arg to GetEnvArgs ({which})')
+        raise ValueError(f'Unknown arg to GetEnvArgs ({which})')
 
     def make_environment(self, full_path, env=None):
         """Returns an environment for using the toolchain.
@@ -311,7 +312,7 @@ class Toolchains:
                   f"{bsettings.config_fname}. See buildman.rst for details")
 
         paths = []
-        for name, value in toolchains:
+        for _, value in toolchains:
             fname = os.path.expanduser(value)
             if '*' in value:
                 paths += glob.glob(fname)
@@ -329,6 +330,7 @@ class Toolchains:
         self.prefixes = bsettings.get_items('toolchain-prefix')
         self.paths += self.get_path_list(show_warning)
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def add(self, fname, test=True, verbose=False, priority=PRIORITY_CALC,
             arch=None):
         """Add a toolchain to our list
@@ -371,9 +373,11 @@ class Toolchains:
         fnames = []
         for subdir in ['.', 'bin', 'usr/bin']:
             dirname = os.path.join(path, subdir)
-            if verbose: print(f"      - looking in '{dirname}'")
+            if verbose:
+                print(f"      - looking in '{dirname}'")
             for fname in glob.glob(dirname + '/*gcc'):
-                if verbose: print(f"         - found '{fname}'")
+                if verbose:
+                    print(f"         - found '{fname}'")
                 fnames.append(fname)
         return fnames
 
@@ -406,7 +410,8 @@ class Toolchains:
             raise_on_error (bool): True to raise an error if a toolchain is
                 not found
         """
-        if verbose: print('Scanning for tool chains')
+        if verbose:
+            print('Scanning for tool chains')
         for name, value in self.prefixes:
             fname = os.path.expanduser(value)
             if verbose:
@@ -425,10 +430,10 @@ class Toolchains:
                 msg = f"No tool chain found for prefix '{fname}'"
                 if raise_on_error:
                     raise ValueError(msg)
-                else:
-                    print(f'Error: {msg}')
+                print(f'Error: {msg}')
         for path in self.paths:
-            if verbose: print(f"   - scanning path '{path}'")
+            if verbose:
+                print(f"   - scanning path '{path}'")
             fnames = self.scan_path(path, verbose)
             for fname in fnames:
                 self.add(fname, True, verbose)
@@ -560,14 +565,14 @@ class Toolchains:
         for version in versions:
             url = f'{base}/{arch}/{version}/'
             print(f'Checking: {url}')
-            response = urllib.request.urlopen(url)
-            html = tools.to_string(response.read())
-            parser = MyHTMLParser(fetch_arch)
-            parser.feed(html)
-            if fetch_arch == 'list':
-                links += parser.links
-            elif parser.arch_link:
-                return url + parser.arch_link
+            with urllib.request.urlopen(url) as response:
+                html = tools.to_string(response.read())
+                parser = MyHTMLParser(fetch_arch)
+                parser.feed(html)
+                if fetch_arch == 'list':
+                    links += parser.links
+                elif parser.arch_link:
+                    return url + parser.arch_link
         if fetch_arch == 'list':
             return arch, links
         return None
@@ -650,7 +655,8 @@ class Toolchains:
             print(col.build(col.RED,
                             f"Warning, ambiguous toolchains: "
                             f"{', '.join(compiler_fname_list)}"))
-        toolchain = Toolchain(compiler_fname_list[0], True, True)
+        # Instantiate to verify the toolchain works
+        Toolchain(compiler_fname_list[0], True, True)
 
         # Make sure that it will be found by buildman
         if not self.test_settings_has_path(dirpath):
