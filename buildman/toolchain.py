@@ -22,7 +22,13 @@ from u_boot_pylib import tools
 (VAR_CROSS_COMPILE, VAR_PATH, VAR_ARCH, VAR_MAKE_ARGS) = range(4)
 
 class MyHTMLParser(HTMLParser):
-    """Simple class to collect links from a page"""
+    """Simple class to collect links from a page
+
+    Public members:
+        arch_link (str): URL of the toolchain for the desired architecture,
+            or None if not found
+        links (list of str): List of URLs for all .xz archives found
+    """
 
     def __init__(self, arch):
         """Create a new parser
@@ -37,7 +43,7 @@ class MyHTMLParser(HTMLParser):
         HTMLParser.__init__(self)
         self.arch_link = None
         self.links = []
-        self.re_arch = re.compile('[-_]%s-' % arch)
+        self._re_arch = re.compile('[-_]%s-' % arch)
 
     def handle_starttag(self, tag, attrs):
         """Handle a start tag in the HTML being parsed"""
@@ -46,7 +52,7 @@ class MyHTMLParser(HTMLParser):
                 if tag == 'href':
                     if value and value.endswith('.xz'):
                         self.links.append(value)
-                        if self.re_arch.search(value):
+                        if self._re_arch.search(value):
                             self.arch_link = value
 
 
