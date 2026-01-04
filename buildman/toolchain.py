@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (c) 2012 The Chromium OS Authors.
-#
+
+"""Handles finding and using toolchains for building U-Boot."""
 
 import re
 import glob
@@ -20,8 +21,9 @@ from u_boot_pylib import tools
 
 (VAR_CROSS_COMPILE, VAR_PATH, VAR_ARCH, VAR_MAKE_ARGS) = range(4)
 
-# Simple class to collect links from a page
 class MyHTMLParser(HTMLParser):
+    """Simple class to collect links from a page"""
+
     def __init__(self, arch):
         """Create a new parser
 
@@ -30,7 +32,7 @@ class MyHTMLParser(HTMLParser):
         the one for the given architecture (or None if not found).
 
         Args:
-            arch: Architecture to search for
+            arch (str): Architecture to search for
         """
         HTMLParser.__init__(self)
         self.arch_link = None
@@ -38,6 +40,7 @@ class MyHTMLParser(HTMLParser):
         self.re_arch = re.compile('[-_]%s-' % arch)
 
     def handle_starttag(self, tag, attrs):
+        """Handle a start tag in the HTML being parsed"""
         if tag == 'a':
             for tag, value in attrs:
                 if tag == 'href':
@@ -123,9 +126,10 @@ class Toolchain:
         filename prefix.
 
         Args:
-            fname: Filename of toolchain
+            fname (str): Filename of toolchain
+
         Returns:
-            Priority of toolchain, PRIORITY_CALC=highest, 20=lowest.
+            int: Priority of toolchain, PRIORITY_CALC=highest, 20=lowest.
         """
         priority_list = ['-elf', '-unknown-linux-gnu', '-linux',
             '-none-linux-gnueabi', '-none-linux-gnueabihf', '-uclinux',
@@ -152,10 +156,10 @@ class Toolchain:
         """Get an environment variable/args value based on the the toolchain
 
         Args:
-            which: VAR_... value to get
+            which (int): VAR_... value to get
 
         Returns:
-            Value of that environment variable or arguments
+            str: Value of that environment variable or arguments
         """
         if which == VAR_CROSS_COMPILE:
             wrapper = self.get_wrapper()
@@ -196,13 +200,14 @@ class Toolchain:
         buildman will still respect the venv.
 
         Args:
-            full_path: Return the full path in CROSS_COMPILE and don't set
-                PATH
+            full_path (bool): Return the full path in CROSS_COMPILE and don't
+                set PATH
             env (dict of bytes): Original environment, used for testing
+
         Returns:
-            Dict containing the (bytes) environment to use. This is based on the
-            current environment, with changes as needed to CROSS_COMPILE, PATH
-            and LC_ALL.
+            dict of bytes: Environment to use. This is based on the current
+                environment, with changes as needed to CROSS_COMPILE, PATH
+                and LC_ALL.
         """
         env = dict(env or os.environb)
 
@@ -281,11 +286,12 @@ class Toolchains:
         """Get a list of available toolchain paths
 
         Args:
-            show_warning: True to show a warning if there are no tool chains.
+            show_warning (bool): True to show a warning if there are no tool
+                chains.
 
         Returns:
-            List of strings, each a path to a toolchain mentioned in the
-            [toolchain] section of the settings file.
+            list of str: List of paths to toolchains mentioned in the
+                [toolchain] section of the settings file.
         """
         toolchains = bsettings.get_items('toolchain')
         if show_warning and not toolchains:
@@ -308,7 +314,8 @@ class Toolchains:
         """Get toolchain settings from the settings file.
 
         Args:
-            show_warning: True to show a warning if there are no tool chains.
+            show_warning (bool): True to show a warning if there are no tool
+                chains.
         """
         self.prefixes = bsettings.get_items('toolchain-prefix')
         self.paths += self.get_path_list(show_warning)
@@ -321,10 +328,11 @@ class Toolchains:
         architecture if it is a higher priority than the others.
 
         Args:
-            fname: Filename of toolchain's gcc driver
-            test: True to run the toolchain to test it
-            priority: Priority to use for this toolchain
-            arch: Toolchain architecture, or None if not known
+            fname (str): Filename of toolchain's gcc driver
+            test (bool): True to run the toolchain to test it
+            verbose (bool): True to print out progress information
+            priority (int): Priority to use for this toolchain
+            arch (str): Toolchain architecture, or None if not known
         """
         toolchain = Toolchain(fname, test, verbose, priority, arch,
                               self.override_toolchain)
@@ -345,10 +353,11 @@ class Toolchains:
         """Scan a path for a valid toolchain
 
         Args:
-            path: Path to scan
-            verbose: True to print out progress information
+            path (str): Path to scan
+            verbose (bool): True to print out progress information
+
         Returns:
-            Filename of C compiler if found, else None
+            list of str: Filenames of C compilers found
         """
         fnames = []
         for subdir in ['.', 'bin', 'usr/bin']:
@@ -363,9 +372,10 @@ class Toolchains:
         """Scan the PATH environment variable for a given filename.
 
         Args:
-            fname: Filename to scan for
+            fname (str): Filename to scan for
+
         Returns:
-            List of matching pathanames, or [] if none
+            list of str: List of matching pathnames, or [] if none
         """
         pathname_list = []
         for path in os.environ["PATH"].split(os.pathsep):
@@ -383,7 +393,9 @@ class Toolchains:
         highest priority toolchain for each arch.
 
         Args:
-            verbose: True to print out progress information
+            verbose (bool): True to print out progress information
+            raise_on_error (bool): True to raise an error if a toolchain is
+                not found
         """
         if verbose: print('Scanning for tool chains')
         for name, value in self.prefixes:
@@ -426,10 +438,10 @@ class Toolchains:
         """Returns the toolchain for a given architecture
 
         Args:
-            args: Name of architecture (e.g. 'arm', 'ppc_8xx')
+            arch (str): Name of architecture (e.g. 'arm', 'ppc_8xx')
 
-        returns:
-            toolchain object, or None if none found
+        Returns:
+            Toolchain: toolchain object, or None if none found
         """
         for tag, value in bsettings.get_items('toolchain-alias'):
             if arch == tag:
@@ -447,12 +459,13 @@ class Toolchains:
         This converts ${blah} within the string to the value of blah.
         This function works recursively.
 
-            Resolved string
-
         Args:
-            var_dict: Dictionary containing variables and their values
-            args: String containing make arguments
+            var_dict (dict): Dictionary containing variables and their values
+            args (str): String containing make arguments
+
         Returns:
+            str: Resolved string
+
         >>> bsettings.setup(None)
         >>> tcs = Toolchains()
         >>> tcs.add('fred', False)
@@ -495,9 +508,10 @@ class Toolchains:
         A special 'target' variable is set to the board target.
 
         Args:
-            brd: Board object for the board to check.
+            brd (Board): Board object for the board to check.
+
         Returns:
-            'make' flags for that board, or '' if none
+            list of str: 'make' flags for that board, or [] if none
         """
         self._make_flags['target'] = brd.target
         arg_str = self.resolve_references(self._make_flags,
@@ -519,13 +533,12 @@ class Toolchains:
         only standard place is at kernel.org.
 
         Args:
-            arch: Architecture to look for, or 'list' for all
+            fetch_arch (str): Architecture to look for, or 'list' for all
+
         Returns:
-            If fetch_arch is 'list', a tuple:
-                Machine architecture (e.g. x86_64)
-                List of toolchains
-            else
-                URL containing this toolchain, if avaialble, else None
+            tuple or str or None: If fetch_arch is 'list', a tuple of
+                (machine architecture, list of toolchains). Otherwise the
+                URL containing this toolchain, if available, else None.
         """
         arch = command.output_one_line('uname', '-m')
         if arch == 'aarch64':
@@ -552,11 +565,12 @@ class Toolchains:
         """Unpack a tar file
 
         Args:
-            fname: Filename to unpack
-            dest: Destination directory
+            fname (str): Filename to unpack
+            dest (str): Destination directory
+
         Returns:
-            Directory name of the first entry in the archive, without the
-            trailing /
+            str: Directory name of the first entry in the archive, without
+                the trailing /
         """
         stdout = command.output('tar', 'xvfJ', fname, '-C', dest)
         dirs = stdout.splitlines()[1].split('/')[:2]
