@@ -13,7 +13,6 @@ import glob
 import io
 import os
 import shutil
-import sys
 import threading
 
 from buildman import cfgutil
@@ -71,6 +70,7 @@ def mkdir(dirname, parents=False):
 
     Raises:
         OSError: File already exists
+        ValueError: Trying to create the current working directory
     """
     if not dirname or os.path.exists(dirname):
         return
@@ -83,7 +83,8 @@ def mkdir(dirname, parents=False):
         if err.errno == errno.EEXIST:
             if os.path.realpath('.') == os.path.realpath(dirname):
                 raise ValueError(
-                    f"Cannot create the current working directory '{dirname}'!")
+                    f"Cannot create the current working directory "
+                    f"'{dirname}'!") from err
         else:
             raise
 
@@ -464,7 +465,7 @@ class BuilderThread(threading.Thread):
                 config_args.append(fname)
         else:
             config_args = [f'{brd.target}_defconfig']
-        if fragments != None:
+        if fragments is not None:
             config_args.extend(fragments.split(','))
         config_out = io.StringIO()
 
@@ -553,7 +554,8 @@ class BuilderThread(threading.Thread):
                 except ValueError as err:
                     result.return_code = 10
                     result.stdout = ''
-                    result.stderr = f'Tool chain error for {brd.arch}: {str(err)}'
+                    result.stderr = (f'Tool chain error for {brd.arch}: '
+                                     f'{str(err)}')
 
             if self.toolchain:
                 commit = self._checkout(commit_upto, work_dir)
@@ -848,7 +850,7 @@ class BuilderThread(threading.Thread):
             job = self.builder.queue.get()
             try:
                 self.run_job(job)
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=W0718
                 print('Thread exception (use -T0 to run without threads):',
                       exc)
                 self.builder.thread_exceptions.append(exc)
