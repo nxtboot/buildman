@@ -60,25 +60,30 @@ class Toolchain:
     """A single toolchain
 
     Public members:
-        gcc: Full path to C compiler
-        path: Directory path containing C compiler
-        cross: Cross compile string, e.g. 'arm-linux-'
-        arch: Architecture of toolchain as determined from the first
-                component of the filename. E.g. arm-linux-gcc becomes arm
-        priority: Toolchain priority (0=highest, 20=lowest)
-        override_toolchain: Toolchain to use for sandbox, overriding the normal
-                one
+        gcc (str): Full path to C compiler
+        path (str): Directory path containing C compiler
+        cross (str): Cross compile string, e.g. 'arm-linux-'
+        arch (str): Architecture of toolchain as determined from the first
+            component of the filename. E.g. arm-linux-gcc becomes arm
+        priority (int): Toolchain priority (0=highest, 20=lowest)
+        override_toolchain (str): Toolchain to use for sandbox, overriding the
+            normal one
+        ok (bool): True if the toolchain works, False otherwise
     """
     def __init__(self, fname, test, verbose=False, priority=PRIORITY_CALC,
                  arch=None, override_toolchain=None):
         """Create a new toolchain object.
 
         Args:
-            fname: Filename of the gcc component, possibly with ~ or $HOME in it
-            test: True to run the toolchain to test it
-            verbose: True to print out the information
-            priority: Priority to use for this toolchain, or PRIORITY_CALC to
-                calculate it
+            fname (str): Filename of the gcc component, possibly with ~ or
+                $HOME in it
+            test (bool): True to run the toolchain to test it
+            verbose (bool): True to print out the information
+            priority (int): Priority to use for this toolchain, or
+                PRIORITY_CALC to calculate it
+            arch (str): Architecture of toolchain, or None to detect from
+                filename
+            override_toolchain (str): Toolchain to use for sandbox, or None
         """
         fname = os.path.expanduser(fname)
         self.gcc = fname
