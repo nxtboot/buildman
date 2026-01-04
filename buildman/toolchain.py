@@ -43,7 +43,7 @@ class MyHTMLParser(HTMLParser):
         HTMLParser.__init__(self)
         self.arch_link = None
         self.links = []
-        self._re_arch = re.compile('[-_]%s-' % arch)
+        self._re_arch = re.compile(f'[-_]{arch}-')
 
     def handle_starttag(self, tag, attrs):
         """Handle a start tag in the HTML being parsed"""
@@ -120,8 +120,7 @@ class Toolchain:
             if verbose:
                 print('Tool chain test: ', end=' ')
                 if self.ok:
-                    print("OK, arch='%s', priority %d" % (self.arch,
-                                                          self.priority))
+                    print(f"OK, arch='{self.arch}', priority {self.priority}")
                 else:
                     print('BAD')
                     print(f"Command: {' '.join(cmd)}")
@@ -188,7 +187,7 @@ class Toolchain:
                 return ' '.join(args)
             return ''
         else:
-            raise ValueError('Unknown arg to GetEnvArgs (%d)' % which)
+            raise ValueError(f'Unknown arg to GetEnvArgs ({which})')
 
     def make_environment(self, full_path, env=None):
         """Returns an environment for using the toolchain.
@@ -266,8 +265,8 @@ class Toolchain:
             List of arguments to pass to 'make'
         """
         if self.override_toolchain:
-            return ['HOSTCC=%s' % self.override_toolchain,
-                    'CC=%s' % self.override_toolchain]
+            return [f'HOSTCC={self.override_toolchain}',
+                    f'CC={self.override_toolchain}']
         return []
 
 
@@ -306,11 +305,10 @@ class Toolchains:
         """
         toolchains = bsettings.get_items('toolchain')
         if show_warning and not toolchains:
-            print(("Warning: No tool chains. Please run 'buildman "
-                   "--fetch-arch all' to download all available toolchains, or "
-                   "add a [toolchain] section to your buildman config file "
-                   "%s. See buildman.rst for details" %
-                   bsettings.config_fname))
+            print(f"Warning: No tool chains. Please run 'buildman "
+                  f"--fetch-arch all' to download all available toolchains, or "
+                  f"add a [toolchain] section to your buildman config file "
+                  f"{bsettings.config_fname}. See buildman.rst for details")
 
         paths = []
         for name, value in toolchains:
@@ -355,10 +353,10 @@ class Toolchains:
             if add_it:
                 self.toolchains[toolchain.arch] = toolchain
             elif verbose:
-                print(("Toolchain '%s' at priority %d will be ignored because "
-                       "another toolchain for arch '%s' has priority %d" %
-                       (toolchain.gcc, toolchain.priority, toolchain.arch,
-                        self.toolchains[toolchain.arch].priority)))
+                print(f"Toolchain '{toolchain.gcc}' at priority "
+                      f"{toolchain.priority} will be ignored because another "
+                      f"toolchain for arch '{toolchain.arch}' has priority "
+                      f"{self.toolchains[toolchain.arch].priority}")
 
     def scan_path(self, path, verbose):
         """Scan a path for a valid toolchain
@@ -373,9 +371,9 @@ class Toolchains:
         fnames = []
         for subdir in ['.', 'bin', 'usr/bin']:
             dirname = os.path.join(path, subdir)
-            if verbose: print("      - looking in '%s'" % dirname)
+            if verbose: print(f"      - looking in '{dirname}'")
             for fname in glob.glob(dirname + '/*gcc'):
-                if verbose: print("         - found '%s'" % fname)
+                if verbose: print(f"         - found '{fname}'")
                 fnames.append(fname)
         return fnames
 
@@ -411,7 +409,8 @@ class Toolchains:
         if verbose: print('Scanning for tool chains')
         for name, value in self.prefixes:
             fname = os.path.expanduser(value)
-            if verbose: print("   - scanning prefix '%s'" % fname)
+            if verbose:
+                print(f"   - scanning prefix '{fname}'")
             if os.path.exists(fname):
                 self.add(fname, True, verbose, PRIORITY_FULL_PREFIX, name)
                 continue
@@ -429,7 +428,7 @@ class Toolchains:
                 else:
                     print(f'Error: {msg}')
         for path in self.paths:
-            if verbose: print("   - scanning path '%s'" % path)
+            if verbose: print(f"   - scanning path '{path}'")
             fnames = self.scan_path(path, verbose)
             for fname in fnames:
                 self.add(fname, True, verbose)
@@ -437,11 +436,12 @@ class Toolchains:
     def list(self):
         """List out the selected toolchains for each architecture"""
         col = terminal.Color()
-        print(col.build(col.BLUE, 'List of available toolchains (%d):' %
-                        len(self.toolchains)))
+        print(col.build(
+            col.BLUE,
+            f'List of available toolchains ({len(self.toolchains)}):'))
         if len(self.toolchains):
             for key, value in sorted(self.toolchains.items()):
-                print('%-10s: %s' % (key, value.gcc))
+                print(f'{key:10}: {value.gcc}')
         else:
             print('None')
 
@@ -461,7 +461,7 @@ class Toolchains:
                         return self.toolchains[alias]
 
         if not arch in self.toolchains:
-            raise ValueError("No tool chain found for arch '%s'" % arch)
+            raise ValueError(f"No tool chain found for arch '{arch}'")
         return self.toolchains[arch]
 
     def resolve_references(self, var_dict, args):
@@ -558,8 +558,8 @@ class Toolchains:
         versions = ['14.2.0', '13.2.0']
         links = []
         for version in versions:
-            url = '%s/%s/%s/' % (base, arch, version)
-            print('Checking: %s' % url)
+            url = f'{base}/{arch}/{version}/'
+            print(f'Checking: {url}')
             response = urllib.request.urlopen(url)
             html = tools.to_string(response.read())
             parser = MyHTMLParser(fetch_arch)
@@ -617,11 +617,11 @@ class Toolchains:
         """
         # Fist get the URL for this architecture
         col = terminal.Color()
-        print(col.build(col.BLUE, "Downloading toolchain for arch '%s'" % arch))
+        print(col.build(col.BLUE, f"Downloading toolchain for arch '{arch}'"))
         url = self.locate_arch_url(arch)
         if not url:
-            print(("Cannot find toolchain for arch '%s' - use 'list' to list" %
-                   arch))
+            print(f"Cannot find toolchain for arch '{arch}' - "
+                  "use 'list' to list")
             return 2
         home = os.environ['HOME']
         dest = os.path.join(home, '.buildman-toolchains')
@@ -632,7 +632,7 @@ class Toolchains:
         tarfile, tmpdir = tools.download(url, '.buildman')
         if not tarfile:
             return 1
-        print(col.build(col.GREEN, 'Unpacking to: %s' % dest), end=' ')
+        print(col.build(col.GREEN, f'Unpacking to: {dest}'), end=' ')
         sys.stdout.flush()
         path = self.unpack(tarfile, dest)
         os.remove(tarfile)
@@ -647,13 +647,14 @@ class Toolchains:
             print('Could not locate C compiler - fetch failed.')
             return 1
         if len(compiler_fname_list) != 1:
-            print(col.build(col.RED, 'Warning, ambiguous toolchains: %s' %
-                            ', '.join(compiler_fname_list)))
+            print(col.build(col.RED,
+                            f"Warning, ambiguous toolchains: "
+                            f"{', '.join(compiler_fname_list)}"))
         toolchain = Toolchain(compiler_fname_list[0], True, True)
 
         # Make sure that it will be found by buildman
         if not self.test_settings_has_path(dirpath):
-            print(("Adding 'download' to config file '%s'" %
-                   bsettings.config_fname))
-            bsettings.set_item('toolchain', 'download', '%s/*/*' % dest)
+            print(f"Adding 'download' to config file "
+                  f"'{bsettings.config_fname}'")
+            bsettings.set_item('toolchain', 'download', f'{dest}/*/*')
         return 0
