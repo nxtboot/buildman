@@ -91,12 +91,12 @@ class Toolchain:
         if self.arch == 'sandbox' and override_toolchain:
             self.gcc = override_toolchain
 
-        env = self.MakeEnvironment(False)
+        env = self.make_environment(False)
 
         # As a basic sanity check, run the C compiler with --version
         cmd = [fname, '--version']
         if priority == PRIORITY_CALC:
-            self.priority = self.GetPriority(fname)
+            self.priority = self.get_priority(fname)
         else:
             self.priority = priority
         if test:
@@ -116,7 +116,7 @@ class Toolchain:
         else:
             self.ok = True
 
-    def GetPriority(self, fname):
+    def get_priority(self, fname):
         """Return the priority of the toolchain.
 
         Toolchains are ranked according to their suitability by their
@@ -136,7 +136,7 @@ class Toolchain:
                 return PRIORITY_CALC + prio
         return PRIORITY_CALC + prio
 
-    def GetWrapper(self, show_warning=True):
+    def get_wrapper(self, show_warning=True):
         """Get toolchain wrapper from the setting file.
         """
         value = ''
@@ -148,7 +148,7 @@ class Toolchain:
 
         return value
 
-    def GetEnvArgs(self, which):
+    def get_env_args(self, which):
         """Get an environment variable/args value based on the the toolchain
 
         Args:
@@ -158,7 +158,7 @@ class Toolchain:
             Value of that environment variable or arguments
         """
         if which == VAR_CROSS_COMPILE:
-            wrapper = self.GetWrapper()
+            wrapper = self.get_wrapper()
             base = '' if self.arch == 'sandbox' else self.path
             if (base == '' and self.cross == ''):
                 return ''
@@ -168,14 +168,14 @@ class Toolchain:
         elif which == VAR_ARCH:
             return self.arch
         elif which == VAR_MAKE_ARGS:
-            args = self.MakeArgs()
+            args = self.make_args()
             if args:
                 return ' '.join(args)
             return ''
         else:
             raise ValueError('Unknown arg to GetEnvArgs (%d)' % which)
 
-    def MakeEnvironment(self, full_path, env=None):
+    def make_environment(self, full_path, env=None):
         """Returns an environment for using the toolchain.
 
         This takes the current environment and adds CROSS_COMPILE so that
@@ -206,7 +206,7 @@ class Toolchain:
         """
         env = dict(env or os.environb)
 
-        wrapper = self.GetWrapper()
+        wrapper = self.get_wrapper()
 
         if self.override_toolchain:
             # We'll use MakeArgs() to provide this
@@ -238,7 +238,7 @@ class Toolchain:
 
         return env
 
-    def MakeArgs(self):
+    def make_args(self):
         """Create the 'make' arguments for a toolchain
 
         This is only used when the toolchain is being overridden. Since the
@@ -277,7 +277,7 @@ class Toolchains:
         self.override_toolchain = override_toolchain
         self._make_flags = dict(bsettings.get_items('make-flags'))
 
-    def GetPathList(self, show_warning=True):
+    def get_path_list(self, show_warning=True):
         """Get a list of available toolchain paths
 
         Args:
@@ -304,16 +304,16 @@ class Toolchains:
                 paths.append(fname)
         return paths
 
-    def GetSettings(self, show_warning=True):
+    def get_settings(self, show_warning=True):
         """Get toolchain settings from the settings file.
 
         Args:
             show_warning: True to show a warning if there are no tool chains.
         """
         self.prefixes = bsettings.get_items('toolchain-prefix')
-        self.paths += self.GetPathList(show_warning)
+        self.paths += self.get_path_list(show_warning)
 
-    def Add(self, fname, test=True, verbose=False, priority=PRIORITY_CALC,
+    def add(self, fname, test=True, verbose=False, priority=PRIORITY_CALC,
             arch=None):
         """Add a toolchain to our list
 
@@ -341,7 +341,7 @@ class Toolchains:
                        (toolchain.gcc, toolchain.priority, toolchain.arch,
                         self.toolchains[toolchain.arch].priority)))
 
-    def ScanPath(self, path, verbose):
+    def scan_path(self, path, verbose):
         """Scan a path for a valid toolchain
 
         Args:
@@ -359,7 +359,7 @@ class Toolchains:
                 fnames.append(fname)
         return fnames
 
-    def ScanPathEnv(self, fname):
+    def scan_path_env(self, fname):
         """Scan the PATH environment variable for a given filename.
 
         Args:
@@ -375,7 +375,7 @@ class Toolchains:
                 pathname_list.append(pathname)
         return pathname_list
 
-    def Scan(self, verbose, raise_on_error=True):
+    def scan(self, verbose, raise_on_error=True):
         """Scan for available toolchains and select the best for each arch.
 
         We look for all the toolchains we can file, figure out the
@@ -390,15 +390,15 @@ class Toolchains:
             fname = os.path.expanduser(value)
             if verbose: print("   - scanning prefix '%s'" % fname)
             if os.path.exists(fname):
-                self.Add(fname, True, verbose, PRIORITY_FULL_PREFIX, name)
+                self.add(fname, True, verbose, PRIORITY_FULL_PREFIX, name)
                 continue
             fname += 'gcc'
             if os.path.exists(fname):
-                self.Add(fname, True, verbose, PRIORITY_PREFIX_GCC, name)
+                self.add(fname, True, verbose, PRIORITY_PREFIX_GCC, name)
                 continue
-            fname_list = self.ScanPathEnv(fname)
+            fname_list = self.scan_path_env(fname)
             for f in fname_list:
-                self.Add(f, True, verbose, PRIORITY_PREFIX_GCC_PATH, name)
+                self.add(f, True, verbose, PRIORITY_PREFIX_GCC_PATH, name)
             if not fname_list:
                 msg = f"No tool chain found for prefix '{fname}'"
                 if raise_on_error:
@@ -407,11 +407,11 @@ class Toolchains:
                     print(f'Error: {msg}')
         for path in self.paths:
             if verbose: print("   - scanning path '%s'" % path)
-            fnames = self.ScanPath(path, verbose)
+            fnames = self.scan_path(path, verbose)
             for fname in fnames:
-                self.Add(fname, True, verbose)
+                self.add(fname, True, verbose)
 
-    def List(self):
+    def list(self):
         """List out the selected toolchains for each architecture"""
         col = terminal.Color()
         print(col.build(col.BLUE, 'List of available toolchains (%d):' %
@@ -422,7 +422,7 @@ class Toolchains:
         else:
             print('None')
 
-    def Select(self, arch):
+    def select(self, arch):
         """Returns the toolchain for a given architecture
 
         Args:
@@ -441,7 +441,7 @@ class Toolchains:
             raise ValueError("No tool chain found for arch '%s'" % arch)
         return self.toolchains[arch]
 
-    def ResolveReferences(self, var_dict, args):
+    def resolve_references(self, var_dict, args):
         """Resolve variable references in a string
 
         This converts ${blah} within the string to the value of blah.
@@ -455,12 +455,12 @@ class Toolchains:
         Returns:
         >>> bsettings.setup(None)
         >>> tcs = Toolchains()
-        >>> tcs.Add('fred', False)
+        >>> tcs.add('fred', False)
         >>> var_dict = {'oblique' : 'OBLIQUE', 'first' : 'fi${second}rst', \
                         'second' : '2nd'}
-        >>> tcs.ResolveReferences(var_dict, 'this=${oblique}_set')
+        >>> tcs.resolve_references(var_dict, 'this=${oblique}_set')
         'this=OBLIQUE_set'
-        >>> tcs.ResolveReferences(var_dict, 'this=${oblique}_set${first}nd')
+        >>> tcs.resolve_references(var_dict, 'this=${oblique}_set${first}nd')
         'this=OBLIQUE_setfi2ndrstnd'
         """
         re_var = re.compile(r'(\$\{[-_a-z0-9A-Z]{1,}\})')
@@ -474,7 +474,7 @@ class Toolchains:
             args = args[:m.start(0)] + value + args[m.end(0):]
         return args
 
-    def GetMakeArguments(self, brd):
+    def get_make_arguments(self, brd):
         """Returns 'make' arguments for a given board
 
         The flags are in a section called 'make-flags'. Flags are named
@@ -500,7 +500,7 @@ class Toolchains:
             'make' flags for that board, or '' if none
         """
         self._make_flags['target'] = brd.target
-        arg_str = self.ResolveReferences(self._make_flags,
+        arg_str = self.resolve_references(self._make_flags,
                            self._make_flags.get(brd.target, ''))
         args = re.findall(r"(?:\".*?\"|\S)+", arg_str)
         i = 0
@@ -512,7 +512,7 @@ class Toolchains:
                 i += 1
         return args
 
-    def LocateArchUrl(self, fetch_arch):
+    def locate_arch_url(self, fetch_arch):
         """Find a toolchain available online
 
         Look in standard places for available toolchains. At present the
@@ -548,7 +548,7 @@ class Toolchains:
             return arch, links
         return None
 
-    def Unpack(self, fname, dest):
+    def unpack(self, fname, dest):
         """Unpack a tar file
 
         Args:
@@ -562,18 +562,18 @@ class Toolchains:
         dirs = stdout.splitlines()[1].split('/')[:2]
         return '/'.join(dirs)
 
-    def TestSettingsHasPath(self, path):
+    def test_settings_has_path(self, path):
         """Check if buildman will find this toolchain
 
         Returns:
             True if the path is in settings, False if not
         """
-        paths = self.GetPathList(False)
+        paths = self.get_path_list(False)
         return path in paths
 
-    def ListArchs(self):
+    def list_archs(self):
         """List architectures with available toolchains to download"""
-        host_arch, archives = self.LocateArchUrl('list')
+        host_arch, archives = self.locate_arch_url('list')
         re_arch = re.compile('[-a-z0-9.]*[-_]([^-]*)-.*')
         arch_set = set()
         for archive in archives:
@@ -584,7 +584,7 @@ class Toolchains:
                     arch_set.add(arch.group(1))
         return sorted(arch_set)
 
-    def FetchAndInstall(self, arch):
+    def fetch_and_install(self, arch):
         """Fetch and install a new toolchain
 
         arch:
@@ -593,7 +593,7 @@ class Toolchains:
         # Fist get the URL for this architecture
         col = terminal.Color()
         print(col.build(col.BLUE, "Downloading toolchain for arch '%s'" % arch))
-        url = self.LocateArchUrl(arch)
+        url = self.locate_arch_url(arch)
         if not url:
             print(("Cannot find toolchain for arch '%s' - use 'list' to list" %
                    arch))
@@ -609,7 +609,7 @@ class Toolchains:
             return 1
         print(col.build(col.GREEN, 'Unpacking to: %s' % dest), end=' ')
         sys.stdout.flush()
-        path = self.Unpack(tarfile, dest)
+        path = self.unpack(tarfile, dest)
         os.remove(tarfile)
         os.rmdir(tmpdir)
         print()
@@ -617,7 +617,7 @@ class Toolchains:
         # Check that the toolchain works
         print(col.build(col.GREEN, 'Testing'))
         dirpath = os.path.join(dest, path)
-        compiler_fname_list = self.ScanPath(dirpath, True)
+        compiler_fname_list = self.scan_path(dirpath, True)
         if not compiler_fname_list:
             print('Could not locate C compiler - fetch failed.')
             return 1
@@ -627,7 +627,7 @@ class Toolchains:
         toolchain = Toolchain(compiler_fname_list[0], True, True)
 
         # Make sure that it will be found by buildman
-        if not self.TestSettingsHasPath(dirpath):
+        if not self.test_settings_has_path(dirpath):
             print(("Adding 'download' to config file '%s'" %
                    bsettings.config_fname))
             bsettings.set_item('toolchain', 'download', '%s/*/*' % dest)

@@ -274,8 +274,8 @@ class BuilderThread(threading.Thread):
             args.append('NO_LTO=1')
         if self.builder.reproducible_builds:
             args.append('SOURCE_DATE_EPOCH=0')
-        args.extend(self.builder.toolchains.GetMakeArguments(brd))
-        args.extend(self.toolchain.MakeArgs())
+        args.extend(self.builder.toolchains.get_make_arguments(brd))
+        args.extend(self.toolchain.make_args())
         return args, cwd, src_dir
 
     def _reconfigure(self, commit, brd, cwd, args, env, config_args, config_out,
@@ -549,7 +549,7 @@ class BuilderThread(threading.Thread):
             # We are going to have to build it. First, get a toolchain
             if not self.toolchain:
                 try:
-                    self.toolchain = self.builder.toolchains.Select(brd.arch)
+                    self.toolchain = self.builder.toolchains.select(brd.arch)
                 except ValueError as err:
                     result.return_code = 10
                     result.stdout = ''

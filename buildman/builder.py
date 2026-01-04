@@ -435,7 +435,7 @@ class Builder:
                 key (str): Variable name
                 value (str): Variable value
         """
-        env = toolchain.MakeEnvironment(self.full_path)
+        env = toolchain.make_environment(self.full_path)
         if self.dtc:
             env[b'DTC'] = tools.to_bytes(self.dtc)
         return env

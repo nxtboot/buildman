@@ -194,8 +194,8 @@ class TestFunctional(unittest.TestCase):
         bsettings.setup(None)
         bsettings.add_file(settings_data)
         self.setupToolchains()
-        self._toolchains.Add('arm-gcc', test=False)
-        self._toolchains.Add('powerpc-gcc', test=False)
+        self._toolchains.add('arm-gcc', test=False)
+        self._toolchains.add('powerpc-gcc', test=False)
         self._boards = boards.Boards()
         for brd in BOARDS:
             self._boards.add_board(board.Board(*brd))
@@ -232,7 +232,7 @@ class TestFunctional(unittest.TestCase):
 
     def setupToolchains(self):
         self._toolchains = toolchain.Toolchains()
-        self._toolchains.Add('gcc', test=False)
+        self._toolchains.add('gcc', test=False)
 
     def _RunBuildman(self, *args):
         all_args = [self._buildman_pathname] + list(args)
