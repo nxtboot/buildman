@@ -684,6 +684,101 @@ class BuilderThread(threading.Thread):
         result.out_dir = out_dir
         return result, do_config
 
+    def _write_toolchain_result(self, result, done_file, build_dir,
+                                maybe_aborted, work_in_output):
+        """Write build result and toolchain information
+
+        Args:
+            result (CommandResult): Result to write
+            done_file (str): Path to the 'done' file
+            build_dir (str): Build directory path
+            maybe_aborted (bool): True if the build may have been aborted
+            work_in_output (bool): Use the output directory as the work
+                directory and don't write to a separate output directory
+        """
+        # Write the build result and toolchain information.
+        with open(done_file, 'w', encoding='utf-8') as outf:
+            if maybe_aborted:
+                # Special code to indicate we need to retry
+                outf.write(f'{RETURN_CODE_RETRY}')
+            else:
+                outf.write(f'{result.return_code}')
+        with open(os.path.join(build_dir, 'toolchain'), 'w',
+                  encoding='utf-8') as outf:
+            print('gcc', result.toolchain.gcc, file=outf)
+            print('path', result.toolchain.path, file=outf)
+            print('cross', result.toolchain.cross, file=outf)
+            print('arch', result.toolchain.arch, file=outf)
+            outf.write(f'{result.return_code}')
+
+        # Write out the image and function size information and an objdump
+        env = self.builder.make_environment(self.toolchain)
+        with open(os.path.join(build_dir, 'out-env'), 'wb') as outf:
+            for var in sorted(env.keys()):
+                outf.write(b'%s="%s"' % (var, env[var]))
+
+        with open(os.path.join(build_dir, 'out-cmd'), 'w',
+                  encoding='utf-8') as outf:
+            for cmd in result.cmd_list:
+                print(' '.join(cmd), file=outf)
+
+        lines = []
+        for fname in BASE_ELF_FILENAMES:
+            cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
+            nm_result = command.run_one(*cmd, capture=True,
+                                        capture_stderr=True,
+                                        cwd=result.out_dir,
+                                        raise_on_error=False, env=env)
+            if nm_result.stdout:
+                nm_fname = self.builder.get_func_sizes_file(
+                    result.commit_upto, result.brd.target, fname)
+                with open(nm_fname, 'w', encoding='utf-8') as outf:
+                    print(nm_result.stdout, end=' ', file=outf)
+
+            cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
+            dump_result = command.run_one(*cmd, capture=True,
+                                          capture_stderr=True,
+                                          cwd=result.out_dir,
+                                          raise_on_error=False, env=env)
+            rodata_size = ''
+            if dump_result.stdout:
+                objdump = self.builder.get_objdump_file(result.commit_upto,
+                                result.brd.target, fname)
+                with open(objdump, 'w', encoding='utf-8') as outf:
+                    print(dump_result.stdout, end=' ', file=outf)
+                for line in dump_result.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) > 5 and fields[1] == '.rodata':
+                        rodata_size = fields[2]
+
+            cmd = [f'{self.toolchain.cross}size', fname]
+            size_result = command.run_one(*cmd, capture=True,
+                                          capture_stderr=True,
+                                          cwd=result.out_dir,
+                                          raise_on_error=False, env=env)
+            if size_result.stdout:
+                lines.append(size_result.stdout.splitlines()[1] + ' ' +
+                             rodata_size)
+
+        # Extract the environment from U-Boot and dump it out
+        cmd = [f'{self.toolchain.cross}objcopy', '-O', 'binary',
+               '-j', '.rodata.default_environment',
+               'env/built-in.o', 'uboot.env']
+        command.run_one(*cmd, capture=True, capture_stderr=True,
+                        cwd=result.out_dir, raise_on_error=False, env=env)
+        if not work_in_output:
+            copy_files(result.out_dir, build_dir, '', ['uboot.env'])
+
+        # Write out the image sizes file. This is similar to the output
+        # of binutil's 'size' utility, but it omits the header line and
+        # adds an additional hex value at the end of each line for the
+        # rodata size
+        if lines:
+            sizes = self.builder.get_sizes_file(result.commit_upto,
+                            result.brd.target)
+            with open(sizes, 'w', encoding='utf-8') as outf:
+                print('\n'.join(lines), file=outf)
+
     def _write_result(self, result, keep_outputs, work_in_output):
         """Write a built result to the output directory.
 
@@ -729,88 +824,8 @@ class BuilderThread(threading.Thread):
         done_file = self.builder.get_done_file(result.commit_upto,
                 result.brd.target)
         if result.toolchain:
-            # Write the build result and toolchain information.
-            with open(done_file, 'w', encoding='utf-8') as outf:
-                if maybe_aborted:
-                    # Special code to indicate we need to retry
-                    outf.write(f'{RETURN_CODE_RETRY}')
-                else:
-                    outf.write(f'{result.return_code}')
-            with open(os.path.join(build_dir, 'toolchain'), 'w',
-                      encoding='utf-8') as outf:
-                print('gcc', result.toolchain.gcc, file=outf)
-                print('path', result.toolchain.path, file=outf)
-                print('cross', result.toolchain.cross, file=outf)
-                print('arch', result.toolchain.arch, file=outf)
-                outf.write(f'{result.return_code}')
-
-            # Write out the image and function size information and an objdump
-            env = self.builder.make_environment(self.toolchain)
-            with open(os.path.join(build_dir, 'out-env'), 'wb') as outf:
-                for var in sorted(env.keys()):
-                    outf.write(b'%s="%s"' % (var, env[var]))
-
-            with open(os.path.join(build_dir, 'out-cmd'), 'w',
-                      encoding='utf-8') as outf:
-                for cmd in result.cmd_list:
-                    print(' '.join(cmd), file=outf)
-
-            lines = []
-            for fname in BASE_ELF_FILENAMES:
-                cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
-                nm_result = command.run_one(*cmd, capture=True,
-                                            capture_stderr=True,
-                                            cwd=result.out_dir,
-                                            raise_on_error=False, env=env)
-                if nm_result.stdout:
-                    nm_fname = self.builder.get_func_sizes_file(
-                        result.commit_upto, result.brd.target, fname)
-                    with open(nm_fname, 'w', encoding='utf-8') as outf:
-                        print(nm_result.stdout, end=' ', file=outf)
-
-                cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
-                dump_result = command.run_one(*cmd, capture=True,
-                                              capture_stderr=True,
-                                              cwd=result.out_dir,
-                                              raise_on_error=False, env=env)
-                rodata_size = ''
-                if dump_result.stdout:
-                    objdump = self.builder.get_objdump_file(result.commit_upto,
-                                    result.brd.target, fname)
-                    with open(objdump, 'w', encoding='utf-8') as outf:
-                        print(dump_result.stdout, end=' ', file=outf)
-                    for line in dump_result.stdout.splitlines():
-                        fields = line.split()
-                        if len(fields) > 5 and fields[1] == '.rodata':
-                            rodata_size = fields[2]
-
-                cmd = [f'{self.toolchain.cross}size', fname]
-                size_result = command.run_one(*cmd, capture=True,
-                                              capture_stderr=True,
-                                              cwd=result.out_dir,
-                                              raise_on_error=False, env=env)
-                if size_result.stdout:
-                    lines.append(size_result.stdout.splitlines()[1] + ' ' +
-                                 rodata_size)
-
-            # Extract the environment from U-Boot and dump it out
-            cmd = [f'{self.toolchain.cross}objcopy', '-O', 'binary',
-                   '-j', '.rodata.default_environment',
-                   'env/built-in.o', 'uboot.env']
-            command.run_one(*cmd, capture=True, capture_stderr=True,
-                            cwd=result.out_dir, raise_on_error=False, env=env)
-            if not work_in_output:
-                copy_files(result.out_dir, build_dir, '', ['uboot.env'])
-
-            # Write out the image sizes file. This is similar to the output
-            # of binutil's 'size' utility, but it omits the header line and
-            # adds an additional hex value at the end of each line for the
-            # rodata size
-            if lines:
-                sizes = self.builder.get_sizes_file(result.commit_upto,
-                                result.brd.target)
-                with open(sizes, 'w', encoding='utf-8') as outf:
-                    print('\n'.join(lines), file=outf)
+            self._write_toolchain_result(result, done_file, build_dir,
+                                         maybe_aborted, work_in_output)
         else:
             # Indicate that the build failure due to lack of toolchain
             tools.write_file(done_file, '2\n', binary=False)
