@@ -149,7 +149,7 @@ class TestBuild(unittest.TestCase):
             comm.return_code = commit_info[2]
             comm.error_list = commit_info[3]
             if sequence < 6:
-                 comm.error_list += [migration]
+                comm.error_list += [migration]
             comm.sequence = sequence
             sequence += 1
             self.commits.append(comm)
@@ -248,7 +248,7 @@ class TestBuild(unittest.TestCase):
         # We should get two starting messages, an update for every commit built
         # and a summary message
         self.assertEqual(count, len(commits) * len(BOARDS) + 3)
-        build.set_display_options(**kwdisplay_args);
+        build.set_display_options(**kwdisplay_args)
         build.show_summary(self.commits, board_selected)
         if echo_lines:
             terminal.echo_print_test_lines()
