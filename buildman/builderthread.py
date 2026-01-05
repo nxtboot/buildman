@@ -443,6 +443,120 @@ class BuilderThread(threading.Thread):
             commit = 'current'
         return commit
 
+    def _setup_build(self, req, commit_upto, out_dir, out_rel_dir):
+        """Set up the build environment and arguments
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            out_dir (str): Output directory for the build, or None to use
+               current
+            out_rel_dir (str): Output directory relative to the current dir
+
+        Returns:
+            tuple:
+                env (dict): Environment variables for the build
+                args (list of str): Arguments to pass to make
+                config_args (list of str): Arguments for configuration
+                cwd (str): Current working directory for the build
+                src_dir (str): Source directory path
+        """
+        env = self.builder.make_environment(self.toolchain)
+        if out_dir and not os.path.exists(out_dir):
+            mkdir(out_dir)
+
+        args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
+                                              req.work_dir, commit_upto)
+        if req.brd.extended:
+            config_args = [f'{req.brd.orig_target}_defconfig']
+            for frag in req.brd.extended.fragments:
+                fname = os.path.join(f'{frag}.config')
+                config_args.append(fname)
+        else:
+            config_args = [f'{req.brd.target}_defconfig']
+        if req.fragments is not None:
+            config_args.extend(req.fragments.split(','))
+
+        _remove_old_outputs(out_dir)
+
+        return env, args, config_args, cwd, src_dir
+
+    def _reconfig_if_needed(self, req, commit, cwd, args, env, config_args,
+                            config_out, cmd_list, out_dir, do_config, mrproper,
+                            result):
+        """Reconfigure the build if needed
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit (Commit): Commit being built
+            cwd (str): Current working directory
+            args (list of str): Arguments to pass to make
+            env (dict): Environment strings
+            config_args (list of str): Arguments for configuration
+            config_out (StringIO): Buffer for configuration output
+            cmd_list (list of str): List to add the commands to, for logging
+            out_dir (str): Output directory for the build
+            do_config (bool): True to run a make <board>_defconfig on the source
+            mrproper (bool): True to run mrproper first
+            result (CommandResult): Previous result
+
+        Returns:
+            tuple:
+                result (CommandResult): Result of the reconfiguration
+                do_config (bool): Whether config is still needed
+                cfg_file (str): Path to the .config file
+        """
+        cfg_file = os.path.join(out_dir or '', '.config')
+        if do_config or req.adjust_cfg:
+            result = self._reconfigure(
+                commit, req.brd, cwd, args, env, config_args, config_out,
+                cmd_list, mrproper)
+            do_config = False   # No need to configure next time
+            if req.adjust_cfg:
+                cfgutil.adjust_cfg_file(cfg_file, req.adjust_cfg)
+        return result, do_config, cfg_file
+
+    def _build_and_get_result(self, req, commit, cwd, args, env, cmd_list,
+                              config_out, cfg_file, src_dir, config_only,
+                              result):
+        """Perform the build and finalise the result
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit (Commit): Commit being built
+            cwd (str): Current working directory
+            args (list of str): Arguments to pass to make
+            env (dict): Environment strings
+            cmd_list (list of str): List to add the commands to, for logging
+            config_out (StringIO): Buffer for configuration output
+            cfg_file (str): Path to the .config file
+            src_dir (str): Source directory path
+            config_only (bool): Only configure the source, do not build it
+            result (CommandResult): Previous result
+
+        Returns:
+            CommandResult: Result of the build
+        """
+        if result.return_code == 0:
+            if req.adjust_cfg:
+                oldc_args = list(args) + ['oldconfig']
+                oldc_result = self.make(commit, req.brd, 'oldconfig', cwd,
+                                        *oldc_args, env=env)
+                if oldc_result.return_code:
+                    return oldc_result
+            result = self._build(commit, req.brd, cwd, args, env, cmd_list,
+                                 config_only)
+            if req.adjust_cfg:
+                errs = cfgutil.check_cfg_file(cfg_file, req.adjust_cfg)
+                if errs:
+                    result.stderr += errs
+                    result.return_code = 1
+        result.stderr = result.stderr.replace(src_dir + '/', '')
+        if self.builder.verbose_build:
+            result.stdout = config_out.getvalue() + result.stdout
+        result.cmd_list = cmd_list
+        return result
+
     def _config_and_build(self, req, commit_upto, do_config, mrproper,
                           config_only, commit, out_dir, out_rel_dir, result):
         """Do the build, configuring first if necessary
@@ -465,56 +579,20 @@ class BuilderThread(threading.Thread):
                 do_config (bool): indicates whether 'make config' is needed on
                     the next incremental build
         """
-        # Set up the environment and command line
-        env = self.builder.make_environment(self.toolchain)
-        if out_dir and not os.path.exists(out_dir):
-            mkdir(out_dir)
+        env, args, config_args, cwd, src_dir = self._setup_build(
+            req, commit_upto, out_dir, out_rel_dir)
 
-        args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
-                                              req.work_dir, commit_upto)
-        if req.brd.extended:
-            config_args = [f'{req.brd.orig_target}_defconfig']
-            for frag in req.brd.extended.fragments:
-                fname = os.path.join(f'{frag}.config')
-                config_args.append(fname)
-        else:
-            config_args = [f'{req.brd.target}_defconfig']
-        if req.fragments is not None:
-            config_args.extend(req.fragments.split(','))
         config_out = io.StringIO()
-
-        _remove_old_outputs(out_dir)
-
-        # If we need to reconfigure, do that now
-        cfg_file = os.path.join(out_dir or '', '.config')
         cmd_list = []
-        if do_config or req.adjust_cfg:
-            result = self._reconfigure(
-                commit, req.brd, cwd, args, env, config_args, config_out,
-                cmd_list, mrproper)
-            do_config = False   # No need to configure next time
-            if req.adjust_cfg:
-                cfgutil.adjust_cfg_file(cfg_file, req.adjust_cfg)
 
-        # Now do the build, if everything looks OK
-        if result.return_code == 0:
-            if req.adjust_cfg:
-                oldc_args = list(args) + ['oldconfig']
-                oldc_result = self.make(commit, req.brd, 'oldconfig', cwd,
-                                        *oldc_args, env=env)
-                if oldc_result.return_code:
-                    return oldc_result
-            result = self._build(commit, req.brd, cwd, args, env, cmd_list,
-                                 config_only)
-            if req.adjust_cfg:
-                errs = cfgutil.check_cfg_file(cfg_file, req.adjust_cfg)
-                if errs:
-                    result.stderr += errs
-                    result.return_code = 1
-        result.stderr = result.stderr.replace(src_dir + '/', '')
-        if self.builder.verbose_build:
-            result.stdout = config_out.getvalue() + result.stdout
-        result.cmd_list = cmd_list
+        result, do_config, cfg_file = self._reconfig_if_needed(
+            req, commit, cwd, args, env, config_args, config_out, cmd_list,
+            out_dir, do_config, mrproper, result)
+
+        result = self._build_and_get_result(
+            req, commit, cwd, args, env, cmd_list, config_out, cfg_file,
+            src_dir, config_only, result)
+
         return result, do_config
 
     def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
