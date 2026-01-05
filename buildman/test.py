@@ -278,6 +278,34 @@ class TestBuildOutput(TestBuildBase):
             terminal.echo_print_test_lines()
         return iter(terminal.get_print_test_lines())
 
+    def _add_pfx(self, prefix, brds, error_str, colour):
+        """Add a prefix to each line of a string
+
+        The trailing newline in error_str is removed before processing
+
+        Args:
+            prefix (str): String prefix to add
+            brds (str): Board names to include in the output
+            error_str (str): Error string containing the lines
+            colour (int): Expected colour for the line. Note that the board
+                list, if present, always appears in magenta
+
+        Returns:
+            str: New string where each line has the prefix added
+        """
+        lines = error_str.strip().splitlines()
+        new_lines = []
+        for line in lines:
+            if brds:
+                expect = self._col.build(colour, prefix + '(')
+                expect += self._col.build(self._col.MAGENTA, brds,
+                                          bright=False)
+                expect += self._col.build(colour, f') {line}')
+            else:
+                expect = self._col.build(colour, prefix + line)
+            new_lines.append(expect)
+        return '\n'.join(new_lines)
+
     def _check_output(self, lines, list_error_boards=False,
                      filter_dtb_warnings=False,
                      filter_migration_warnings=False):
@@ -290,34 +318,6 @@ class TestBuildOutput(TestBuildBase):
             filter_dtb_warnings: Adjust the check for output produced with the
                --filter-dtb-warnings flag
         """
-        def add_line_prefix(prefix, brds, error_str, colour):
-            """Add a prefix to each line of a string
-
-            The trailing newline in error_str is removed before processing
-
-            Args:
-                prefix (str): String prefix to add
-                brds (str): Board names to include in the output
-                error_str (str): Error string containing the lines
-                colour (int): Expected colour for the line. Note that the board
-                    list, if present, always appears in magenta
-
-            Returns:
-                str: New string where each line has the prefix added
-            """
-            lines = error_str.strip().splitlines()
-            new_lines = []
-            for line in lines:
-                if brds:
-                    expect = self._col.build(colour, prefix + '(')
-                    expect += self._col.build(self._col.MAGENTA, brds,
-                                              bright=False)
-                    expect += self._col.build(colour, f') {line}')
-                else:
-                    expect = self._col.build(colour, prefix + line)
-                new_lines.append(expect)
-            return '\n'.join(new_lines)
-
         col = terminal.Color()
         boards01234 = ('board0 board1 board2 board3 board4'
                        if list_error_boards else '')
@@ -338,7 +338,7 @@ class TestBuildOutput(TestBuildBase):
                                outcome=OUTCOME_WARN)
 
             self.assertEqual(next(lines).text,
-                add_line_prefix('+', boards01234, MIGRATION, col.RED))
+                self._add_pfx('+', boards01234, MIGRATION, col.RED))
 
         # Second commit: all archs should fail with warnings
         self.assertEqual(next(lines).text, f'02: {COMMITS[1][1]}')
@@ -353,7 +353,7 @@ class TestBuildOutput(TestBuildBase):
 
         # Second commit: The warnings should be listed
         self.assertEqual(next(lines).text,
-            add_line_prefix('w+', boards1234, ERRORS[0], col.YELLOW))
+            self._add_pfx('w+', boards1234, ERRORS[0], col.YELLOW))
 
         # Third commit: Still fails
         self.assertEqual(next(lines).text, f'03: {COMMITS[2][1]}')
@@ -366,7 +366,7 @@ class TestBuildOutput(TestBuildBase):
 
         # Expect a compiler error
         self.assertEqual(next(lines).text,
-                         add_line_prefix('+', boards234, ERRORS[1], col.RED))
+                         self._add_pfx('+', boards234, ERRORS[1], col.RED))
 
         # Fourth commit: Compile errors are fixed, just have warning for board3
         self.assertEqual(next(lines).text, f'04: {COMMITS[3][1]}')
@@ -387,13 +387,31 @@ class TestBuildOutput(TestBuildBase):
 
         # Compile error fixed
         self.assertEqual(next(lines).text,
-                         add_line_prefix('-', boards234, ERRORS[1], col.GREEN))
+                         self._add_pfx('-', boards234, ERRORS[1], col.GREEN))
 
         if not filter_dtb_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('w+', boards34, ERRORS[2], col.YELLOW))
+                self._add_pfx('w+', boards34, ERRORS[2], col.YELLOW))
 
+        self._check_output_part2(lines, col, boards01234, boards34, boards4,
+                                 filter_dtb_warnings, filter_migration_warnings)
+
+    def _check_output_part2(self, lines, col, boards01234, boards34, boards4,
+                            filter_dtb_warnings, filter_migration_warnings):
+        """Check expected output from the build summary (commits 5-7)
+
+        Args:
+            lines: Iterator containing the lines returned from the summary
+            col: terminal.Color object for building expected output
+            boards01234: Board string for all boards (or empty)
+            boards34: Board string for boards 3-4 (or empty)
+            boards4: Board string for board 4 (or empty)
+            filter_dtb_warnings: Adjust the check for output produced with the
+               --filter-dtb-warnings flag
+            filter_migration_warnings: Adjust the check for output produced
+               with the --filter-migration-warnings flag
+        """
         # Fifth commit
         self.assertEqual(next(lines).text, f'05: {COMMITS[4][1]}')
         if filter_migration_warnings:
@@ -406,12 +424,12 @@ class TestBuildOutput(TestBuildBase):
         expect = [expect[0]] + expect[2:]
         expect = '\n'.join(expect)
         self.assertEqual(next(lines).text,
-                         add_line_prefix('+', boards4, expect, col.RED))
+                         self._add_pfx('+', boards4, expect, col.RED))
 
         if not filter_dtb_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('w-', boards34, ERRORS[2], col.CYAN))
+                self._add_pfx('w-', boards34, ERRORS[2], col.CYAN))
 
         # Sixth commit
         self.assertEqual(next(lines).text, f'06: {COMMITS[5][1]}')
@@ -427,9 +445,9 @@ class TestBuildOutput(TestBuildBase):
         expect = [expect[0]] + expect[2:]
         expect = '\n'.join(expect)
         self.assertEqual(next(lines).text,
-                         add_line_prefix('-', boards4, expect, col.GREEN))
+                         self._add_pfx('-', boards4, expect, col.GREEN))
         self.assertEqual(next(lines).text,
-                         add_line_prefix('w-', boards4, ERRORS[0], col.CYAN))
+                         self._add_pfx('w-', boards4, ERRORS[0], col.CYAN))
 
         # Seventh commit
         self.assertEqual(next(lines).text, f'07: {COMMITS[6][1]}')
@@ -449,16 +467,16 @@ class TestBuildOutput(TestBuildBase):
         if not filter_migration_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('-', boards01234, MIGRATION, col.GREEN))
+                self._add_pfx('-', boards01234, MIGRATION, col.GREEN))
 
         self.assertEqual(next(lines).text,
-                         add_line_prefix('+', boards4, expect, col.RED))
+                         self._add_pfx('+', boards4, expect, col.RED))
 
         # Now the warnings lines
         expect = [expect_str[0]] + expect_str[10:12] + [expect_str[9]]
         expect = '\n'.join(expect)
         self.assertEqual(next(lines).text,
-                         add_line_prefix('w+', boards4, expect, col.YELLOW))
+                         self._add_pfx('w+', boards4, expect, col.YELLOW))
 
     def test_output(self):
         """Test basic builder operation and output
