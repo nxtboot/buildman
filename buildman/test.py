@@ -1128,8 +1128,7 @@ class TestBuild(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a reference file
             ref_file = os.path.join(tmpdir, 'done')
-            with open(ref_file, 'w') as f:
-                f.write('0\n')
+            tools.write_file(ref_file, b'0\n')
 
             # Test with no Kconfig files - should return False
             self.assertFalse(
@@ -1140,8 +1139,7 @@ class TestBuild(unittest.TestCase):
 
             # Create a Kconfig file newer than the reference
             kconfig = os.path.join(tmpdir, 'Kconfig')
-            with open(kconfig, 'w') as f:
-                f.write('config TEST\n')
+            tools.write_file(kconfig, b'config TEST\n')
 
             # Should now return True since Kconfig is newer
             self.assertTrue(
@@ -1149,8 +1147,7 @@ class TestBuild(unittest.TestCase):
 
             # Create a new reference file (newer than Kconfig)
             time.sleep(0.1)
-            with open(ref_file, 'w') as f:
-                f.write('0\n')
+            tools.write_file(ref_file, b'0\n')
 
             # Should now return False since reference is newer
             self.assertFalse(
@@ -1165,8 +1162,8 @@ class TestBuild(unittest.TestCase):
             subdir = os.path.join(tmpdir, 'sub')
             os.makedirs(subdir)
             time.sleep(0.1)
-            with open(os.path.join(subdir, 'Kconfig.sub'), 'w') as f:
-                f.write('config SUBTEST\n')
+            tools.write_file(os.path.join(subdir, 'Kconfig.sub'),
+                             b'config SUBTEST\n')
 
             # Should return True due to newer Kconfig.sub in subdir
             self.assertTrue(
@@ -1174,8 +1171,7 @@ class TestBuild(unittest.TestCase):
 
             # Create a new reference file (newer than all Kconfig files)
             time.sleep(0.1)
-            with open(ref_file, 'w') as f:
-                f.write('0\n')
+            tools.write_file(ref_file, b'0\n')
 
             # Should now return False
             self.assertFalse(
@@ -1185,8 +1181,8 @@ class TestBuild(unittest.TestCase):
             configs_dir = os.path.join(tmpdir, 'configs')
             os.makedirs(configs_dir)
             time.sleep(0.1)
-            with open(os.path.join(configs_dir, 'sandbox_defconfig'), 'w') as f:
-                f.write('CONFIG_SANDBOX=y\n')
+            tools.write_file(os.path.join(configs_dir, 'sandbox_defconfig'),
+                             b'CONFIG_SANDBOX=y\n')
 
             # Without target, defconfig is not checked
             self.assertFalse(
