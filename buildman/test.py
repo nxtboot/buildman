@@ -712,6 +712,7 @@ class TestBuild(unittest.TestCase):
         build = builder.Builder(self.toolchains, base_dir, None, 1, 2)
         build.commits = self.commits
         build.commit_count = len(commits)
+        # pylint: disable=protected-access
         result = set(build._get_output_space_removals())
         expected = {os.path.join(base_dir, f) for f in to_remove}
         self.assertEqual(expected, result)
