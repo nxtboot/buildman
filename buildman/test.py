@@ -153,11 +153,10 @@ class Options:
         self.show_errors = False
         self.keep_outputs = False
 
-class TestBuild(unittest.TestCase):
-    """Test buildman
+# pylint: disable=too-many-instance-attributes
+class TestBuildBase(unittest.TestCase):
+    """Base class for buildman tests with common setup"""
 
-    TODO: Write tests for the rest of the functionality
-    """
     def setUp(self):
         # Set up commits to build
         self.commits = []
@@ -206,6 +205,10 @@ class TestBuild(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.base_dir)
+
+
+class TestBuildOutput(TestBuildBase):
+    """Tests for build output and summary display"""
 
     def make(self, cmt, brd, _stage, *_args, **_kwargs):
         """Mock make function for testing build output"""
@@ -518,6 +521,10 @@ class TestBuild(unittest.TestCase):
         args = ['tegra20']
         control.do_buildman(options, args)
 
+
+class TestBuildBoards(TestBuildBase):
+    """Tests for board selection"""
+
     def test_board_single(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['sandbox']),
@@ -578,6 +585,14 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(self.brds.select_boards(['sandbox sandbox',
                                                    'sandbox']),
                          ({'all': ['board4'], 'sandbox': ['board4']}, []))
+
+
+class TestBuild(TestBuildBase):
+    """Tests for buildman functionality
+
+    TODO: Write tests for the rest of the functionality
+    """
+
     def check_dirs(self, build, dirname):
         """Check that the output directories are correct"""
         self.assertEqual(f'base{dirname}', build.get_output_dir(1))
@@ -720,6 +735,10 @@ class TestBuild(unittest.TestCase):
         expected = {os.path.join(base_dir, f) for f in to_remove}
         self.assertEqual(expected, result)
 
+
+class TestBuildConfig(TestBuildBase):
+    """Tests for config adjustment functionality"""
+
     def test_adjust_cfg_nop(self):
         """check various adjustments of config that are nops"""
         # enable an enabled CONFIG
@@ -853,6 +872,10 @@ class TestBuild(unittest.TestCase):
         self.assertEqual([
             ['MARY="mary"', 'Missing expected line: CONFIG_MARY="mary"']],
             result)
+
+
+class TestBuildMisc(TestBuildBase):
+    """Miscellaneous buildman tests"""
 
     def get_procs(self):
         """Get list of running process IDs from the running file"""
