@@ -616,7 +616,7 @@ class TestBuild(unittest.TestCase):
 
     def test_toolchain_aliases(self):
         """Test that toolchain aliases are handled correctly"""
-        self.assertTrue(self.toolchains.select('arm') != None)
+        self.assertTrue(self.toolchains.select('arm') is not None)
         with self.assertRaises(ValueError):
             self.toolchains.select('no-arch')
         with self.assertRaises(ValueError):
@@ -624,11 +624,11 @@ class TestBuild(unittest.TestCase):
 
         self.toolchains = toolchain.Toolchains()
         self.toolchains.add('x86_64-linux-gcc', test=False)
-        self.assertTrue(self.toolchains.select('x86') != None)
+        self.assertTrue(self.toolchains.select('x86') is not None)
 
         self.toolchains = toolchain.Toolchains()
         self.toolchains.add('i386-linux-gcc', test=False)
-        self.assertTrue(self.toolchains.select('x86') != None)
+        self.assertTrue(self.toolchains.select('x86') is not None)
 
     def test_toolchain_download(self):
         """Test that we can download toolchains"""
