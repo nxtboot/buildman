@@ -207,8 +207,8 @@ class TestBuild(unittest.TestCase):
         boardnum = int(brd.target[-1])
         result.return_code = 0
         result.stderr = ''
-        result.stdout = ('This is the test output for board %s, commit %s' %
-                (brd.target, commit.hash))
+        result.stdout = (f'This is the test output for board {brd.target}, '
+                         f'commit {commit.hash}')
         if ((boardnum >= 1 and boardnum >= commit.sequence) or
                 boardnum == 4 and commit.sequence == 6):
             result.return_code = commit.return_code
@@ -224,12 +224,12 @@ class TestBuild(unittest.TestCase):
         col = self._col
         expected_colour = (col.GREEN if outcome == OUTCOME_OK else
                            col.YELLOW if outcome == OUTCOME_WARN else col.RED)
-        expect = '%10s: ' % arch
+        expect = f'{arch:>10}: '
         # TODO(sjg@chromium.org): If plus is '', we shouldn't need this
         expect += ' ' + col.build(expected_colour, plus)
         expect += '  '
         for brd in brds:
-            expect += col.build(expected_colour, ' %s' % brd)
+            expect += col.build(expected_colour, f' {brd}')
         self.assertEqual(text, expect)
 
     def _SetupTest(self, echo_lines=False, threads=1, **kwdisplay_args):
@@ -301,7 +301,7 @@ class TestBuild(unittest.TestCase):
                     expect = self._col.build(colour, prefix + '(')
                     expect += self._col.build(self._col.MAGENTA, brds,
                                               bright=False)
-                    expect += self._col.build(colour, ') %s' % line)
+                    expect += self._col.build(colour, f') {line}')
                 else:
                     expect = self._col.build(colour, prefix + line)
                 new_lines.append(expect)
@@ -316,7 +316,7 @@ class TestBuild(unittest.TestCase):
         boards4 = 'board4' if list_error_boards else ''
 
         # Upstream commit: migration warnings only
-        self.assertEqual(next(lines).text, '01: %s' % commits[0][1])
+        self.assertEqual(next(lines).text, f'01: {commits[0][1]}')
 
         if not filter_migration_warnings:
             self.assertSummary(next(lines).text, 'arm', 'w+',
@@ -330,7 +330,7 @@ class TestBuild(unittest.TestCase):
                 add_line_prefix('+', boards01234, migration, col.RED))
 
         # Second commit: all archs should fail with warnings
-        self.assertEqual(next(lines).text, '02: %s' % commits[1][1])
+        self.assertEqual(next(lines).text, f'02: {commits[1][1]}')
 
         if filter_migration_warnings:
             self.assertSummary(next(lines).text, 'arm', 'w+',
@@ -345,7 +345,7 @@ class TestBuild(unittest.TestCase):
             add_line_prefix('w+', boards1234, errors[0], col.YELLOW))
 
         # Third commit: Still fails
-        self.assertEqual(next(lines).text, '03: %s' % commits[2][1])
+        self.assertEqual(next(lines).text, f'03: {commits[2][1]}')
         if filter_migration_warnings:
             self.assertSummary(next(lines).text, 'arm', '',
                                ['board1'], outcome=OUTCOME_OK)
@@ -358,15 +358,15 @@ class TestBuild(unittest.TestCase):
                          add_line_prefix('+', boards234, errors[1], col.RED))
 
         # Fourth commit: Compile errors are fixed, just have warning for board3
-        self.assertEqual(next(lines).text, '04: %s' % commits[3][1])
+        self.assertEqual(next(lines).text, f'04: {commits[3][1]}')
         if filter_migration_warnings:
-            expect = '%10s: ' % 'powerpc'
+            expect = f"{'powerpc':>10}: "
             expect += ' ' + col.build(col.GREEN, '')
             expect += '  '
-            expect += col.build(col.GREEN, ' %s' % 'board2')
+            expect += col.build(col.GREEN, ' board2')
             expect += ' ' + col.build(col.YELLOW, 'w+')
             expect += '  '
-            expect += col.build(col.YELLOW, ' %s' % 'board3')
+            expect += col.build(col.YELLOW, ' board3')
             self.assertEqual(next(lines).text, expect)
         else:
             self.assertSummary(next(lines).text, 'powerpc', 'w+',
@@ -384,7 +384,7 @@ class TestBuild(unittest.TestCase):
                 add_line_prefix('w+', boards34, errors[2], col.YELLOW))
 
         # Fifth commit
-        self.assertEqual(next(lines).text, '05: %s' % commits[4][1])
+        self.assertEqual(next(lines).text, f'05: {commits[4][1]}')
         if filter_migration_warnings:
             self.assertSummary(next(lines).text, 'powerpc', '', ['board3'],
                                outcome=OUTCOME_OK)
@@ -403,7 +403,7 @@ class TestBuild(unittest.TestCase):
                 add_line_prefix('w-', boards34, errors[2], col.CYAN))
 
         # Sixth commit
-        self.assertEqual(next(lines).text, '06: %s' % commits[5][1])
+        self.assertEqual(next(lines).text, f'06: {commits[5][1]}')
         if filter_migration_warnings:
             self.assertSummary(next(lines).text, 'sandbox', '', ['board4'],
                                outcome=OUTCOME_OK)
@@ -421,7 +421,7 @@ class TestBuild(unittest.TestCase):
                          add_line_prefix('w-', boards4, errors[0], col.CYAN))
 
         # Seventh commit
-        self.assertEqual(next(lines).text, '07: %s' % commits[6][1])
+        self.assertEqual(next(lines).text, f'07: {commits[6][1]}')
         if filter_migration_warnings:
             self.assertSummary(next(lines).text, 'sandbox', '+', ['board4'])
         else:
@@ -571,16 +571,15 @@ class TestBuild(unittest.TestCase):
                                                    'sandbox']),
                          ({'all': ['board4'], 'sandbox': ['board4']}, []))
     def CheckDirs(self, build, dirname):
-        self.assertEqual('base%s' % dirname, build.get_output_dir(1))
-        self.assertEqual('base%s/fred' % dirname,
-                         build.get_build_dir(1, 'fred'))
-        self.assertEqual('base%s/fred/done' % dirname,
+        self.assertEqual(f'base{dirname}', build.get_output_dir(1))
+        self.assertEqual(f'base{dirname}/fred', build.get_build_dir(1, 'fred'))
+        self.assertEqual(f'base{dirname}/fred/done',
                          build.get_done_file(1, 'fred'))
-        self.assertEqual('base%s/fred/u-boot.sizes' % dirname,
+        self.assertEqual(f'base{dirname}/fred/u-boot.sizes',
                          build.get_func_sizes_file(1, 'fred', 'u-boot'))
-        self.assertEqual('base%s/fred/u-boot.objdump' % dirname,
+        self.assertEqual(f'base{dirname}/fred/u-boot.objdump',
                          build.get_objdump_file(1, 'fred', 'u-boot'))
-        self.assertEqual('base%s/fred/err' % dirname,
+        self.assertEqual(f'base{dirname}/fred/err',
                          build.get_err_file(1, 'fred'))
 
     def testOutputDir(self):
@@ -589,7 +588,7 @@ class TestBuild(unittest.TestCase):
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
-        dirname ='/%02d_g%s_%s' % (2, commits[1][0], subject[:20])
+        dirname = f'/{2:02d}_g{commits[1][0]}_{subject[:20]}'
         self.CheckDirs(build, dirname)
 
     def testOutputDirCurrent(self):
