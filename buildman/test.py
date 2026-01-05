@@ -202,7 +202,7 @@ class TestBuild(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.base_dir)
 
-    def Make(self, commit, brd, stage, *args, **kwargs):
+    def make(self, commit, brd, stage, *args, **kwargs):
         result = command.CommandResult()
         boardnum = int(brd.target[-1])
         result.return_code = 0
@@ -220,7 +220,7 @@ class TestBuild(unittest.TestCase):
         result.combined = result.stdout + result.stderr
         return result
 
-    def assertSummary(self, text, arch, plus, brds, outcome=OUTCOME_ERR):
+    def assert_summary(self, text, arch, plus, brds, outcome=OUTCOME_ERR):
         col = self._col
         expected_colour = (col.GREEN if outcome == OUTCOME_OK else
                            col.YELLOW if outcome == OUTCOME_WARN else col.RED)
@@ -232,7 +232,7 @@ class TestBuild(unittest.TestCase):
             expect += col.build(expected_colour, f' {brd}')
         self.assertEqual(text, expect)
 
-    def _SetupTest(self, echo_lines=False, threads=1, **kwdisplay_args):
+    def _setup_test(self, echo_lines=False, threads=1, **kwdisplay_args):
         """Set up the test by running a build and summary
 
         Args:
@@ -246,7 +246,7 @@ class TestBuild(unittest.TestCase):
         """
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
                                 2, checkout=False, show_unknown=False)
-        build.do_make = self.Make
+        build.do_make = self.make
         board_selected = self.brds.get_selected_dict()
 
         # Build the boards for the pre-defined commits and warnings/errors
@@ -268,7 +268,7 @@ class TestBuild(unittest.TestCase):
             terminal.echo_print_test_lines()
         return iter(terminal.get_print_test_lines())
 
-    def _CheckOutput(self, lines, list_error_boards=False,
+    def _check_output(self, lines, list_error_boards=False,
                      filter_dtb_warnings=False,
                      filter_migration_warnings=False):
         """Check for expected output from the build summary
@@ -319,11 +319,11 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(next(lines).text, f'01: {commits[0][1]}')
 
         if not filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'arm', 'w+',
+            self.assert_summary(next(lines).text, 'arm', 'w+',
                                ['board0', 'board1'], outcome=OUTCOME_WARN)
-            self.assertSummary(next(lines).text, 'powerpc', 'w+',
+            self.assert_summary(next(lines).text, 'powerpc', 'w+',
                                ['board2', 'board3'], outcome=OUTCOME_WARN)
-            self.assertSummary(next(lines).text, 'sandbox', 'w+', ['board4'],
+            self.assert_summary(next(lines).text, 'sandbox', 'w+', ['board4'],
                                outcome=OUTCOME_WARN)
 
             self.assertEqual(next(lines).text,
@@ -333,11 +333,11 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(next(lines).text, f'02: {commits[1][1]}')
 
         if filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'arm', 'w+',
+            self.assert_summary(next(lines).text, 'arm', 'w+',
                                ['board1'], outcome=OUTCOME_WARN)
-            self.assertSummary(next(lines).text, 'powerpc', 'w+',
+            self.assert_summary(next(lines).text, 'powerpc', 'w+',
                                ['board2', 'board3'], outcome=OUTCOME_WARN)
-            self.assertSummary(next(lines).text, 'sandbox', 'w+', ['board4'],
+            self.assert_summary(next(lines).text, 'sandbox', 'w+', ['board4'],
                                outcome=OUTCOME_WARN)
 
         # Second commit: The warnings should be listed
@@ -347,11 +347,11 @@ class TestBuild(unittest.TestCase):
         # Third commit: Still fails
         self.assertEqual(next(lines).text, f'03: {commits[2][1]}')
         if filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'arm', '',
+            self.assert_summary(next(lines).text, 'arm', '',
                                ['board1'], outcome=OUTCOME_OK)
-        self.assertSummary(next(lines).text, 'powerpc', '+',
+        self.assert_summary(next(lines).text, 'powerpc', '+',
                            ['board2', 'board3'])
-        self.assertSummary(next(lines).text, 'sandbox', '+', ['board4'])
+        self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
 
         # Expect a compiler error
         self.assertEqual(next(lines).text,
@@ -369,9 +369,9 @@ class TestBuild(unittest.TestCase):
             expect += col.build(col.YELLOW, ' board3')
             self.assertEqual(next(lines).text, expect)
         else:
-            self.assertSummary(next(lines).text, 'powerpc', 'w+',
+            self.assert_summary(next(lines).text, 'powerpc', 'w+',
                                ['board2', 'board3'], outcome=OUTCOME_WARN)
-        self.assertSummary(next(lines).text, 'sandbox', 'w+', ['board4'],
+        self.assert_summary(next(lines).text, 'sandbox', 'w+', ['board4'],
                                outcome=OUTCOME_WARN)
 
         # Compile error fixed
@@ -386,9 +386,9 @@ class TestBuild(unittest.TestCase):
         # Fifth commit
         self.assertEqual(next(lines).text, f'05: {commits[4][1]}')
         if filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'powerpc', '', ['board3'],
+            self.assert_summary(next(lines).text, 'powerpc', '', ['board3'],
                                outcome=OUTCOME_OK)
-        self.assertSummary(next(lines).text, 'sandbox', '+', ['board4'])
+        self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
 
         # The second line of errors[3] is a duplicate, so buildman will drop it
         expect = errors[3].rstrip().split('\n')
@@ -405,10 +405,10 @@ class TestBuild(unittest.TestCase):
         # Sixth commit
         self.assertEqual(next(lines).text, f'06: {commits[5][1]}')
         if filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'sandbox', '', ['board4'],
+            self.assert_summary(next(lines).text, 'sandbox', '', ['board4'],
                                outcome=OUTCOME_OK)
         else:
-            self.assertSummary(next(lines).text, 'sandbox', 'w+', ['board4'],
+            self.assert_summary(next(lines).text, 'sandbox', 'w+', ['board4'],
                                outcome=OUTCOME_WARN)
 
         # The second line of errors[3] is a duplicate, so buildman will drop it
@@ -423,13 +423,13 @@ class TestBuild(unittest.TestCase):
         # Seventh commit
         self.assertEqual(next(lines).text, f'07: {commits[6][1]}')
         if filter_migration_warnings:
-            self.assertSummary(next(lines).text, 'sandbox', '+', ['board4'])
+            self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
         else:
-            self.assertSummary(next(lines).text, 'arm', '', ['board0', 'board1'],
+            self.assert_summary(next(lines).text, 'arm', '', ['board0', 'board1'],
                                outcome=OUTCOME_OK)
-            self.assertSummary(next(lines).text, 'powerpc', '',
+            self.assert_summary(next(lines).text, 'powerpc', '',
                                ['board2', 'board3'], outcome=OUTCOME_OK)
-            self.assertSummary(next(lines).text, 'sandbox', '+', ['board4'])
+            self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
 
         # Pick out the correct error lines
         expect_str = errors[4].rstrip().replace('%(basedir)s', '').split('\n')
@@ -449,47 +449,47 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(next(lines).text,
                          add_line_prefix('w+', boards4, expect, col.YELLOW))
 
-    def testOutput(self):
+    def test_output(self):
         """Test basic builder operation and output
 
         This does a line-by-line verification of the summary output.
         """
-        lines = self._SetupTest(show_errors=True)
-        self._CheckOutput(lines, list_error_boards=False,
+        lines = self._setup_test(show_errors=True)
+        self._check_output(lines, list_error_boards=False,
                           filter_dtb_warnings=False)
 
-    def testErrorBoards(self):
+    def test_error_boards(self):
         """Test output with --list-error-boards
 
         This does a line-by-line verification of the summary output.
         """
-        lines = self._SetupTest(show_errors=True, list_error_boards=True)
-        self._CheckOutput(lines, list_error_boards=True)
+        lines = self._setup_test(show_errors=True, list_error_boards=True)
+        self._check_output(lines, list_error_boards=True)
 
-    def testFilterDtb(self):
+    def test_filter_dtb(self):
         """Test output with --filter-dtb-warnings
 
         This does a line-by-line verification of the summary output.
         """
-        lines = self._SetupTest(show_errors=True, filter_dtb_warnings=True)
-        self._CheckOutput(lines, filter_dtb_warnings=True)
+        lines = self._setup_test(show_errors=True, filter_dtb_warnings=True)
+        self._check_output(lines, filter_dtb_warnings=True)
 
-    def testFilterMigration(self):
+    def test_filter_migration(self):
         """Test output with --filter-migration-warnings
 
         This does a line-by-line verification of the summary output.
         """
-        lines = self._SetupTest(show_errors=True,
+        lines = self._setup_test(show_errors=True,
                                 filter_migration_warnings=True)
-        self._CheckOutput(lines, filter_migration_warnings=True)
+        self._check_output(lines, filter_migration_warnings=True)
 
-    def testSingleThread(self):
+    def test_single_thread(self):
         """Test operation without threading"""
-        lines = self._SetupTest(show_errors=True, threads=0)
-        self._CheckOutput(lines, list_error_boards=False,
+        lines = self._setup_test(show_errors=True, threads=0)
+        self._check_output(lines, list_error_boards=False,
                           filter_dtb_warnings=False)
 
-    def _testGit(self):
+    def _test_git(self):
         """Test basic builder operation by building a branch"""
         options = Options()
         options.git = os.getcwd()
@@ -510,18 +510,18 @@ class TestBuild(unittest.TestCase):
         args = ['tegra20']
         control.do_buildman(options, args)
 
-    def testBoardSingle(self):
+    def test_board_single(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['sandbox']),
                          ({'all': ['board4'], 'sandbox': ['board4']}, []))
 
-    def testBoardArch(self):
+    def test_board_arch(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['arm']),
                          ({'all': ['board0', 'board1'],
                           'arm': ['board0', 'board1']}, []))
 
-    def testBoardArchSingle(self):
+    def test_board_arch_single(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['arm sandbox']),
                          ({'sandbox': ['board4'],
@@ -529,20 +529,20 @@ class TestBuild(unittest.TestCase):
                           'arm': ['board0', 'board1']}, []))
 
 
-    def testBoardArchSingleMultiWord(self):
+    def test_board_arch_single_multi_word(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['arm', 'sandbox']),
                          ({'sandbox': ['board4'],
                           'all': ['board0', 'board1', 'board4'],
                           'arm': ['board0', 'board1']}, []))
 
-    def testBoardSingleAnd(self):
+    def test_board_single_and(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['Tester & arm']),
                          ({'Tester&arm': ['board0', 'board1'],
                            'all': ['board0', 'board1']}, []))
 
-    def testBoardTwoAnd(self):
+    def test_board_two_and(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['Tester', '&', 'arm',
                                                    'Tester' '&', 'powerpc',
@@ -553,24 +553,24 @@ class TestBuild(unittest.TestCase):
                           'Tester&powerpc': ['board2', 'board3'],
                           'Tester&arm': ['board0', 'board1']}, []))
 
-    def testBoardAll(self):
+    def test_board_all(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards([]),
                          ({'all': ['board0', 'board1', 'board2', 'board3',
                                   'board4']}, []))
 
-    def testBoardRegularExpression(self):
+    def test_board_regular_expression(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['T.*r&^Po']),
                          ({'all': ['board2', 'board3'],
                           'T.*r&^Po': ['board2', 'board3']}, []))
 
-    def testBoardDuplicate(self):
+    def test_board_duplicate(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['sandbox sandbox',
                                                    'sandbox']),
                          ({'all': ['board4'], 'sandbox': ['board4']}, []))
-    def CheckDirs(self, build, dirname):
+    def check_dirs(self, build, dirname):
         self.assertEqual(f'base{dirname}', build.get_output_dir(1))
         self.assertEqual(f'base{dirname}/fred', build.get_build_dir(1, 'fred'))
         self.assertEqual(f'base{dirname}/fred/done',
@@ -582,31 +582,31 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(f'base{dirname}/fred/err',
                          build.get_err_file(1, 'fred'))
 
-    def testOutputDir(self):
+    def test_output_dir(self):
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False)
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
         dirname = f'/{2:02d}_g{commits[1][0]}_{subject[:20]}'
-        self.CheckDirs(build, dirname)
+        self.check_dirs(build, dirname)
 
-    def testOutputDirCurrent(self):
+    def test_output_dir_current(self):
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False)
         build.commits = None
         build.commit_count = 0
-        self.CheckDirs(build, '/current')
+        self.check_dirs(build, '/current')
 
-    def testOutputDirNoSubdirs(self):
+    def test_output_dir_no_subdirs(self):
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False,
                                 no_subdirs=True)
         build.commits = None
         build.commit_count = 0
-        self.CheckDirs(build, '')
+        self.check_dirs(build, '')
 
-    def testToolchainAliases(self):
+    def test_toolchain_aliases(self):
         self.assertTrue(self.toolchains.select('arm') != None)
         with self.assertRaises(ValueError):
             self.toolchains.select('no-arch')
@@ -621,7 +621,7 @@ class TestBuild(unittest.TestCase):
         self.toolchains.add('i386-linux-gcc', test=False)
         self.assertTrue(self.toolchains.select('x86') != None)
 
-    def testToolchainDownload(self):
+    def test_toolchain_download(self):
         """Test that we can download toolchains"""
         if use_network:
             with terminal.capture() as (stdout, stderr):
@@ -630,7 +630,7 @@ class TestBuild(unittest.TestCase):
                     'crosstool/files/bin/x86_64/.*/'
                     'x86_64-gcc-.*-nolibc[-_]arm-.*linux-gnueabi.tar.xz')
 
-    def testGetEnvArgs(self):
+    def test_get_env_args(self):
         """Test the GetEnvArgs() function"""
         tc = self.toolchains.select('arm')
         self.assertEqual('arm-linux-',
@@ -662,7 +662,7 @@ class TestBuild(unittest.TestCase):
         tc = self.toolchains.select('sandbox')
         self.assertEqual('', tc.get_env_args(toolchain.VAR_CROSS_COMPILE))
 
-    def testMakeEnvironment(self):
+    def test_make_environment(self):
         """Test the make_environment function"""
         os.environ.pop('CROSS_COMPILE', None)
         tc = self.toolchains.select('arm')
@@ -685,8 +685,8 @@ class TestBuild(unittest.TestCase):
         env = tc.make_environment(False)
         self.assertTrue(b'CROSS_COMPILE' not in env)
 
-    def testPrepareOutputSpace(self):
-        def _Touch(fname):
+    def test_prepare_output_space(self):
+        def _touch(fname):
             tools.write_file(os.path.join(base_dir, fname), b'')
 
         base_dir = tempfile.mkdtemp()
@@ -696,7 +696,7 @@ class TestBuild(unittest.TestCase):
                      '01_g2938abd8_title']
         to_leave = ['something_else', '01-something.patch', '01_another']
         for name in to_remove + to_leave:
-            _Touch(name)
+            _touch(name)
 
         build = builder.Builder(self.toolchains, base_dir, None, 1, 2)
         build.commits = self.commits
@@ -1069,7 +1069,7 @@ class TestBuild(unittest.TestCase):
         finally:
             os.environ['PATH'] = old_path
 
-    def testHomedir(self):
+    def test_homedir(self):
         """Test using ~ in a toolchain or toolchain-prefix section"""
         # Add some test settings
         bsettings.setup(None)
@@ -1109,7 +1109,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('', next(lines))
         self.assertEqual('##done', next(lines))
 
-    def testKconfigChangedSince(self):
+    def test_kconfig_changed_since(self):
         """Test the kconfig_changed_since() function"""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a reference file
