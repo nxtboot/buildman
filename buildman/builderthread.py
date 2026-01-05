@@ -189,6 +189,8 @@ class BuilderThread(threading.Thread):
             board rather than a thread-specific directory
         test_exception: Used for testing; True to raise an exception instead of
             reporting the build result
+        toolchain: Toolchain object to use for building, or None if not yet
+            selected
     """
     def __init__(self, builder, thread_num, mrproper, per_board_out_dir,
                  test_exception=False):
