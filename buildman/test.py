@@ -550,7 +550,7 @@ class TestBuild(unittest.TestCase):
     def test_board_two_and(self):
         """Test single board selection"""
         self.assertEqual(self.brds.select_boards(['Tester', '&', 'arm',
-                                                   'Tester' '&', 'powerpc',
+                                                   'Tester', '&', 'powerpc',
                                                    'sandbox']),
                          ({'sandbox': ['board4'],
                           'all': ['board0', 'board1', 'board2', 'board3',
