@@ -68,14 +68,13 @@ def get_action_summary(is_summary, commit_count, selected, threads, jobs):
 
     Args:
         is_summary (bool): True if this is a summary (otherwise it is building)
-        commits (list): List of commits being built
+        commit_count (int): Number of commits being built
         selected (list of Board): List of Board objects that are marked
-        step (int): Step increment through commits
         threads (int): Number of processor threads being used
         jobs (int): Number of jobs to build at once
 
     Returns:
-        Summary string.
+        str: Summary string
     """
     if commit_count:
         commit_str = f'{commit_count} commit{get_plural(commit_count)}'
@@ -87,22 +86,23 @@ def get_action_summary(is_summary, commit_count, selected, threads, jobs):
             f'{jobs} job{get_plural(jobs)} per thread)')
     return msg
 
-# pylint: disable=R0913
+# pylint: disable=R0913,R0917
 def show_actions(series, why_selected, boards_selected, output_dir,
                  board_warnings, step, threads, jobs, verbose):
     """Display a list of actions that we would take, if not a dry run.
 
     Args:
-        series: Series object
-        why_selected: Dictionary where each key is a buildman argument
-                provided by the user, and the value is the list of boards
-                brought in by that argument. For example, 'arm' might bring
-                in 400 boards, so in this case the key would be 'arm' and
-                the value would be a list of board names.
-        boards_selected: Dict of selected boards, key is target name,
-                value is Board object
+        series (Series): Series object
+        why_selected (dict): Dictionary where each key is a buildman argument
+            provided by the user, and the value is the list of boards
+            brought in by that argument. For example, 'arm' might bring
+            in 400 boards, so in this case the key would be 'arm' and
+            the value would be a list of board names.
+        boards_selected (dict): Dict of selected boards, key is target name,
+            value is Board object
         output_dir (str): Output directory for builder
-        board_warnings: List of warnings obtained from board selected
+        board_warnings (list of str): List of warnings obtained from board
+            selected
         step (int): Step increment through commits
         threads (int): Number of processor threads being used
         jobs (int): Number of jobs to build at once
@@ -121,7 +121,8 @@ def show_actions(series, why_selected, boards_selected, output_dir,
     if commits:
         for upto in range(0, len(series.commits), step):
             commit = series.commits[upto]
-            print('   ', col.build(col.YELLOW, commit.hash[:8], bright=False), end=' ')
+            print('   ', col.build(col.YELLOW, commit.hash[:8], bright=False),
+                  end=' ')
             print(commit.subject)
     print()
     for arg in why_selected:
@@ -143,11 +144,9 @@ def show_toolchain_prefix(brds, toolchains):
     the correct value for CROSS_COMPILE.
 
     Args:
-        boards: Boards object containing selected boards
-        toolchains: Toolchains object containing available toolchains
-
-    Return:
-        None on success, string error message otherwise
+        brds (Boards): Boards object containing selected boards
+        toolchains (Toolchains): Toolchains object containing available
+            toolchains
     """
     board_selected = brds.get_selected_dict()
     tc_set = set()
@@ -165,10 +164,7 @@ def show_arch(brds):
     the correct value for ARCH.
 
     Args:
-        boards: Boards object containing selected boards
-
-    Return:
-        None on success, string error message otherwise
+        brds (Boards): Boards object containing selected boards
     """
     board_selected = brds.get_selected_dict()
     arch_set = set()
@@ -251,6 +247,7 @@ def count_commits(branch, count, col, git_dir):
     return count, has_range
 
 
+# pylint: disable=R0917
 def determine_series(selected, col, git_dir, count, branch, work_in_output):
     """Determine the series which is to be built, if any
 
@@ -348,6 +345,7 @@ def do_fetch_arch(toolchains, col, fetch_arch):
     return 0
 
 
+# pylint: disable=R0917
 def get_toolchains(toolchains, col, override_toolchain, fetch_arch,
                    list_tool_chains, verbose):
     """Get toolchains object to use
@@ -383,6 +381,7 @@ def get_toolchains(toolchains, col, override_toolchain, fetch_arch,
     return toolchains
 
 
+# pylint: disable=R0917
 def get_boards_obj(output_dir, regen_board_list, maintainer_check, full_check,
                    threads, verbose):
     """Object the Boards object to use
@@ -501,6 +500,7 @@ def adjust_args(args, series, selected):
         args.show_detail = True
 
 
+# pylint: disable=R0917
 def setup_output_dir(output_dir, work_in_output, branch, no_subdirs, col,
                      in_tree, clean_dir):
     """Set up the output directory
@@ -510,9 +510,10 @@ def setup_output_dir(output_dir, work_in_output, branch, no_subdirs, col,
         work_in_output (bool): True to work in the output directory
         branch (str): Name of branch to build, or None if none
         no_subdirs (bool): True to put the output in the top-level output dir
+        col (Terminal.Color): Color object to use
         in_tree (bool): True if doing an in-tree build
-        clean_dir: Used for tests only, indicates that the existing output_dir
-            should be removed before starting the build
+        clean_dir (bool): Used for tests only, indicates that the existing
+            output_dir should be removed before starting the build
 
     Returns:
         str: Updated output directory pathname
@@ -537,8 +538,9 @@ def run_builder(builder, commits, board_selected, args):
     """Run the builder or show the summary
 
     Args:
+        builder (Builder): Builder to use
         commits (list of Commit): List of commits being built, None if no branch
-        boards_selected (dict): Dict of selected boards:
+        board_selected (dict): Dict of selected boards:
             key: target name
             value: Board object
         args (Namespace): Namespace to use
@@ -622,26 +624,26 @@ def read_procs(tmpdir=tempfile.gettempdir()):
 def check_pid(pid):
     """Check for existence of a unix PID
 
-    https://stackoverflow.com/questions/568271/how-to-check-if-there-exists-a-process-with-a-given-pid-in-python
+    See: https://stackoverflow.com/questions/568271
 
     Args:
         pid (int): PID to check
 
     Returns:
-        True if it exists, else False
+        bool: True if it exists, else False
     """
     try:
         os.kill(pid, 0)
     except OSError:
         return False
-    else:
-        return True
+    return True
 
 
 def write_procs(procs, tmpdir=tempfile.gettempdir()):
     """Write the list of running buildman processes
 
     Args:
+        procs (list of int): List of process IDs to write
         tmpdir (str): Temporary directory to use (for testing only)
     """
     running_fname = os.path.join(tmpdir, RUNNING_FNAME)
@@ -678,9 +680,9 @@ def wait_for_process_limit(limit, tmpdir=tempfile.gettempdir(),
         tmpdir (str): Temporary directory to use (for testing only)
         pid (int): Current process ID (for testing only)
     """
+    # pylint: disable=C0415
     from filelock import Timeout, FileLock
 
-    running_fname = os.path.join(tmpdir, RUNNING_FNAME)
     lock_fname = os.path.join(tmpdir, LOCK_FNAME)
     lock = FileLock(lock_fname)
 
@@ -719,26 +721,26 @@ def wait_for_process_limit(limit, tmpdir=tempfile.gettempdir(),
     tprint('starting build', newline=False)
     print_clear()
 
+# pylint: disable=R0917
 def do_buildman(args, toolchains=None, make_func=None, brds=None,
                 clean_dir=False, test_thread_exceptions=False):
     """The main control code for buildman
 
     Args:
-        args: ArgumentParser object
-        args: Command line arguments (list of strings)
-        toolchains: Toolchains to use - this should be a Toolchains()
-                object. If None, then it will be created and scanned
-        make_func: Make function to use for the builder. This is called
-                to execute 'make'. If this is None, the normal function
-                will be used, which calls the 'make' tool with suitable
-                arguments. This setting is useful for tests.
-        brds: Boards() object to use, containing a list of available
-                boards. If this is None it will be created and scanned.
-        clean_dir: Used for tests only, indicates that the existing output_dir
-            should be removed before starting the build
-        test_thread_exceptions: Uses for tests only, True to make the threads
-            raise an exception instead of reporting their result. This simulates
-            a failure in the code somewhere
+        args (Namespace): ArgumentParser object
+        toolchains (Toolchains): Toolchains to use - this should be a
+            Toolchains() object. If None, then it will be created and scanned
+        make_func (function): Make function to use for the builder. This is
+            called to execute 'make'. If this is None, the normal function
+            will be used, which calls the 'make' tool with suitable
+            arguments. This setting is useful for tests.
+        brds (Boards): Boards() object to use, containing a list of available
+            boards. If this is None it will be created and scanned.
+        clean_dir (bool): Used for tests only, indicates that the existing
+            output_dir should be removed before starting the build
+        test_thread_exceptions (bool): Uses for tests only, True to make the
+            threads raise an exception instead of reporting their result. This
+            simulates a failure in the code somewhere
     """
     # Used so testing can obtain the builder: pylint: disable=W0603
     global TEST_BUILDER

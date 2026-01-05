@@ -8,18 +8,46 @@ This module provides the BuilderThread class, which handles calling the builder
 based on the jobs provided.
 """
 
+from collections import namedtuple
 import errno
 import glob
 import io
 import os
 import shutil
-import sys
 import threading
 
 from buildman import cfgutil
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
+
+# Named tuple for run_commit() options that don't change during a job
+#
+# Members:
+#     brd (Board): Board to build
+#     work_dir (str): Directory to which the source will be checked out
+#     work_in_output (bool): Use the output directory as the work directory and
+#         don't write to a separate output directory
+#     adjust_cfg (list of str): List of changes to make to .config file before
+#         building. Each is one of (where C is either CONFIG_xxx or just xxx):
+#             C to enable C
+#             ~C to disable C
+#             C=val to set the value of C (val must have quotes if C is a
+#                 string Kconfig
+#     fragments (str): Config fragments added to defconfig
+RunRequest = namedtuple('RunRequest', ['brd', 'work_dir', 'work_in_output',
+                                       'adjust_cfg', 'fragments'])
+
+# Named tuple for _setup_build() return value
+#
+# Members:
+#     env (dict): Environment variables for the build
+#     args (list of str): Arguments to pass to make
+#     config_args (list of str): Arguments for configuration
+#     cwd (str): Current working directory for the build
+#     src_dir (str): Source directory path
+BuildSetup = namedtuple('BuildSetup', ['env', 'args', 'config_args', 'cwd',
+                                       'src_dir'])
 
 RETURN_CODE_RETRY = -1
 BASE_ELF_FILENAMES = ['u-boot', 'spl/u-boot-spl', 'tpl/u-boot-tpl']
@@ -71,6 +99,7 @@ def mkdir(dirname, parents=False):
 
     Raises:
         OSError: File already exists
+        ValueError: Trying to create the current working directory
     """
     if not dirname or os.path.exists(dirname):
         return
@@ -83,7 +112,8 @@ def mkdir(dirname, parents=False):
         if err.errno == errno.EEXIST:
             if os.path.realpath('.') == os.path.realpath(dirname):
                 raise ValueError(
-                    f"Cannot create the current working directory '{dirname}'!")
+                    f"Cannot create the current working directory "
+                    f"'{dirname}'!") from err
         else:
             raise
 
@@ -188,7 +218,10 @@ class BuilderThread(threading.Thread):
             board rather than a thread-specific directory
         test_exception: Used for testing; True to raise an exception instead of
             reporting the build result
+        toolchain: Toolchain object to use for building, or None if not yet
+            selected
     """
+    # pylint: disable=R0913
     def __init__(self, builder, thread_num, mrproper, per_board_out_dir,
                  test_exception=False):
         """Set up a new builder thread"""
@@ -219,7 +252,7 @@ class BuilderThread(threading.Thread):
                 command.run_one()
 
         Returns:
-            CommandResult object
+            CommandResult: Result of the make operation
         """
         return self.builder.do_make(commit, brd, stage, cwd, *args, **kwargs)
 
@@ -381,28 +414,26 @@ class BuilderThread(threading.Thread):
 
         return will_build, result
 
-    def _decide_dirs(self, brd, work_dir, work_in_output):
+    def _decide_dirs(self, req):
         """Decide the output directory to use
 
         Args:
-            work_dir (str): Directory to which the source will be checked out
-            work_in_output (bool): Use the output directory as the work
-                directory and don't write to a separate output directory.
+            req (RunRequest): Run request (see RunRequest for details)
 
         Returns:
             tuple:
                 out_dir (str): Output directory for the build
-                out_rel_dir (str): Output directory relatie to the current dir
+                out_rel_dir (str): Output directory relative to the current dir
         """
-        if work_in_output or self.builder.in_tree:
+        if req.work_in_output or self.builder.in_tree:
             out_rel_dir = None
-            out_dir = work_dir
+            out_dir = req.work_dir
         else:
             if self.per_board_out_dir:
-                out_rel_dir = os.path.join('..', brd.target)
+                out_rel_dir = os.path.join('..', req.brd.target)
             else:
                 out_rel_dir = 'build'
-            out_dir = os.path.join(work_dir, out_rel_dir)
+            out_dir = os.path.join(req.work_dir, out_rel_dir)
         return out_dir, out_rel_dir
 
     def _checkout(self, commit_upto, work_dir):
@@ -424,24 +455,121 @@ class BuilderThread(threading.Thread):
             commit = 'current'
         return commit
 
-    def _config_and_build(self, commit_upto, brd, work_dir, do_config, mrproper,
-                          config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                          fragments, result):
+    def _setup_build(self, req, commit_upto, out_dir, out_rel_dir):
+        """Set up the build environment and arguments
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            out_dir (str): Output directory for the build, or None to use
+               current
+            out_rel_dir (str): Output directory relative to the current dir
+
+        Returns:
+            BuildSetup: Build setup (see BuildSetup for details)
+        """
+        env = self.builder.make_environment(self.toolchain)
+        if out_dir and not os.path.exists(out_dir):
+            mkdir(out_dir)
+
+        args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
+                                              req.work_dir, commit_upto)
+        if req.brd.extended:
+            config_args = [f'{req.brd.orig_target}_defconfig']
+            for frag in req.brd.extended.fragments:
+                fname = os.path.join(f'{frag}.config')
+                config_args.append(fname)
+        else:
+            config_args = [f'{req.brd.target}_defconfig']
+        if req.fragments is not None:
+            config_args.extend(req.fragments.split(','))
+
+        _remove_old_outputs(out_dir)
+
+        return BuildSetup(env, args, config_args, cwd, src_dir)
+
+    def _reconfig_if_needed(self, req, setup, commit, config_out, cmd_list,
+                            out_dir, do_config, mrproper, result):
+        """Reconfigure the build if needed
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            setup (BuildSetup): Build setup (see BuildSetup for details)
+            commit (Commit): Commit being built
+            config_out (StringIO): Buffer for configuration output
+            cmd_list (list of str): List to add the commands to, for logging
+            out_dir (str): Output directory for the build
+            do_config (bool): True to run a make <board>_defconfig on the source
+            mrproper (bool): True to run mrproper first
+            result (CommandResult): Previous result
+
+        Returns:
+            tuple:
+                result (CommandResult): Result of the reconfiguration
+                do_config (bool): Whether config is still needed
+                cfg_file (str): Path to the .config file
+        """
+        cfg_file = os.path.join(out_dir or '', '.config')
+        if do_config or req.adjust_cfg:
+            result = self._reconfigure(
+                commit, req.brd, setup.cwd, setup.args, setup.env,
+                setup.config_args, config_out, cmd_list, mrproper)
+            do_config = False   # No need to configure next time
+            if req.adjust_cfg:
+                cfgutil.adjust_cfg_file(cfg_file, req.adjust_cfg)
+        return result, do_config, cfg_file
+
+    def _build_and_get_result(self, req, setup, commit, cmd_list, config_out,
+                              cfg_file, config_only, result):
+        """Perform the build and finalise the result
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            setup (BuildSetup): Build setup (see BuildSetup for details)
+            commit (Commit): Commit being built
+            cmd_list (list of str): List to add the commands to, for logging
+            config_out (StringIO): Buffer for configuration output
+            cfg_file (str): Path to the .config file
+            config_only (bool): Only configure the source, do not build it
+            result (CommandResult): Previous result
+
+        Returns:
+            CommandResult: Result of the build
+        """
+        if result.return_code == 0:
+            if req.adjust_cfg:
+                oldc_args = list(setup.args) + ['oldconfig']
+                oldc_result = self.make(commit, req.brd, 'oldconfig', setup.cwd,
+                                        *oldc_args, env=setup.env)
+                if oldc_result.return_code:
+                    return oldc_result
+            result = self._build(commit, req.brd, setup.cwd, setup.args,
+                                 setup.env, cmd_list, config_only)
+            if req.adjust_cfg:
+                errs = cfgutil.check_cfg_file(cfg_file, req.adjust_cfg)
+                if errs:
+                    result.stderr += errs
+                    result.return_code = 1
+        result.stderr = result.stderr.replace(setup.src_dir + '/', '')
+        if self.builder.verbose_build:
+            result.stdout = config_out.getvalue() + result.stdout
+        result.cmd_list = cmd_list
+        return result
+
+    def _config_and_build(self, req, commit_upto, do_config, mrproper,
+                          config_only, commit, out_dir, out_rel_dir, result):
         """Do the build, configuring first if necessary
 
         Args:
+            req (RunRequest): Run request (see RunRequest for details)
             commit_upto (int): Commit number to build (0...n-1)
-            brd (Board): Board to create arguments for
-            work_dir (str): Directory to which the source will be checked out
             do_config (bool): True to run a make <board>_defconfig on the source
             mrproper (bool): True to run mrproper first
             config_only (bool): Only configure the source, do not build it
-            adjust_cfg (list of str): See the cfgutil module and run_commit()
-            commit (Commit): Commit only being built
+            commit (Commit): Commit being built
             out_dir (str): Output directory for the build, or None to use
                current
-            out_rel_dir (str): Output directory relatie to the current dir
-            fragments (str): config fragments added to defconfig
+            out_rel_dir (str): Output directory relative to the current dir
             result (CommandResult): Previous result
 
         Returns:
@@ -450,134 +578,225 @@ class BuilderThread(threading.Thread):
                 do_config (bool): indicates whether 'make config' is needed on
                     the next incremental build
         """
-        # Set up the environment and command line
-        env = self.builder.make_environment(self.toolchain)
-        if out_dir and not os.path.exists(out_dir):
-            mkdir(out_dir)
+        setup = self._setup_build(req, commit_upto, out_dir, out_rel_dir)
 
-        args, cwd, src_dir = self._build_args(brd, out_dir, out_rel_dir,
-                                              work_dir, commit_upto)
-        if brd.extended:
-            config_args = [f'{brd.orig_target}_defconfig']
-            for frag in brd.extended.fragments:
-                fname = os.path.join(f'{frag}.config')
-                config_args.append(fname)
-        else:
-            config_args = [f'{brd.target}_defconfig']
-        if fragments != None:
-            config_args.extend(fragments.split(','))
         config_out = io.StringIO()
-
-        _remove_old_outputs(out_dir)
-
-        # If we need to reconfigure, do that now
-        cfg_file = os.path.join(out_dir or '', '.config')
         cmd_list = []
-        if do_config or adjust_cfg:
-            result = self._reconfigure(
-                commit, brd, cwd, args, env, config_args, config_out, cmd_list,
-                mrproper)
-            do_config = False   # No need to configure next time
-            if adjust_cfg:
-                cfgutil.adjust_cfg_file(cfg_file, adjust_cfg)
 
-        # Now do the build, if everything looks OK
-        if result.return_code == 0:
-            if adjust_cfg:
-                oldc_args = list(args) + ['oldconfig']
-                oldc_result = self.make(commit, brd, 'oldconfig', cwd,
-                                        *oldc_args, env=env)
-                if oldc_result.return_code:
-                    return oldc_result
-            result = self._build(commit, brd, cwd, args, env, cmd_list,
-                                 config_only)
-            if adjust_cfg:
-                errs = cfgutil.check_cfg_file(cfg_file, adjust_cfg)
-                if errs:
-                    result.stderr += errs
-                    result.return_code = 1
-        result.stderr = result.stderr.replace(src_dir + '/', '')
-        if self.builder.verbose_build:
-            result.stdout = config_out.getvalue() + result.stdout
-        result.cmd_list = cmd_list
+        result, do_config, cfg_file = self._reconfig_if_needed(
+            req, setup, commit, config_out, cmd_list, out_dir, do_config,
+            mrproper, result)
+
+        result = self._build_and_get_result(
+            req, setup, commit, cmd_list, config_out, cfg_file, config_only,
+            result)
+
         return result, do_config
 
-    def run_commit(self, commit_upto, brd, work_dir, do_config, mrproper,
-                   config_only, force_build, force_build_failures,
-                   work_in_output, adjust_cfg, fragments):
+    def _do_build(self, req, commit_upto, do_config, mrproper, config_only,
+                  out_dir, out_rel_dir, result):
+        """Perform a build if a toolchain can be obtained
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            do_config (bool): True to run a make <board>_defconfig on the source
+            mrproper (bool): True to run mrproper first
+            config_only (bool): Only configure the source, do not build it
+            out_dir (str): Output directory for the build
+            out_rel_dir (str): Output directory relative to the current dir
+            result (CommandResult): Previous result
+
+        Returns:
+            tuple:
+                result (CommandResult): Result of the build
+                do_config (bool): Whether config is needed next time
+                kconfig_reconfig (bool): Whether Kconfig triggered a reconfig
+        """
+        kconfig_reconfig = False
+
+        # We are going to have to build it. First, get a toolchain
+        if not self.toolchain:
+            try:
+                self.toolchain = self.builder.toolchains.select(req.brd.arch)
+            except ValueError as err:
+                result.return_code = 10
+                result.stdout = ''
+                result.stderr = f'Tool chain error for {req.brd.arch}: {err}'
+
+        if self.toolchain:
+            commit = self._checkout(commit_upto, req.work_dir)
+
+            # Check if Kconfig files have changed since last config
+            if self.builder.kconfig_check:
+                config_file = os.path.join(out_dir, '.config')
+                if kconfig_changed_since(config_file, req.work_dir,
+                                         req.brd.target):
+                    kconfig_reconfig = True
+                    do_config = True
+
+            result, do_config = self._config_and_build(
+                req, commit_upto, do_config, mrproper, config_only,
+                commit, out_dir, out_rel_dir, result)
+
+        result.already_done = False
+        result.kconfig_reconfig = kconfig_reconfig
+        return result, do_config, kconfig_reconfig
+
+    def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
+                   force_build, force_build_failures):
         """Build a particular commit.
 
         If the build is already done, and we are not forcing a build, we skip
         the build and just return the previously-saved results.
 
         Args:
+            req (RunRequest): Run request (see RunRequest for details)
             commit_upto (int): Commit number to build (0...n-1)
-            brd (Board): Board to build
-            work_dir (str): Directory to which the source will be checked out
             do_config (bool): True to run a make <board>_defconfig on the source
             mrproper (bool): True to run mrproper first
             config_only (bool): Only configure the source, do not build it
             force_build (bool): Force a build even if one was previously done
-            force_build_failures (bool): Force a bulid if the previous result
+            force_build_failures (bool): Force a build if the previous result
                 showed failure
-            work_in_output (bool) : Use the output directory as the work
-                directory and don't write to a separate output directory.
-            adjust_cfg (list of str): List of changes to make to .config file
-                before building. Each is one of (where C is either CONFIG_xxx
-                or just xxx):
-                     C to enable C
-                     ~C to disable C
-                     C=val to set the value of C (val must have quotes if C is
-                         a string Kconfig
-            fragments (str): config fragments added to defconfig
 
         Returns:
-            tuple containing:
-                - CommandResult object containing the results of the build
-                - boolean indicating whether 'make config' is still needed
+            tuple:
+                CommandResult: Results of the build
+                bool: Indicates whether 'make config' is still needed
         """
         # Create a default result - it will be overwritte by the call to
         # self.make() below, in the event that we do a build.
-        out_dir, out_rel_dir = self._decide_dirs(brd, work_dir, work_in_output)
+        out_dir, out_rel_dir = self._decide_dirs(req)
 
         # Check if the job was already completed last time
-        will_build, result = self._read_done_file(commit_upto, brd, force_build,
+        will_build, result = self._read_done_file(commit_upto, req.brd,
+                                                  force_build,
                                                   force_build_failures)
 
-        kconfig_reconfig = False
         if will_build:
-            # We are going to have to build it. First, get a toolchain
-            if not self.toolchain:
-                try:
-                    self.toolchain = self.builder.toolchains.select(brd.arch)
-                except ValueError as err:
-                    result.return_code = 10
-                    result.stdout = ''
-                    result.stderr = f'Tool chain error for {brd.arch}: {str(err)}'
-
-            if self.toolchain:
-                commit = self._checkout(commit_upto, work_dir)
-
-                # Check if Kconfig files have changed since last config
-                if self.builder.kconfig_check:
-                    config_file = os.path.join(out_dir, '.config')
-                    if kconfig_changed_since(config_file, work_dir,
-                                             brd.target):
-                        kconfig_reconfig = True
-                        do_config = True
-
-                result, do_config = self._config_and_build(
-                    commit_upto, brd, work_dir, do_config, mrproper,
-                    config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                    fragments, result)
-            result.already_done = False
-            result.kconfig_reconfig = kconfig_reconfig
+            result, do_config, _ = self._do_build(
+                req, commit_upto, do_config, mrproper, config_only,
+                out_dir, out_rel_dir, result)
 
         result.toolchain = self.toolchain
-        result.brd = brd
+        result.brd = req.brd
         result.commit_upto = commit_upto
         result.out_dir = out_dir
         return result, do_config
+
+    def _process_elf_file(self, result, fname, env):
+        """Process an ELF file to extract size information
+
+        Runs nm, objdump, and size on the ELF file and writes the output
+        to appropriate files.
+
+        Args:
+            result (CommandResult): Result containing build information
+            fname (str): ELF filename to process
+            env (dict): Environment variables for the commands
+
+        Returns:
+            str: Size line with rodata size appended, or None if size failed
+        """
+        cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
+        nm_result = command.run_one(*cmd, capture=True,
+                                    capture_stderr=True,
+                                    cwd=result.out_dir,
+                                    raise_on_error=False, env=env)
+        if nm_result.stdout:
+            nm_fname = self.builder.get_func_sizes_file(
+                result.commit_upto, result.brd.target, fname)
+            with open(nm_fname, 'w', encoding='utf-8') as outf:
+                print(nm_result.stdout, end=' ', file=outf)
+
+        cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
+        dump_result = command.run_one(*cmd, capture=True,
+                                      capture_stderr=True,
+                                      cwd=result.out_dir,
+                                      raise_on_error=False, env=env)
+        rodata_size = ''
+        if dump_result.stdout:
+            objdump = self.builder.get_objdump_file(result.commit_upto,
+                            result.brd.target, fname)
+            with open(objdump, 'w', encoding='utf-8') as outf:
+                print(dump_result.stdout, end=' ', file=outf)
+            for line in dump_result.stdout.splitlines():
+                fields = line.split()
+                if len(fields) > 5 and fields[1] == '.rodata':
+                    rodata_size = fields[2]
+
+        cmd = [f'{self.toolchain.cross}size', fname]
+        size_result = command.run_one(*cmd, capture=True,
+                                      capture_stderr=True,
+                                      cwd=result.out_dir,
+                                      raise_on_error=False, env=env)
+        if size_result.stdout:
+            return size_result.stdout.splitlines()[1] + ' ' + rodata_size
+        return None
+
+    def _write_toolchain_result(self, result, done_file, build_dir,
+                                maybe_aborted, work_in_output):
+        """Write build result and toolchain information
+
+        Args:
+            result (CommandResult): Result to write
+            done_file (str): Path to the 'done' file
+            build_dir (str): Build directory path
+            maybe_aborted (bool): True if the build may have been aborted
+            work_in_output (bool): Use the output directory as the work
+                directory and don't write to a separate output directory
+        """
+        # Write the build result and toolchain information.
+        with open(done_file, 'w', encoding='utf-8') as outf:
+            if maybe_aborted:
+                # Special code to indicate we need to retry
+                outf.write(f'{RETURN_CODE_RETRY}')
+            else:
+                outf.write(f'{result.return_code}')
+        with open(os.path.join(build_dir, 'toolchain'), 'w',
+                  encoding='utf-8') as outf:
+            print('gcc', result.toolchain.gcc, file=outf)
+            print('path', result.toolchain.path, file=outf)
+            print('cross', result.toolchain.cross, file=outf)
+            print('arch', result.toolchain.arch, file=outf)
+            outf.write(f'{result.return_code}')
+
+        # Write out the image and function size information and an objdump
+        env = self.builder.make_environment(self.toolchain)
+        with open(os.path.join(build_dir, 'out-env'), 'wb') as outf:
+            for var in sorted(env.keys()):
+                outf.write(b'%s="%s"' % (var, env[var]))
+
+        with open(os.path.join(build_dir, 'out-cmd'), 'w',
+                  encoding='utf-8') as outf:
+            for cmd in result.cmd_list:
+                print(' '.join(cmd), file=outf)
+
+        lines = []
+        for fname in BASE_ELF_FILENAMES:
+            line = self._process_elf_file(result, fname, env)
+            if line:
+                lines.append(line)
+
+        # Extract the environment from U-Boot and dump it out
+        cmd = [f'{self.toolchain.cross}objcopy', '-O', 'binary',
+               '-j', '.rodata.default_environment',
+               'env/built-in.o', 'uboot.env']
+        command.run_one(*cmd, capture=True, capture_stderr=True,
+                        cwd=result.out_dir, raise_on_error=False, env=env)
+        if not work_in_output:
+            copy_files(result.out_dir, build_dir, '', ['uboot.env'])
+
+        # Write out the image sizes file. This is similar to the output
+        # of binutil's 'size' utility, but it omits the header line and
+        # adds an additional hex value at the end of each line for the
+        # rodata size
+        if lines:
+            sizes = self.builder.get_sizes_file(result.commit_upto,
+                            result.brd.target)
+            with open(sizes, 'w', encoding='utf-8') as outf:
+                print('\n'.join(lines), file=outf)
 
     def _write_result(self, result, keep_outputs, work_in_output):
         """Write a built result to the output directory.
@@ -624,88 +843,8 @@ class BuilderThread(threading.Thread):
         done_file = self.builder.get_done_file(result.commit_upto,
                 result.brd.target)
         if result.toolchain:
-            # Write the build result and toolchain information.
-            with open(done_file, 'w', encoding='utf-8') as outf:
-                if maybe_aborted:
-                    # Special code to indicate we need to retry
-                    outf.write(f'{RETURN_CODE_RETRY}')
-                else:
-                    outf.write(f'{result.return_code}')
-            with open(os.path.join(build_dir, 'toolchain'), 'w',
-                      encoding='utf-8') as outf:
-                print('gcc', result.toolchain.gcc, file=outf)
-                print('path', result.toolchain.path, file=outf)
-                print('cross', result.toolchain.cross, file=outf)
-                print('arch', result.toolchain.arch, file=outf)
-                outf.write(f'{result.return_code}')
-
-            # Write out the image and function size information and an objdump
-            env = self.builder.make_environment(self.toolchain)
-            with open(os.path.join(build_dir, 'out-env'), 'wb') as outf:
-                for var in sorted(env.keys()):
-                    outf.write(b'%s="%s"' % (var, env[var]))
-
-            with open(os.path.join(build_dir, 'out-cmd'), 'w',
-                      encoding='utf-8') as outf:
-                for cmd in result.cmd_list:
-                    print(' '.join(cmd), file=outf)
-
-            lines = []
-            for fname in BASE_ELF_FILENAMES:
-                cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
-                nm_result = command.run_one(*cmd, capture=True,
-                                            capture_stderr=True,
-                                            cwd=result.out_dir,
-                                            raise_on_error=False, env=env)
-                if nm_result.stdout:
-                    nm_fname = self.builder.get_func_sizes_file(
-                        result.commit_upto, result.brd.target, fname)
-                    with open(nm_fname, 'w', encoding='utf-8') as outf:
-                        print(nm_result.stdout, end=' ', file=outf)
-
-                cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
-                dump_result = command.run_one(*cmd, capture=True,
-                                              capture_stderr=True,
-                                              cwd=result.out_dir,
-                                              raise_on_error=False, env=env)
-                rodata_size = ''
-                if dump_result.stdout:
-                    objdump = self.builder.get_objdump_file(result.commit_upto,
-                                    result.brd.target, fname)
-                    with open(objdump, 'w', encoding='utf-8') as outf:
-                        print(dump_result.stdout, end=' ', file=outf)
-                    for line in dump_result.stdout.splitlines():
-                        fields = line.split()
-                        if len(fields) > 5 and fields[1] == '.rodata':
-                            rodata_size = fields[2]
-
-                cmd = [f'{self.toolchain.cross}size', fname]
-                size_result = command.run_one(*cmd, capture=True,
-                                              capture_stderr=True,
-                                              cwd=result.out_dir,
-                                              raise_on_error=False, env=env)
-                if size_result.stdout:
-                    lines.append(size_result.stdout.splitlines()[1] + ' ' +
-                                 rodata_size)
-
-            # Extract the environment from U-Boot and dump it out
-            cmd = [f'{self.toolchain.cross}objcopy', '-O', 'binary',
-                   '-j', '.rodata.default_environment',
-                   'env/built-in.o', 'uboot.env']
-            command.run_one(*cmd, capture=True, capture_stderr=True,
-                            cwd=result.out_dir, raise_on_error=False, env=env)
-            if not work_in_output:
-                copy_files(result.out_dir, build_dir, '', ['uboot.env'])
-
-            # Write out the image sizes file. This is similar to the output
-            # of binutil's 'size' utility, but it omits the header line and
-            # adds an additional hex value at the end of each line for the
-            # rodata size
-            if lines:
-                sizes = self.builder.get_sizes_file(result.commit_upto,
-                                result.brd.target)
-                with open(sizes, 'w', encoding='utf-8') as outf:
-                    print('\n'.join(lines), file=outf)
+            self._write_toolchain_result(result, done_file, build_dir,
+                                         maybe_aborted, work_in_output)
         else:
             # Indicate that the build failure due to lack of toolchain
             tools.write_file(done_file, '2\n', binary=False)
@@ -757,29 +896,29 @@ class BuilderThread(threading.Thread):
         brd = job.brd
         work_dir = self.builder.get_thread_dir(self.thread_num)
         self.toolchain = None
+        req = RunRequest(brd, work_dir, job.work_in_output, job.adjust_cfg,
+                         job.fragments)
         if job.commits:
             # Run 'make board_defconfig' on the first commit
             do_config = True
             commit_upto  = 0
             force_build = False
             for commit_upto in range(0, len(job.commits), job.step):
-                result, request_config = self.run_commit(commit_upto, brd,
-                        work_dir, do_config, self.mrproper,
+                result, request_config = self.run_commit(
+                        req, commit_upto, do_config, self.mrproper,
                         self.builder.config_only,
                         force_build or self.builder.force_build,
-                        self.builder.force_build_failures,
-                        job.work_in_output, job.adjust_cfg, job.fragments)
+                        self.builder.force_build_failures)
                 failed = result.return_code
                 did_config = do_config
                 if failed and not do_config and not self.mrproper:
                     # If our incremental build failed, try building again
                     # with a reconfig.
                     if self.builder.force_config_on_failure:
-                        result, request_config = self.run_commit(commit_upto,
-                            brd, work_dir, True,
+                        result, request_config = self.run_commit(
+                            req, commit_upto, True,
                             self.mrproper or self.builder.fallback_mrproper,
-                            False, True, False, job.work_in_output,
-                            job.adjust_cfg, job.fragments)
+                            False, True, False)
                         did_config = True
                 if not self.builder.force_reconfig:
                     do_config = request_config
@@ -822,17 +961,16 @@ class BuilderThread(threading.Thread):
                 self._send_result(result)
         else:
             # Just build the currently checked-out build
-            result, request_config = self.run_commit(None, brd, work_dir, True,
-                        self.mrproper, self.builder.config_only, True,
-                        self.builder.force_build_failures, job.work_in_output,
-                        job.adjust_cfg, job.fragments)
+            result, request_config = self.run_commit(
+                        req, None, True, self.mrproper,
+                        self.builder.config_only, True,
+                        self.builder.force_build_failures)
             failed = result.return_code
             if failed and not self.mrproper:
-                result, request_config = self.run_commit(None, brd, work_dir,
-                            True, self.builder.fallback_mrproper,
+                result, request_config = self.run_commit(
+                            req, None, True, self.builder.fallback_mrproper,
                             self.builder.config_only, True,
-                            self.builder.force_build_failures,
-                            job.work_in_output, job.adjust_cfg, job.fragments)
+                            self.builder.force_build_failures)
 
             result.commit_upto = 0
             self._write_result(result, job.keep_outputs, job.work_in_output)
@@ -848,7 +986,7 @@ class BuilderThread(threading.Thread):
             job = self.builder.queue.get()
             try:
                 self.run_job(job)
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=W0718
                 print('Thread exception (use -T0 to run without threads):',
                       exc)
                 self.builder.thread_exceptions.append(exc)
