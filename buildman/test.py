@@ -204,20 +204,20 @@ class TestBuild(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.base_dir)
 
-    def make(self, commit, brd, _stage, *_args, **_kwargs):
+    def make(self, cmt, brd, _stage, *_args, **_kwargs):
         """Mock make function for testing build output"""
         result = command.CommandResult()
         boardnum = int(brd.target[-1])
         result.return_code = 0
         result.stderr = ''
         result.stdout = (f'This is the test output for board {brd.target}, '
-                         f'commit {commit.hash}')
-        if ((boardnum >= 1 and boardnum >= commit.sequence) or
-                boardnum == 4 and commit.sequence == 6):
-            result.return_code = commit.return_code
-            result.stderr = (''.join(commit.error_list)
+                         f'commit {cmt.hash}')
+        if ((boardnum >= 1 and boardnum >= cmt.sequence) or
+                boardnum == 4 and cmt.sequence == 6):
+            result.return_code = cmt.return_code
+            result.stderr = (''.join(cmt.error_list)
                 % {'basedir' : self.base_dir + '/.bm-work/00/'})
-        elif commit.sequence < 6:
+        elif cmt.sequence < 6:
             result.stderr = migration
 
         result.combined = result.stdout + result.stderr
