@@ -204,7 +204,7 @@ class TestBuild(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.base_dir)
 
-    def make(self, commit, brd, stage, *args, **kwargs):
+    def make(self, commit, brd, _stage, *_args, **_kwargs):
         """Mock make function for testing build output"""
         result = command.CommandResult()
         boardnum = int(brd.target[-1])
@@ -868,7 +868,7 @@ class TestBuild(unittest.TestCase):
             self.valid_pids = [pid for pid in self.valid_pids
                                if pid != self.finish_pid]
 
-    def kill(self, pid, signal):
+    def kill(self, pid, _signal):
         """Mock kill function that validates process IDs"""
         if pid not in self.valid_pids:
             raise OSError('Invalid PID')
