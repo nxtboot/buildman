@@ -73,7 +73,7 @@ main.c:260:6: warning: unused variable 'joe' [-Wunused-variable]
 ''',
     '''main.c: In function 'main_loop2':
 main.c:295:2: error: 'fred' undeclared (first use in this function)
-main.c:295:2: note: each undeclared identifier is reported only once for each function it appears in
+main.c:295:2: note: each undeclared identifier is reported only once
 make[1]: *** [main.o] Error 1
 make: *** [common/libcommon.o] Error 2
 Make failed
@@ -84,25 +84,27 @@ without "ranges" or child "reg" property
 ''',
     '''powerpc-linux-ld: warning: dot moved backwards before `.bss'
 powerpc-linux-ld: warning: dot moved backwards before `.bss'
-powerpc-linux-ld: u-boot: section .text lma 0xfffc0000 overlaps previous sections
-powerpc-linux-ld: u-boot: section .rodata lma 0xfffef3ec overlaps previous sections
-powerpc-linux-ld: u-boot: section .reloc lma 0xffffa400 overlaps previous sections
-powerpc-linux-ld: u-boot: section .data lma 0xffffcd38 overlaps previous sections
-powerpc-linux-ld: u-boot: section .u_boot_cmd lma 0xffffeb40 overlaps previous sections
-powerpc-linux-ld: u-boot: section .bootpg lma 0xfffff198 overlaps previous sections
+powerpc-linux-ld: u-boot: section .text lma 0xfffc0000 overlaps previous
+powerpc-linux-ld: u-boot: section .rodata lma 0xfffef3ec overlaps previous
+powerpc-linux-ld: u-boot: section .reloc lma 0xffffa400 overlaps previous
+powerpc-linux-ld: u-boot: section .data lma 0xffffcd38 overlaps previous
+powerpc-linux-ld: u-boot: section .u_boot_cmd lma 0xffffeb40 overlaps previous
+powerpc-linux-ld: u-boot: section .bootpg lma 0xfffff198 overlaps previous
 ''',
    '''In file included from %(basedir)sarch/sandbox/cpu/cpu.c:9:0:
-%(basedir)sarch/sandbox/include/asm/state.h:44:0: warning: "xxxx" redefined [enabled by default]
-%(basedir)sarch/sandbox/include/asm/state.h:43:0: note: this is the location of the previous definition
+%(basedir)sarch/sandbox/include/asm/state.h:44:0: warning: "xxxx" redefined
+%(basedir)sarch/sandbox/include/asm/state.h:43:0: note: this is the location \
+of the previous definition
 %(basedir)sarch/sandbox/cpu/cpu.c: In function 'do_reset':
 %(basedir)sarch/sandbox/cpu/cpu.c:27:1: error: unknown type name 'blah'
-%(basedir)sarch/sandbox/cpu/cpu.c:28:12: error: expected declaration specifiers or '...' before numeric constant
+%(basedir)sarch/sandbox/cpu/cpu.c:28:12: error: expected specifiers before num
 make[2]: *** [arch/sandbox/cpu/cpu.o] Error 1
 make[1]: *** [arch/sandbox/cpu] Error 2
 make[1]: *** Waiting for unfinished jobs....
 In file included from %(basedir)scommon/board_f.c:55:0:
-%(basedir)sarch/sandbox/include/asm/state.h:44:0: warning: "xxxx" redefined [enabled by default]
-%(basedir)sarch/sandbox/include/asm/state.h:43:0: note: this is the location of the previous definition
+%(basedir)sarch/sandbox/include/asm/state.h:44:0: warning: "xxxx" redefined
+%(basedir)sarch/sandbox/include/asm/state.h:43:0: note: this is the location \
+of the previous definition
 make: *** [sub-make] Error 2
 '''
 ]
@@ -121,11 +123,11 @@ COMMITS = [
 ]
 
 BOARDS = [
-    ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 1', 'board0',  ''],
+    ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 1', 'board0', ''],
     ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 2', 'board1', ''],
-    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC board 1', 'board2', ''],
-    ['Active', 'powerpc', 'mpc83xx', '', 'Tester', 'PowerPC board 2', 'board3', ''],
-    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board', 'board4', ''],
+    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC 1', 'board2', ''],
+    ['Active', 'powerpc', 'mpc83xx', '', 'Tester', 'PowerPC 2', 'board3', ''],
+    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox', 'board4', ''],
 ]
 
 BASE_DIR = 'base'
@@ -430,8 +432,8 @@ class TestBuild(unittest.TestCase):
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
         else:
-            self.assert_summary(next(lines).text, 'arm', '', ['board0', 'board1'],
-                               outcome=OUTCOME_OK)
+            self.assert_summary(next(lines).text, 'arm', '',
+                               ['board0', 'board1'], outcome=OUTCOME_OK)
             self.assert_summary(next(lines).text, 'powerpc', '',
                                ['board2', 'board3'], outcome=OUTCOME_OK)
             self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
@@ -848,7 +850,8 @@ class TestBuild(unittest.TestCase):
         # Check failure to add CONFIG value
         result = cfgutil.check_cfg_lines([], {'MARY':'MARY="mary"'})
         self.assertEqual([
-            ['MARY="mary"', 'Missing expected line: CONFIG_MARY="mary"']], result)
+            ['MARY="mary"', 'Missing expected line: CONFIG_MARY="mary"']],
+            result)
 
     def get_procs(self):
         """Get list of running process IDs from the running file"""
