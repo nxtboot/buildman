@@ -2,6 +2,8 @@
 # Copyright (c) 2012 The Chromium OS Authors.
 #
 
+"""Tests for the buildman build tool"""
+
 import os
 import shutil
 import sys
@@ -203,6 +205,7 @@ class TestBuild(unittest.TestCase):
         shutil.rmtree(self.base_dir)
 
     def make(self, commit, brd, stage, *args, **kwargs):
+        """Mock make function for testing build output"""
         result = command.CommandResult()
         boardnum = int(brd.target[-1])
         result.return_code = 0
@@ -221,6 +224,7 @@ class TestBuild(unittest.TestCase):
         return result
 
     def assert_summary(self, text, arch, plus, brds, outcome=OUTCOME_ERR):
+        """Check that the summary text matches expectations"""
         col = self._col
         expected_colour = (col.GREEN if outcome == OUTCOME_OK else
                            col.YELLOW if outcome == OUTCOME_WARN else col.RED)
@@ -571,6 +575,7 @@ class TestBuild(unittest.TestCase):
                                                    'sandbox']),
                          ({'all': ['board4'], 'sandbox': ['board4']}, []))
     def check_dirs(self, build, dirname):
+        """Check that the output directories are correct"""
         self.assertEqual(f'base{dirname}', build.get_output_dir(1))
         self.assertEqual(f'base{dirname}/fred', build.get_build_dir(1, 'fred'))
         self.assertEqual(f'base{dirname}/fred/done',
@@ -583,6 +588,7 @@ class TestBuild(unittest.TestCase):
                          build.get_err_file(1, 'fred'))
 
     def test_output_dir(self):
+        """Test output-directory naming for a commit"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False)
         build.commits = self.commits
@@ -592,6 +598,7 @@ class TestBuild(unittest.TestCase):
         self.check_dirs(build, dirname)
 
     def test_output_dir_current(self):
+        """Test output-directory naming for current source"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False)
         build.commits = None
@@ -599,6 +606,7 @@ class TestBuild(unittest.TestCase):
         self.check_dirs(build, '/current')
 
     def test_output_dir_no_subdirs(self):
+        """Test output-directory naming without subdirectories"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
                                 checkout=False, show_unknown=False,
                                 no_subdirs=True)
@@ -607,6 +615,7 @@ class TestBuild(unittest.TestCase):
         self.check_dirs(build, '')
 
     def test_toolchain_aliases(self):
+        """Test that toolchain aliases are handled correctly"""
         self.assertTrue(self.toolchains.select('arm') != None)
         with self.assertRaises(ValueError):
             self.toolchains.select('no-arch')
@@ -686,6 +695,7 @@ class TestBuild(unittest.TestCase):
         self.assertTrue(b'CROSS_COMPILE' not in env)
 
     def test_prepare_output_space(self):
+        """Test preparation of output-directory space"""
         def _touch(fname):
             tools.write_file(os.path.join(base_dir, fname), b'')
 
@@ -839,14 +849,17 @@ class TestBuild(unittest.TestCase):
             ['MARY="mary"', 'Missing expected line: CONFIG_MARY="mary"']], result)
 
     def get_procs(self):
+        """Get list of running process IDs from the running file"""
         running_fname = os.path.join(self.base_dir, control.RUNNING_FNAME)
         items = tools.read_file(running_fname, binary=False).split()
         return [int(x) for x in items]
 
     def get_time(self):
+        """Get current mock time for testing"""
         return self.cur_time
 
     def inc_time(self, amount):
+        """Increment mock time, handling process exit if scheduled"""
         self.cur_time += amount
 
         # Handle a process exiting
@@ -855,6 +868,7 @@ class TestBuild(unittest.TestCase):
                                if pid != self.finish_pid]
 
     def kill(self, pid, signal):
+        """Mock kill function that validates process IDs"""
         if pid not in self.valid_pids:
             raise OSError('Invalid PID')
 
