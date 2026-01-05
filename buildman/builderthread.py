@@ -8,6 +8,7 @@ This module provides the BuilderThread class, which handles calling the builder
 based on the jobs provided.
 """
 
+from collections import namedtuple
 import errno
 import glob
 import io
@@ -19,6 +20,23 @@ from buildman import cfgutil
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
+
+# Named tuple for run_commit() options that don't change during a job
+#
+# Members:
+#     brd (Board): Board to build
+#     work_dir (str): Directory to which the source will be checked out
+#     work_in_output (bool): Use the output directory as the work directory and
+#         don't write to a separate output directory
+#     adjust_cfg (list of str): List of changes to make to .config file before
+#         building. Each is one of (where C is either CONFIG_xxx or just xxx):
+#             C to enable C
+#             ~C to disable C
+#             C=val to set the value of C (val must have quotes if C is a
+#                 string Kconfig
+#     fragments (str): Config fragments added to defconfig
+RunRequest = namedtuple('RunRequest', ['brd', 'work_dir', 'work_in_output',
+                                       'adjust_cfg', 'fragments'])
 
 RETURN_CODE_RETRY = -1
 BASE_ELF_FILENAMES = ['u-boot', 'spl/u-boot-spl', 'tpl/u-boot-tpl']
@@ -384,28 +402,26 @@ class BuilderThread(threading.Thread):
 
         return will_build, result
 
-    def _decide_dirs(self, brd, work_dir, work_in_output):
+    def _decide_dirs(self, req):
         """Decide the output directory to use
 
         Args:
-            work_dir (str): Directory to which the source will be checked out
-            work_in_output (bool): Use the output directory as the work
-                directory and don't write to a separate output directory.
+            req (RunRequest): Run request (see RunRequest for details)
 
         Returns:
             tuple:
                 out_dir (str): Output directory for the build
-                out_rel_dir (str): Output directory relatie to the current dir
+                out_rel_dir (str): Output directory relative to the current dir
         """
-        if work_in_output or self.builder.in_tree:
+        if req.work_in_output or self.builder.in_tree:
             out_rel_dir = None
-            out_dir = work_dir
+            out_dir = req.work_dir
         else:
             if self.per_board_out_dir:
-                out_rel_dir = os.path.join('..', brd.target)
+                out_rel_dir = os.path.join('..', req.brd.target)
             else:
                 out_rel_dir = 'build'
-            out_dir = os.path.join(work_dir, out_rel_dir)
+            out_dir = os.path.join(req.work_dir, out_rel_dir)
         return out_dir, out_rel_dir
 
     def _checkout(self, commit_upto, work_dir):
@@ -427,24 +443,20 @@ class BuilderThread(threading.Thread):
             commit = 'current'
         return commit
 
-    def _config_and_build(self, commit_upto, brd, work_dir, do_config, mrproper,
-                          config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                          fragments, result):
+    def _config_and_build(self, req, commit_upto, do_config, mrproper,
+                          config_only, commit, out_dir, out_rel_dir, result):
         """Do the build, configuring first if necessary
 
         Args:
+            req (RunRequest): Run request (see RunRequest for details)
             commit_upto (int): Commit number to build (0...n-1)
-            brd (Board): Board to create arguments for
-            work_dir (str): Directory to which the source will be checked out
             do_config (bool): True to run a make <board>_defconfig on the source
             mrproper (bool): True to run mrproper first
             config_only (bool): Only configure the source, do not build it
-            adjust_cfg (list of str): See the cfgutil module and run_commit()
-            commit (Commit): Commit only being built
+            commit (Commit): Commit being built
             out_dir (str): Output directory for the build, or None to use
                current
-            out_rel_dir (str): Output directory relatie to the current dir
-            fragments (str): config fragments added to defconfig
+            out_rel_dir (str): Output directory relative to the current dir
             result (CommandResult): Previous result
 
         Returns:
@@ -458,17 +470,17 @@ class BuilderThread(threading.Thread):
         if out_dir and not os.path.exists(out_dir):
             mkdir(out_dir)
 
-        args, cwd, src_dir = self._build_args(brd, out_dir, out_rel_dir,
-                                              work_dir, commit_upto)
-        if brd.extended:
-            config_args = [f'{brd.orig_target}_defconfig']
-            for frag in brd.extended.fragments:
+        args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
+                                              req.work_dir, commit_upto)
+        if req.brd.extended:
+            config_args = [f'{req.brd.orig_target}_defconfig']
+            for frag in req.brd.extended.fragments:
                 fname = os.path.join(f'{frag}.config')
                 config_args.append(fname)
         else:
-            config_args = [f'{brd.target}_defconfig']
-        if fragments is not None:
-            config_args.extend(fragments.split(','))
+            config_args = [f'{req.brd.target}_defconfig']
+        if req.fragments is not None:
+            config_args.extend(req.fragments.split(','))
         config_out = io.StringIO()
 
         _remove_old_outputs(out_dir)
@@ -476,26 +488,26 @@ class BuilderThread(threading.Thread):
         # If we need to reconfigure, do that now
         cfg_file = os.path.join(out_dir or '', '.config')
         cmd_list = []
-        if do_config or adjust_cfg:
+        if do_config or req.adjust_cfg:
             result = self._reconfigure(
-                commit, brd, cwd, args, env, config_args, config_out, cmd_list,
-                mrproper)
+                commit, req.brd, cwd, args, env, config_args, config_out,
+                cmd_list, mrproper)
             do_config = False   # No need to configure next time
-            if adjust_cfg:
-                cfgutil.adjust_cfg_file(cfg_file, adjust_cfg)
+            if req.adjust_cfg:
+                cfgutil.adjust_cfg_file(cfg_file, req.adjust_cfg)
 
         # Now do the build, if everything looks OK
         if result.return_code == 0:
-            if adjust_cfg:
+            if req.adjust_cfg:
                 oldc_args = list(args) + ['oldconfig']
-                oldc_result = self.make(commit, brd, 'oldconfig', cwd,
+                oldc_result = self.make(commit, req.brd, 'oldconfig', cwd,
                                         *oldc_args, env=env)
                 if oldc_result.return_code:
                     return oldc_result
-            result = self._build(commit, brd, cwd, args, env, cmd_list,
+            result = self._build(commit, req.brd, cwd, args, env, cmd_list,
                                  config_only)
-            if adjust_cfg:
-                errs = cfgutil.check_cfg_file(cfg_file, adjust_cfg)
+            if req.adjust_cfg:
+                errs = cfgutil.check_cfg_file(cfg_file, req.adjust_cfg)
                 if errs:
                     result.stderr += errs
                     result.return_code = 1
@@ -505,34 +517,22 @@ class BuilderThread(threading.Thread):
         result.cmd_list = cmd_list
         return result, do_config
 
-    def run_commit(self, commit_upto, brd, work_dir, do_config, mrproper,
-                   config_only, force_build, force_build_failures,
-                   work_in_output, adjust_cfg, fragments):
+    def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
+                   force_build, force_build_failures):
         """Build a particular commit.
 
         If the build is already done, and we are not forcing a build, we skip
         the build and just return the previously-saved results.
 
         Args:
+            req (RunRequest): Run request (see RunRequest for details)
             commit_upto (int): Commit number to build (0...n-1)
-            brd (Board): Board to build
-            work_dir (str): Directory to which the source will be checked out
             do_config (bool): True to run a make <board>_defconfig on the source
             mrproper (bool): True to run mrproper first
             config_only (bool): Only configure the source, do not build it
             force_build (bool): Force a build even if one was previously done
-            force_build_failures (bool): Force a bulid if the previous result
+            force_build_failures (bool): Force a build if the previous result
                 showed failure
-            work_in_output (bool) : Use the output directory as the work
-                directory and don't write to a separate output directory.
-            adjust_cfg (list of str): List of changes to make to .config file
-                before building. Each is one of (where C is either CONFIG_xxx
-                or just xxx):
-                     C to enable C
-                     ~C to disable C
-                     C=val to set the value of C (val must have quotes if C is
-                         a string Kconfig
-            fragments (str): config fragments added to defconfig
 
         Returns:
             tuple containing:
@@ -541,10 +541,11 @@ class BuilderThread(threading.Thread):
         """
         # Create a default result - it will be overwritte by the call to
         # self.make() below, in the event that we do a build.
-        out_dir, out_rel_dir = self._decide_dirs(brd, work_dir, work_in_output)
+        out_dir, out_rel_dir = self._decide_dirs(req)
 
         # Check if the job was already completed last time
-        will_build, result = self._read_done_file(commit_upto, brd, force_build,
+        will_build, result = self._read_done_file(commit_upto, req.brd,
+                                                  force_build,
                                                   force_build_failures)
 
         kconfig_reconfig = False
@@ -552,33 +553,33 @@ class BuilderThread(threading.Thread):
             # We are going to have to build it. First, get a toolchain
             if not self.toolchain:
                 try:
-                    self.toolchain = self.builder.toolchains.select(brd.arch)
+                    self.toolchain = self.builder.toolchains.select(
+                        req.brd.arch)
                 except ValueError as err:
                     result.return_code = 10
                     result.stdout = ''
-                    result.stderr = (f'Tool chain error for {brd.arch}: '
+                    result.stderr = (f'Tool chain error for {req.brd.arch}: '
                                      f'{str(err)}')
 
             if self.toolchain:
-                commit = self._checkout(commit_upto, work_dir)
+                commit = self._checkout(commit_upto, req.work_dir)
 
                 # Check if Kconfig files have changed since last config
                 if self.builder.kconfig_check:
                     config_file = os.path.join(out_dir, '.config')
-                    if kconfig_changed_since(config_file, work_dir,
-                                             brd.target):
+                    if kconfig_changed_since(config_file, req.work_dir,
+                                             req.brd.target):
                         kconfig_reconfig = True
                         do_config = True
 
                 result, do_config = self._config_and_build(
-                    commit_upto, brd, work_dir, do_config, mrproper,
-                    config_only, adjust_cfg, commit, out_dir, out_rel_dir,
-                    fragments, result)
+                    req, commit_upto, do_config, mrproper, config_only,
+                    commit, out_dir, out_rel_dir, result)
             result.already_done = False
             result.kconfig_reconfig = kconfig_reconfig
 
         result.toolchain = self.toolchain
-        result.brd = brd
+        result.brd = req.brd
         result.commit_upto = commit_upto
         result.out_dir = out_dir
         return result, do_config
@@ -761,29 +762,29 @@ class BuilderThread(threading.Thread):
         brd = job.brd
         work_dir = self.builder.get_thread_dir(self.thread_num)
         self.toolchain = None
+        req = RunRequest(brd, work_dir, job.work_in_output, job.adjust_cfg,
+                         job.fragments)
         if job.commits:
             # Run 'make board_defconfig' on the first commit
             do_config = True
             commit_upto  = 0
             force_build = False
             for commit_upto in range(0, len(job.commits), job.step):
-                result, request_config = self.run_commit(commit_upto, brd,
-                        work_dir, do_config, self.mrproper,
+                result, request_config = self.run_commit(
+                        req, commit_upto, do_config, self.mrproper,
                         self.builder.config_only,
                         force_build or self.builder.force_build,
-                        self.builder.force_build_failures,
-                        job.work_in_output, job.adjust_cfg, job.fragments)
+                        self.builder.force_build_failures)
                 failed = result.return_code
                 did_config = do_config
                 if failed and not do_config and not self.mrproper:
                     # If our incremental build failed, try building again
                     # with a reconfig.
                     if self.builder.force_config_on_failure:
-                        result, request_config = self.run_commit(commit_upto,
-                            brd, work_dir, True,
+                        result, request_config = self.run_commit(
+                            req, commit_upto, True,
                             self.mrproper or self.builder.fallback_mrproper,
-                            False, True, False, job.work_in_output,
-                            job.adjust_cfg, job.fragments)
+                            False, True, False)
                         did_config = True
                 if not self.builder.force_reconfig:
                     do_config = request_config
@@ -826,17 +827,16 @@ class BuilderThread(threading.Thread):
                 self._send_result(result)
         else:
             # Just build the currently checked-out build
-            result, request_config = self.run_commit(None, brd, work_dir, True,
-                        self.mrproper, self.builder.config_only, True,
-                        self.builder.force_build_failures, job.work_in_output,
-                        job.adjust_cfg, job.fragments)
+            result, request_config = self.run_commit(
+                        req, None, True, self.mrproper,
+                        self.builder.config_only, True,
+                        self.builder.force_build_failures)
             failed = result.return_code
             if failed and not self.mrproper:
-                result, request_config = self.run_commit(None, brd, work_dir,
-                            True, self.builder.fallback_mrproper,
+                result, request_config = self.run_commit(
+                            req, None, True, self.builder.fallback_mrproper,
                             self.builder.config_only, True,
-                            self.builder.force_build_failures,
-                            job.work_in_output, job.adjust_cfg, job.fragments)
+                            self.builder.force_build_failures)
 
             result.commit_upto = 0
             self._write_result(result, job.keep_outputs, job.work_in_output)
