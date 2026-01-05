@@ -252,7 +252,7 @@ class BuilderThread(threading.Thread):
                 command.run_one()
 
         Returns:
-            CommandResult object
+            CommandResult: Result of the make operation
         """
         return self.builder.do_make(commit, brd, stage, cwd, *args, **kwargs)
 
@@ -661,9 +661,9 @@ class BuilderThread(threading.Thread):
                 showed failure
 
         Returns:
-            tuple containing:
-                - CommandResult object containing the results of the build
-                - boolean indicating whether 'make config' is still needed
+            tuple:
+                CommandResult: Results of the build
+                bool: Indicates whether 'make config' is still needed
         """
         # Create a default result - it will be overwritte by the call to
         # self.make() below, in the event that we do a build.
