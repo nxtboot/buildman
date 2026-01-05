@@ -287,16 +287,17 @@ class TestBuild(unittest.TestCase):
         def add_line_prefix(prefix, brds, error_str, colour):
             """Add a prefix to each line of a string
 
-            The training \n in error_str is removed before processing
+            The trailing newline in error_str is removed before processing
 
             Args:
-                prefix: String prefix to add
-                error_str: Error string containing the lines
-                colour: Expected colour for the line. Note that the board list,
-                    if present, always appears in magenta
+                prefix (str): String prefix to add
+                brds (str): Board names to include in the output
+                error_str (str): Error string containing the lines
+                colour (int): Expected colour for the line. Note that the board
+                    list, if present, always appears in magenta
 
             Returns:
-                New string where each line has the prefix added
+                str: New string where each line has the prefix added
             """
             lines = error_str.strip().splitlines()
             new_lines = []
