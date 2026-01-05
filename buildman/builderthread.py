@@ -221,6 +221,7 @@ class BuilderThread(threading.Thread):
         toolchain: Toolchain object to use for building, or None if not yet
             selected
     """
+    # pylint: disable=R0913
     def __init__(self, builder, thread_num, mrproper, per_board_out_dir,
                  test_exception=False):
         """Set up a new builder thread"""
