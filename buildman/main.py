@@ -6,11 +6,7 @@
 
 """See README for more information"""
 
-try:
-    import importlib.resources
-except ImportError:
-    # for Python 3.6
-    import importlib_resources
+import importlib.resources
 import os
 import sys
 
@@ -33,7 +29,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
     Args:
         skip_net_tests (bool): True to skip tests which need the network
         debug (bool): True to run in debugging mode (full traceback)
-        verbosity (int): Verbosity level to use (0-4)
+        verbose (int): Verbosity level to use (0-4)
         args (list of str): List of tests to run, empty to run all
     """
     # These imports are here since tests are not available when buildman is
@@ -87,27 +83,27 @@ def run_buildman():
     if cmdline.HAS_TESTS and args.test:
         return run_tests(args.skip_net_tests, args.debug, args.verbose, args)
 
-    elif cmdline.HAS_TESTS and args.coverage:
+    if cmdline.HAS_TESTS and args.coverage:
         run_test_coverage()
+        return 0
 
-    elif args.full_help:
+    if args.full_help:
         if hasattr(importlib.resources, 'files'):
             dirpath = importlib.resources.files('buildman')
             tools.print_full_help(str(dirpath.joinpath('README.rst')))
         else:
             with importlib.resources.path('buildman', 'README.rst') as readme:
                 tools.print_full_help(str(readme))
-
+        return 0
 
     # Build selected commits for selected boards
-    else:
-        try:
-            tout.init(tout.INFO if args.verbose else tout.WARNING)
-            bsettings.setup(args.config_file)
-            ret_code = control.do_buildman(args)
-        finally:
-            tout.uninit()
-        return ret_code
+    try:
+        tout.init(tout.INFO if args.verbose else tout.WARNING)
+        bsettings.setup(args.config_file)
+        ret_code = control.do_buildman(args)
+    finally:
+        tout.uninit()
+    return ret_code
 
 
 if __name__ == "__main__":

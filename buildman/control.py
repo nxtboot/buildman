@@ -152,11 +152,11 @@ def show_toolchain_prefix(brds, toolchains):
     board_selected = brds.get_selected_dict()
     tc_set = set()
     for brd in board_selected.values():
-        tc_set.add(toolchains.Select(brd.arch))
+        tc_set.add(toolchains.select(brd.arch))
     if len(tc_set) != 1:
         sys.exit('Supplied boards must share one toolchain')
     tchain = tc_set.pop()
-    print(tchain.GetEnvArgs(toolchain.VAR_CROSS_COMPILE))
+    print(tchain.get_env_args(toolchain.VAR_CROSS_COMPILE))
 
 def show_arch(brds):
     """Show information about a the architecture used by one or more boards
@@ -330,19 +330,19 @@ def do_fetch_arch(toolchains, col, fetch_arch):
         int: Return code for buildman
     """
     if fetch_arch == 'list':
-        sorted_list = toolchains.ListArchs()
+        sorted_list = toolchains.list_archs()
         print(col.build(
             col.BLUE,
             f"Available architectures: {' '.join(sorted_list)}\n"))
         return 0
 
     if fetch_arch == 'all':
-        fetch_arch = ','.join(toolchains.ListArchs())
+        fetch_arch = ','.join(toolchains.list_archs())
         print(col.build(col.CYAN,
                         f'\nDownloading toolchains: {fetch_arch}'))
     for arch in fetch_arch.split(','):
         print()
-        ret = toolchains.FetchAndInstall(arch)
+        ret = toolchains.fetch_and_install(arch)
         if ret:
             return ret
     return 0
@@ -374,10 +374,10 @@ def get_toolchains(toolchains, col, override_toolchain, fetch_arch,
         return do_fetch_arch(toolchains, col, fetch_arch)
 
     if no_toolchains:
-        toolchains.GetSettings()
-        toolchains.Scan(list_tool_chains and verbose)
+        toolchains.get_settings()
+        toolchains.scan(list_tool_chains and verbose)
     if list_tool_chains:
-        toolchains.List()
+        toolchains.list()
         print()
         return 0
     return toolchains

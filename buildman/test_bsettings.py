@@ -4,11 +4,13 @@
 """Tests for bsettings.py"""
 
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
 
 from buildman import bsettings
+from u_boot_pylib import tools
 
 
 class TestBsettings(unittest.TestCase):
@@ -18,7 +20,6 @@ class TestBsettings(unittest.TestCase):
         self._tmpdir = tempfile.mkdtemp()
 
     def tearDown(self):
-        import shutil
         shutil.rmtree(self._tmpdir)
 
     def test_setup_no_file(self):
@@ -44,8 +45,8 @@ class TestBsettings(unittest.TestCase):
     def test_setup_existing_file(self):
         """Test setup() reads existing config file"""
         config_file = os.path.join(self._tmpdir, 'test.buildman')
-        with open(config_file, 'w') as f:
-            f.write('[toolchain]\narm = /opt/arm\n')
+        tools.write_file(config_file, '[toolchain]\narm = /opt/arm\n',
+                         binary=False)
 
         bsettings.setup(config_file)
         items = bsettings.get_items('toolchain')
@@ -88,8 +89,7 @@ class TestBsettings(unittest.TestCase):
     def test_set_item(self):
         """Test set_item() sets value and writes to file"""
         config_file = os.path.join(self._tmpdir, 'test_set.buildman')
-        with open(config_file, 'w') as f:
-            f.write('[toolchain]\n')
+        tools.write_file(config_file, '[toolchain]\n', binary=False)
 
         bsettings.setup(config_file)
         bsettings.set_item('toolchain', 'newkey', 'newvalue')
@@ -99,8 +99,7 @@ class TestBsettings(unittest.TestCase):
         self.assertEqual('newvalue', items['newkey'])
 
         # Value should be written to file
-        with open(config_file) as f:
-            content = f.read()
+        content = tools.read_file(config_file, binary=False)
         self.assertIn('newkey', content)
         self.assertIn('newvalue', content)
 
@@ -122,8 +121,7 @@ class TestBsettings(unittest.TestCase):
         bsettings.create_buildman_config_file(config_file)
 
         self.assertTrue(os.path.exists(config_file))
-        with open(config_file) as f:
-            content = f.read()
+        content = tools.read_file(config_file, binary=False)
         self.assertIn('[toolchain]', content)
         self.assertIn('[toolchain-prefix]', content)
         self.assertIn('[toolchain-alias]', content)

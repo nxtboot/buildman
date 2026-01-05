@@ -166,11 +166,11 @@ class TestBuild(unittest.TestCase):
 
         # Set up the toolchains
         self.toolchains = toolchain.Toolchains()
-        self.toolchains.Add('arm-linux-gcc', test=False)
-        self.toolchains.Add('sparc-linux-gcc', test=False)
-        self.toolchains.Add('powerpc-linux-gcc', test=False)
-        self.toolchains.Add('/path/to/aarch64-linux-gcc', test=False)
-        self.toolchains.Add('gcc', test=False)
+        self.toolchains.add('arm-linux-gcc', test=False)
+        self.toolchains.add('sparc-linux-gcc', test=False)
+        self.toolchains.add('powerpc-linux-gcc', test=False)
+        self.toolchains.add('/path/to/aarch64-linux-gcc', test=False)
+        self.toolchains.add('gcc', test=False)
 
         # Avoid sending any output
         terminal.set_print_test_mode()
@@ -594,82 +594,82 @@ class TestBuild(unittest.TestCase):
         self.CheckDirs(build, '')
 
     def testToolchainAliases(self):
-        self.assertTrue(self.toolchains.Select('arm') != None)
+        self.assertTrue(self.toolchains.select('arm') != None)
         with self.assertRaises(ValueError):
-            self.toolchains.Select('no-arch')
+            self.toolchains.select('no-arch')
         with self.assertRaises(ValueError):
-            self.toolchains.Select('x86')
+            self.toolchains.select('x86')
 
         self.toolchains = toolchain.Toolchains()
-        self.toolchains.Add('x86_64-linux-gcc', test=False)
-        self.assertTrue(self.toolchains.Select('x86') != None)
+        self.toolchains.add('x86_64-linux-gcc', test=False)
+        self.assertTrue(self.toolchains.select('x86') != None)
 
         self.toolchains = toolchain.Toolchains()
-        self.toolchains.Add('i386-linux-gcc', test=False)
-        self.assertTrue(self.toolchains.Select('x86') != None)
+        self.toolchains.add('i386-linux-gcc', test=False)
+        self.assertTrue(self.toolchains.select('x86') != None)
 
     def testToolchainDownload(self):
         """Test that we can download toolchains"""
         if use_network:
             with terminal.capture() as (stdout, stderr):
-                url = self.toolchains.LocateArchUrl('arm')
+                url = self.toolchains.locate_arch_url('arm')
             self.assertRegex(url, 'https://www.kernel.org/pub/tools/'
                     'crosstool/files/bin/x86_64/.*/'
                     'x86_64-gcc-.*-nolibc[-_]arm-.*linux-gnueabi.tar.xz')
 
     def testGetEnvArgs(self):
         """Test the GetEnvArgs() function"""
-        tc = self.toolchains.Select('arm')
+        tc = self.toolchains.select('arm')
         self.assertEqual('arm-linux-',
-                         tc.GetEnvArgs(toolchain.VAR_CROSS_COMPILE))
-        self.assertEqual('', tc.GetEnvArgs(toolchain.VAR_PATH))
+                         tc.get_env_args(toolchain.VAR_CROSS_COMPILE))
+        self.assertEqual('', tc.get_env_args(toolchain.VAR_PATH))
         self.assertEqual('arm',
-                         tc.GetEnvArgs(toolchain.VAR_ARCH))
-        self.assertEqual('', tc.GetEnvArgs(toolchain.VAR_MAKE_ARGS))
+                         tc.get_env_args(toolchain.VAR_ARCH))
+        self.assertEqual('', tc.get_env_args(toolchain.VAR_MAKE_ARGS))
 
-        tc = self.toolchains.Select('sandbox')
-        self.assertEqual('', tc.GetEnvArgs(toolchain.VAR_CROSS_COMPILE))
+        tc = self.toolchains.select('sandbox')
+        self.assertEqual('', tc.get_env_args(toolchain.VAR_CROSS_COMPILE))
 
-        self.toolchains.Add('/path/to/x86_64-linux-gcc', test=False)
-        tc = self.toolchains.Select('x86')
+        self.toolchains.add('/path/to/x86_64-linux-gcc', test=False)
+        tc = self.toolchains.select('x86')
         self.assertEqual('/path/to',
-                         tc.GetEnvArgs(toolchain.VAR_PATH))
+                         tc.get_env_args(toolchain.VAR_PATH))
         tc.override_toolchain = 'clang'
         self.assertEqual('HOSTCC=clang CC=clang',
-                         tc.GetEnvArgs(toolchain.VAR_MAKE_ARGS))
+                         tc.get_env_args(toolchain.VAR_MAKE_ARGS))
 
         # Test config with ccache wrapper
         bsettings.setup(None)
         bsettings.add_file(settings_data_wrapper)
 
-        tc = self.toolchains.Select('arm')
+        tc = self.toolchains.select('arm')
         self.assertEqual('ccache arm-linux-',
-                         tc.GetEnvArgs(toolchain.VAR_CROSS_COMPILE))
+                         tc.get_env_args(toolchain.VAR_CROSS_COMPILE))
 
-        tc = self.toolchains.Select('sandbox')
-        self.assertEqual('', tc.GetEnvArgs(toolchain.VAR_CROSS_COMPILE))
+        tc = self.toolchains.select('sandbox')
+        self.assertEqual('', tc.get_env_args(toolchain.VAR_CROSS_COMPILE))
 
     def testMakeEnvironment(self):
-        """Test the MakeEnvironment function"""
+        """Test the make_environment function"""
         os.environ.pop('CROSS_COMPILE', None)
-        tc = self.toolchains.Select('arm')
-        env = tc.MakeEnvironment(False)
+        tc = self.toolchains.select('arm')
+        env = tc.make_environment(False)
         self.assertEqual(env[b'CROSS_COMPILE'], b'arm-linux-')
 
-        tc = self.toolchains.Select('sandbox')
-        env = tc.MakeEnvironment(False)
+        tc = self.toolchains.select('sandbox')
+        env = tc.make_environment(False)
         self.assertTrue(b'CROSS_COMPILE' not in env)
 
         # Test config with ccache wrapper
         bsettings.setup(None)
         bsettings.add_file(settings_data_wrapper)
 
-        tc = self.toolchains.Select('arm')
-        env = tc.MakeEnvironment(False)
+        tc = self.toolchains.select('arm')
+        env = tc.make_environment(False)
         self.assertEqual(env[b'CROSS_COMPILE'], b'ccache arm-linux-')
 
-        tc = self.toolchains.Select('sandbox')
-        env = tc.MakeEnvironment(False)
+        tc = self.toolchains.select('sandbox')
+        env = tc.make_environment(False)
         self.assertTrue(b'CROSS_COMPILE' not in env)
 
     def testPrepareOutputSpace(self):
@@ -942,7 +942,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(self.finish_time, self.cur_time)
 
     def call_make_environment(self, tchn, full_path, in_env=None):
-        """Call Toolchain.MakeEnvironment() and process the result
+        """Call Toolchain.make_environment() and process the result
 
         Args:
             tchn (Toolchain): Toolchain to use
@@ -958,7 +958,7 @@ class TestBuild(unittest.TestCase):
                         which were added)
                 str: Full value of the new PATH variable
         """
-        env = tchn.MakeEnvironment(full_path, env=in_env)
+        env = tchn.make_environment(full_path, env=in_env)
 
         # Get the original environment
         orig_env = dict(os.environb if in_env is None else in_env)
@@ -983,7 +983,7 @@ class TestBuild(unittest.TestCase):
     def test_toolchain_env(self):
         """Test PATH and other environment settings for toolchains"""
         # Use a toolchain which has a path, so that full_path makes a difference
-        tchn = self.toolchains.Select('aarch64')
+        tchn = self.toolchains.select('aarch64')
 
         # Normal cases
         diff = self.call_make_environment(tchn, full_path=False)[0]
@@ -1044,13 +1044,13 @@ class TestBuild(unittest.TestCase):
 
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
                                     dtc_skip=True)
-            tch = self.toolchains.Select('arm')
+            tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertIn(b'DTC', env)
 
             # Try the normal case, i.e. not skipping the dtc build
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-            tch = self.toolchains.Select('arm')
+            tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertNotIn(b'DTC', env)
         finally:
@@ -1065,12 +1065,12 @@ class TestBuild(unittest.TestCase):
         # Set up the toolchains
         home = os.path.expanduser('~')
         toolchains = toolchain.Toolchains()
-        toolchains.GetSettings()
+        toolchains.get_settings()
         self.assertEqual([f'{home}/mypath'], toolchains.paths)
 
         # Check scanning
         with terminal.capture() as (stdout, _):
-            toolchains.Scan(verbose=True, raise_on_error=False)
+            toolchains.scan(verbose=True, raise_on_error=False)
         lines = iter(stdout.getvalue().splitlines() + ['##done'])
         self.assertEqual('Scanning for tool chains', next(lines))
         self.assertEqual(f"   - scanning prefix '{home}/mypath-x86-'",
@@ -1087,7 +1087,7 @@ class TestBuild(unittest.TestCase):
 
         # Check adding a toolchain
         with terminal.capture() as (stdout, _):
-            toolchains.Add('~/aarch64-linux-gcc', test=True, verbose=True)
+            toolchains.add('~/aarch64-linux-gcc', test=True, verbose=True)
         lines = iter(stdout.getvalue().splitlines() + ['##done'])
         self.assertEqual('Tool chain test:  BAD', next(lines))
         self.assertEqual(f'Command: {home}/aarch64-linux-gcc --version',

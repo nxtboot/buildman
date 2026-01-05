@@ -22,13 +22,16 @@ from u_boot_pylib import tools
 
 
 BOARDS = [
-    ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 0', 'board0',  ''],
+    ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 0', 'board0', ''],
     ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 1', 'board1', ''],
-    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC board 1', 'board2', ''],
-    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board', 'board4', ''],
+    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC board 1',
+     'board2', ''],
+    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board',
+     'board4', ''],
 ]
 
 
+# pylint: disable=too-many-public-methods
 class TestBoards(unittest.TestCase):
     """Test boards.py functionality"""
 
@@ -71,8 +74,8 @@ class TestBoards(unittest.TestCase):
         # Test normal boards.cfg file
         boards_cfg = os.path.join(self._base_dir, 'boards.cfg')
         content = '''# Comment line
-Active  arm      armv7   -       Tester   ARM_Board_0  board0  config0  maint@test.com
-Active  powerpc  ppc     mpc85xx Tester   PPC_Board_1  board2  config2  maint2@test.com
+Active  arm      armv7   -       Tester   ARM0  board0  config0  m@t.co
+Active  powerpc  ppc     mpc85xx Tester   PPC1  board2  config2  m@t.co
 
 '''
         tools.write_file(boards_cfg, content.encode('utf-8'))
@@ -97,15 +100,15 @@ Active  powerpc  ppc     mpc85xx Tester   PPC_Board_1  board2  config2  maint2@t
 
         # Test with more than 8 fields (extra fields ignored)
         boards_cfg = os.path.join(self._base_dir, 'boards_extra.cfg')
-        content = '''Active  arm  armv7  soc  Tester  Board  target  config  maint  extra
-'''
+        content = ('Active  arm  armv7  soc  Tester  Board  target  '
+                   'config  maint  extra\n')
         tools.write_file(boards_cfg, content.encode('utf-8'))
         brds = boards.Boards()
         brds.read_boards(boards_cfg)
         self.assertEqual('config', brds.get_list()[0].cfg_name)
 
     def test_boards_methods(self):
-        """Test Boards helper methods: get_dict, get_selected_names, find_by_target"""
+        """Test Boards helper methods"""
         brds = boards.Boards()
         for brd in BOARDS:
             brds.add_board(board.Board(*brd))
@@ -124,7 +127,8 @@ Active  powerpc  ppc     mpc85xx Tester   PPC_Board_1  board2  config2  maint2@t
         brds2 = boards.Boards()
         for brd in BOARDS:
             brds2.add_board(board.Board(*brd))
-        result, warnings = brds2.select_boards([], brds=['nonexistent', 'board0'])
+        _, warnings = brds2.select_boards([],
+                                          brds=['nonexistent', 'board0'])
         self.assertEqual(1, len(warnings))
         self.assertIn('nonexistent', warnings[0])
 
@@ -132,7 +136,7 @@ Active  powerpc  ppc     mpc85xx Tester   PPC_Board_1  board2  config2  maint2@t
         found = brds.find_by_target('board0')
         self.assertEqual('arm', found.arch)
 
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture():
             with self.assertRaises(ValueError) as exc:
                 brds.find_by_target('nonexistent')
         self.assertIn('nonexistent', str(exc.exception))
@@ -181,7 +185,7 @@ endif
             tools.write_file(defconfig, 'CONFIG_TARGET_RISCV_BOARD=y\n', False)
 
             # Test riscv64 (no RV32I)
-            res, warnings = scanner.scan(defconfig, False)
+            res, _ = scanner.scan(defconfig, False)
             self.assertEqual('riscv64', res['arch'])
 
             # Test riscv32 (with RV32I)
@@ -191,7 +195,7 @@ config ARCH_RV32I
 '''
             tools.write_file(kc_file, riscv32_kconfig)
             scanner = boards.KconfigScanner(src)
-            res, warnings = scanner.scan(defconfig, False)
+            res, _ = scanner.scan(defconfig, False)
             self.assertEqual('riscv32', res['arch'])
         finally:
             tools.write_file(kc_file, orig_kc_data)
@@ -207,7 +211,7 @@ config ARCH_RV32I
         tools.write_file(main, new_data, binary=False)
 
         try:
-            params_list, warnings = self._boards.build_board_list(config_dir, src)
+            params_list, _ = self._boards.build_board_list(config_dir, src)
             self.assertEqual(2, len(params_list))
         finally:
             tools.write_file(main, orig_data, binary=False)
@@ -218,22 +222,22 @@ config ARCH_RV32I
         brds = boards.Boards()
 
         # Test force=False, quiet=False (normal generation)
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture():
             brds.ensure_board_list(outfile, jobs=1, force=False, quiet=False)
         self.assertTrue(os.path.exists(outfile))
 
         # Test force=True (regenerate even if current)
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _):
             brds.ensure_board_list(outfile, jobs=1, force=True, quiet=False)
         self.assertTrue(os.path.exists(outfile))
 
         # Test quiet=True (minimal output)
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _):
             brds.ensure_board_list(outfile, jobs=1, force=False, quiet=True)
         self.assertNotIn('Checking', stdout.getvalue())
 
         # Test quiet=True when up to date (no output)
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _):
             result = brds.ensure_board_list(outfile, jobs=1, force=False,
                                             quiet=True)
         self.assertTrue(result)
@@ -297,7 +301,7 @@ Active  arm  armv7  -  Tester  Board  board0  options  maint
         tools.write_file(defconfig, 'CONFIG_SYS_ARCH="arm"\n', False)
         try:
             scanner = boards.KconfigScanner(src)
-            res, warnings = scanner.scan(defconfig, warn_targets=True)
+            _, warnings = scanner.scan(defconfig, warn_targets=True)
             self.assertEqual(1, len(warnings))
             self.assertIn('No TARGET_NO_TARGET enabled', warnings[0])
         finally:
@@ -314,7 +318,7 @@ config TARGET_BOARD0_DUP
         try:
             scanner = boards.KconfigScanner(src)
             defconfig = os.path.join(src, 'configs', 'board0_defconfig')
-            res, warnings = scanner.scan(defconfig, warn_targets=True)
+            _, warnings = scanner.scan(defconfig, warn_targets=True)
             self.assertEqual(1, len(warnings))
             self.assertIn('Duplicate TARGET_xxx', warnings[0])
         finally:
@@ -332,7 +336,8 @@ config TARGET_BOARD0_DUP
             targets=[['CONFIG_ARM', 'y']])
 
         with mock.patch('qconfig.find_config') as mock_find, \
-             mock.patch.object(tools, 'read_file', return_value='CONFIG_TEST=y'):
+             mock.patch.object(tools, 'read_file',
+                               return_value='CONFIG_TEST=y'):
             mock_find.return_value = {'board0', 'board1'}
             result = brds.scan_extended(None, ext)
             self.assertEqual({'board0', 'board1'}, result)
@@ -380,7 +385,7 @@ config TARGET_BOARD0_DUP
                                       'configs/board2_defconfig']
             mock_find.return_value = {'board0', 'board1', 'board2'}
             result = brds.scan_extended(None, ext)
-            # Should be intersection: {board0, board2} & {board0, board1, board2}
+            # Result is intersection of regex and find_config results
             self.assertEqual({'board0', 'board2'}, result)
 
     def test_parse_extended(self):
@@ -479,7 +484,7 @@ Active  arm  armv7  -  Tester  Board  board0  config0  maint
         # Simulate a leftover temp file
         tmpfile = os.path.join(self._base_dir, 'leftover.tmp')
         tools.write_file(tmpfile, b'temp')
-        scanner._tmpfile = tmpfile
+        scanner._tmpfile = tmpfile  # pylint: disable=protected-access
 
         # Delete the scanner - should clean up the temp file
         del scanner
@@ -520,8 +525,9 @@ endif
         try:
             scanner = boards.KconfigScanner(src)
             defconfig = os.path.join(src, 'aarch64_defconfig')
-            tools.write_file(defconfig, 'CONFIG_TARGET_AARCH64_BOARD=y\n', False)
-            res, warnings = scanner.scan(defconfig, False)
+            tools.write_file(defconfig,
+                             'CONFIG_TARGET_AARCH64_BOARD=y\n', False)
+            res, _ = scanner.scan(defconfig, False)
             # Should be fixed up to aarch64
             self.assertEqual('aarch64', res['arch'])
         finally:
@@ -550,11 +556,11 @@ endif
         brds = boards.Boards()
 
         # First generate the file
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture():
             brds.ensure_board_list(outfile, jobs=1, force=False, quiet=False)
 
         # Run again - should say "up to date"
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _):
             result = brds.ensure_board_list(outfile, jobs=1, force=False,
                                             quiet=False)
         self.assertTrue(result)
@@ -568,7 +574,7 @@ endif
         # Mock build_board_list to return warnings
         with mock.patch.object(brds, 'build_board_list') as mock_build:
             mock_build.return_value = ([], ['WARNING: test warning'])
-            with terminal.capture() as (stdout, stderr):
+            with terminal.capture() as (_, stderr):
                 result = brds.ensure_board_list(outfile, jobs=1, force=True,
                                                 quiet=False)
             self.assertFalse(result)
@@ -601,7 +607,7 @@ endif
         with mock.patch('qconfig.find_config') as mock_find, \
              mock.patch.object(tools, 'read_file', return_value=''), \
              mock.patch('glob.glob') as mock_glob, \
-             terminal.capture() as (stdout, stderr):
+             terminal.capture() as (stdout, _):
             mock_glob.return_value = []  # No matches
             mock_find.return_value = set()
             result = brds.scan_extended(None, ext)
@@ -652,7 +658,7 @@ endif
             tools.write_file(defconfig, 'CONFIG_TARGET_RISCV_TEST=y\n', False)
 
             scanner = boards.KconfigScanner(src)
-            res, warnings = scanner.scan(defconfig, False)
+            res, _ = scanner.scan(defconfig, False)
 
             # Should default to riscv64 when ARCH_RV32I lookup fails
             self.assertEqual('riscv64', res['arch'])
@@ -676,7 +682,7 @@ endif
 
         # Get the result from the queue
         result = queue.get(timeout=5)
-        params, warnings = result
+        params, _ = result
         self.assertEqual('board0', params['target'])
         self.assertEqual('arm', params['arch'])
 
@@ -691,7 +697,7 @@ endif
 
         try:
             brds = boards.Boards()
-            params_list, warnings = brds.scan_defconfigs(config_dir, src, 1)
+            params_list, _ = brds.scan_defconfigs(config_dir, src, 1)
 
             # Hidden file should not be in results
             targets = [p['target'] for p in params_list]
@@ -716,8 +722,8 @@ N: .*
 
         # Mock os.walk to return a path that doesn't start with 'configs/'
         # when walking the configs directory. This tests line 443.
-        def mock_walk(path):
-            # Return paths with 'configs/' prefix (normal) and without (edge case)
+        def mock_walk(_path):
+            # Return paths with and without 'configs/' prefix
             yield (os.path.join(src, 'configs'), [], ['board0_defconfig'])
             # This path will have 'other/' prefix after srcdir removal
             yield (os.path.join(src, 'other'), [], ['fred_defconfig'])
