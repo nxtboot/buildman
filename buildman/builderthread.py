@@ -684,6 +684,56 @@ class BuilderThread(threading.Thread):
         result.out_dir = out_dir
         return result, do_config
 
+    def _process_elf_file(self, result, fname, env):
+        """Process an ELF file to extract size information
+
+        Runs nm, objdump, and size on the ELF file and writes the output
+        to appropriate files.
+
+        Args:
+            result (CommandResult): Result containing build information
+            fname (str): ELF filename to process
+            env (dict): Environment variables for the commands
+
+        Returns:
+            str: Size line with rodata size appended, or None if size failed
+        """
+        cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
+        nm_result = command.run_one(*cmd, capture=True,
+                                    capture_stderr=True,
+                                    cwd=result.out_dir,
+                                    raise_on_error=False, env=env)
+        if nm_result.stdout:
+            nm_fname = self.builder.get_func_sizes_file(
+                result.commit_upto, result.brd.target, fname)
+            with open(nm_fname, 'w', encoding='utf-8') as outf:
+                print(nm_result.stdout, end=' ', file=outf)
+
+        cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
+        dump_result = command.run_one(*cmd, capture=True,
+                                      capture_stderr=True,
+                                      cwd=result.out_dir,
+                                      raise_on_error=False, env=env)
+        rodata_size = ''
+        if dump_result.stdout:
+            objdump = self.builder.get_objdump_file(result.commit_upto,
+                            result.brd.target, fname)
+            with open(objdump, 'w', encoding='utf-8') as outf:
+                print(dump_result.stdout, end=' ', file=outf)
+            for line in dump_result.stdout.splitlines():
+                fields = line.split()
+                if len(fields) > 5 and fields[1] == '.rodata':
+                    rodata_size = fields[2]
+
+        cmd = [f'{self.toolchain.cross}size', fname]
+        size_result = command.run_one(*cmd, capture=True,
+                                      capture_stderr=True,
+                                      cwd=result.out_dir,
+                                      raise_on_error=False, env=env)
+        if size_result.stdout:
+            return size_result.stdout.splitlines()[1] + ' ' + rodata_size
+        return None
+
     def _write_toolchain_result(self, result, done_file, build_dir,
                                 maybe_aborted, work_in_output):
         """Write build result and toolchain information
@@ -724,41 +774,9 @@ class BuilderThread(threading.Thread):
 
         lines = []
         for fname in BASE_ELF_FILENAMES:
-            cmd = [f'{self.toolchain.cross}nm', '--size-sort', fname]
-            nm_result = command.run_one(*cmd, capture=True,
-                                        capture_stderr=True,
-                                        cwd=result.out_dir,
-                                        raise_on_error=False, env=env)
-            if nm_result.stdout:
-                nm_fname = self.builder.get_func_sizes_file(
-                    result.commit_upto, result.brd.target, fname)
-                with open(nm_fname, 'w', encoding='utf-8') as outf:
-                    print(nm_result.stdout, end=' ', file=outf)
-
-            cmd = [f'{self.toolchain.cross}objdump', '-h', fname]
-            dump_result = command.run_one(*cmd, capture=True,
-                                          capture_stderr=True,
-                                          cwd=result.out_dir,
-                                          raise_on_error=False, env=env)
-            rodata_size = ''
-            if dump_result.stdout:
-                objdump = self.builder.get_objdump_file(result.commit_upto,
-                                result.brd.target, fname)
-                with open(objdump, 'w', encoding='utf-8') as outf:
-                    print(dump_result.stdout, end=' ', file=outf)
-                for line in dump_result.stdout.splitlines():
-                    fields = line.split()
-                    if len(fields) > 5 and fields[1] == '.rodata':
-                        rodata_size = fields[2]
-
-            cmd = [f'{self.toolchain.cross}size', fname]
-            size_result = command.run_one(*cmd, capture=True,
-                                          capture_stderr=True,
-                                          cwd=result.out_dir,
-                                          raise_on_error=False, env=env)
-            if size_result.stdout:
-                lines.append(size_result.stdout.splitlines()[1] + ' ' +
-                             rodata_size)
+            line = self._process_elf_file(result, fname, env)
+            if line:
+                lines.append(line)
 
         # Extract the environment from U-Boot and dump it out
         cmd = [f'{self.toolchain.cross}objcopy', '-O', 'binary',
