@@ -986,6 +986,26 @@ class TestBuildMisc(TestBuildBase):
             self.assertEqual(control.RUN_WAIT_S, self.cur_time)
             lock.release()
 
+    def test_process_limit_dead(self):
+        """Test wait_for_process_limit() with dead processes"""
+        tmpdir = self.base_dir
+
+        with (patch('time.time', side_effect=self.get_time),
+              patch('time.perf_counter', side_effect=self.get_time),
+              patch('time.monotonic', side_effect=self.get_time),
+              patch('time.sleep', side_effect=self.inc_time),
+              patch('os.kill', side_effect=self.kill)):
+            # Set up initial state with PIDs 1, 2, 3 in file
+            control.wait_for_process_limit(1, tmpdir=tmpdir, pid=1)
+            self.valid_pids = [1]
+            control.wait_for_process_limit(1, tmpdir=tmpdir, pid=2)
+            self.valid_pids = [1, 2]
+            lock_fname = os.path.join(tmpdir, control.LOCK_FNAME)
+            lock = FileLock(lock_fname)
+            lock.acquire(timeout=1)
+            control.wait_for_process_limit(1, tmpdir=tmpdir, pid=3)
+            lock.release()
+
             # Check handling of dead processes. Here we have PID 2 as a running
             # process, even though the PID file contains 1, 2 and 3. So we can
             # add one more PID, to make 2 and 4
