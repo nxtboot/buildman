@@ -27,9 +27,9 @@ from u_boot_pylib import command
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
-use_network = True
+USE_NETWORK = True
 
-settings_data = '''
+SETTINGS_DATA = '''
 # Buildman settings file
 
 [toolchain]
@@ -39,7 +39,7 @@ main: /usr/sbin
 x86: i386 x86_64
 '''
 
-settings_data_wrapper = '''
+SETTINGS_DATA_WRAPPER = '''
 # Buildman settings file
 
 [toolchain]
@@ -49,7 +49,7 @@ main: /usr/sbin
 wrapper = ccache
 '''
 
-settings_data_homedir = '''
+SETTINGS_DATA_HOMEDIR = '''
 # Buildman settings file
 
 [toolchain]
@@ -59,7 +59,7 @@ main = ~/mypath
 x86 = ~/mypath-x86-
 '''
 
-migration = '''===================== WARNING ======================
+MIGRATION = '''===================== WARNING ======================
 This board does not use CONFIG_DM. CONFIG_DM will be
 compulsory starting with the v2020.01 release.
 Failure to update may result in board removal.
@@ -67,7 +67,7 @@ See doc/develop/driver-model/migration.rst for more info.
 ====================================================
 '''
 
-errors = [
+ERRORS = [
     '''main.c: In function 'main_loop':
 main.c:260:6: warning: unused variable 'joe' [-Wunused-variable]
 ''',
@@ -108,16 +108,16 @@ make: *** [sub-make] Error 2
 ]
 
 
-# hash, subject, return code, list of errors/warnings
-commits = [
+# hash, subject, return code, list of ERRORS/warnings
+COMMITS = [
     ['1234', 'upstream/master, migration warning', 0, []],
-    ['5678', 'Second commit, a warning', 0, errors[0:1]],
-    ['9012', 'Third commit, error', 1, errors[0:2]],
-    ['3456', 'Fourth commit, warning', 0, [errors[0], errors[2]]],
-    ['7890', 'Fifth commit, link errors', 1, [errors[0], errors[3]]],
+    ['5678', 'Second commit, a warning', 0, ERRORS[0:1]],
+    ['9012', 'Third commit, error', 1, ERRORS[0:2]],
+    ['3456', 'Fourth commit, warning', 0, [ERRORS[0], ERRORS[2]]],
+    ['7890', 'Fifth commit, link errors', 1, [ERRORS[0], ERRORS[3]]],
     ['abcd', 'Sixth commit, fixes all errors', 0, []],
     ['ef01', 'Seventh commit, fix migration, check directory suppression', 1,
-     [errors[4]]],
+     [ERRORS[4]]],
 ]
 
 BOARDS = [
@@ -159,13 +159,13 @@ class TestBuild(unittest.TestCase):
         # Set up commits to build
         self.commits = []
         sequence = 0
-        for commit_info in commits:
+        for commit_info in COMMITS:
             comm = commit.Commit(commit_info[0])
             comm.subject = commit_info[1]
             comm.return_code = commit_info[2]
             comm.error_list = commit_info[3]
             if sequence < 6:
-                comm.error_list += [migration]
+                comm.error_list += [MIGRATION]
             comm.sequence = sequence
             sequence += 1
             self.commits.append(comm)
@@ -178,7 +178,7 @@ class TestBuild(unittest.TestCase):
 
         # Add some test settings
         bsettings.setup(None)
-        bsettings.add_file(settings_data)
+        bsettings.add_file(SETTINGS_DATA)
 
         # Set up the toolchains
         self.toolchains = toolchain.Toolchains()
@@ -218,7 +218,7 @@ class TestBuild(unittest.TestCase):
             result.stderr = (''.join(cmt.error_list)
                 % {'basedir' : self.base_dir + '/.bm-work/00/'})
         elif cmt.sequence < 6:
-            result.stderr = migration
+            result.stderr = MIGRATION
 
         result.combined = result.stdout + result.stderr
         return result
@@ -265,7 +265,7 @@ class TestBuild(unittest.TestCase):
 
         # We should get two starting messages, an update for every commit built
         # and a summary message
-        self.assertEqual(count, len(commits) * len(BOARDS) + 3)
+        self.assertEqual(count, len(COMMITS) * len(BOARDS) + 3)
         build.set_display_options(**kwdisplay_args)
         build.show_summary(self.commits, board_selected)
         if echo_lines:
@@ -321,7 +321,7 @@ class TestBuild(unittest.TestCase):
         boards4 = 'board4' if list_error_boards else ''
 
         # Upstream commit: migration warnings only
-        self.assertEqual(next(lines).text, f'01: {commits[0][1]}')
+        self.assertEqual(next(lines).text, f'01: {COMMITS[0][1]}')
 
         if not filter_migration_warnings:
             self.assert_summary(next(lines).text, 'arm', 'w+',
@@ -332,10 +332,10 @@ class TestBuild(unittest.TestCase):
                                outcome=OUTCOME_WARN)
 
             self.assertEqual(next(lines).text,
-                add_line_prefix('+', boards01234, migration, col.RED))
+                add_line_prefix('+', boards01234, MIGRATION, col.RED))
 
         # Second commit: all archs should fail with warnings
-        self.assertEqual(next(lines).text, f'02: {commits[1][1]}')
+        self.assertEqual(next(lines).text, f'02: {COMMITS[1][1]}')
 
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'arm', 'w+',
@@ -347,10 +347,10 @@ class TestBuild(unittest.TestCase):
 
         # Second commit: The warnings should be listed
         self.assertEqual(next(lines).text,
-            add_line_prefix('w+', boards1234, errors[0], col.YELLOW))
+            add_line_prefix('w+', boards1234, ERRORS[0], col.YELLOW))
 
         # Third commit: Still fails
-        self.assertEqual(next(lines).text, f'03: {commits[2][1]}')
+        self.assertEqual(next(lines).text, f'03: {COMMITS[2][1]}')
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'arm', '',
                                ['board1'], outcome=OUTCOME_OK)
@@ -360,10 +360,10 @@ class TestBuild(unittest.TestCase):
 
         # Expect a compiler error
         self.assertEqual(next(lines).text,
-                         add_line_prefix('+', boards234, errors[1], col.RED))
+                         add_line_prefix('+', boards234, ERRORS[1], col.RED))
 
         # Fourth commit: Compile errors are fixed, just have warning for board3
-        self.assertEqual(next(lines).text, f'04: {commits[3][1]}')
+        self.assertEqual(next(lines).text, f'04: {COMMITS[3][1]}')
         if filter_migration_warnings:
             expect = f"{'powerpc':>10}: "
             expect += ' ' + col.build(col.GREEN, '')
@@ -381,22 +381,22 @@ class TestBuild(unittest.TestCase):
 
         # Compile error fixed
         self.assertEqual(next(lines).text,
-                         add_line_prefix('-', boards234, errors[1], col.GREEN))
+                         add_line_prefix('-', boards234, ERRORS[1], col.GREEN))
 
         if not filter_dtb_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('w+', boards34, errors[2], col.YELLOW))
+                add_line_prefix('w+', boards34, ERRORS[2], col.YELLOW))
 
         # Fifth commit
-        self.assertEqual(next(lines).text, f'05: {commits[4][1]}')
+        self.assertEqual(next(lines).text, f'05: {COMMITS[4][1]}')
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'powerpc', '', ['board3'],
                                outcome=OUTCOME_OK)
         self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
 
-        # The second line of errors[3] is a duplicate, so buildman will drop it
-        expect = errors[3].rstrip().split('\n')
+        # The second line of ERRORS[3] is a duplicate, so buildman will drop it
+        expect = ERRORS[3].rstrip().split('\n')
         expect = [expect[0]] + expect[2:]
         expect = '\n'.join(expect)
         self.assertEqual(next(lines).text,
@@ -405,10 +405,10 @@ class TestBuild(unittest.TestCase):
         if not filter_dtb_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('w-', boards34, errors[2], col.CYAN))
+                add_line_prefix('w-', boards34, ERRORS[2], col.CYAN))
 
         # Sixth commit
-        self.assertEqual(next(lines).text, f'06: {commits[5][1]}')
+        self.assertEqual(next(lines).text, f'06: {COMMITS[5][1]}')
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'sandbox', '', ['board4'],
                                outcome=OUTCOME_OK)
@@ -416,17 +416,17 @@ class TestBuild(unittest.TestCase):
             self.assert_summary(next(lines).text, 'sandbox', 'w+', ['board4'],
                                outcome=OUTCOME_WARN)
 
-        # The second line of errors[3] is a duplicate, so buildman will drop it
-        expect = errors[3].rstrip().split('\n')
+        # The second line of ERRORS[3] is a duplicate, so buildman will drop it
+        expect = ERRORS[3].rstrip().split('\n')
         expect = [expect[0]] + expect[2:]
         expect = '\n'.join(expect)
         self.assertEqual(next(lines).text,
                          add_line_prefix('-', boards4, expect, col.GREEN))
         self.assertEqual(next(lines).text,
-                         add_line_prefix('w-', boards4, errors[0], col.CYAN))
+                         add_line_prefix('w-', boards4, ERRORS[0], col.CYAN))
 
         # Seventh commit
-        self.assertEqual(next(lines).text, f'07: {commits[6][1]}')
+        self.assertEqual(next(lines).text, f'07: {COMMITS[6][1]}')
         if filter_migration_warnings:
             self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
         else:
@@ -437,13 +437,13 @@ class TestBuild(unittest.TestCase):
             self.assert_summary(next(lines).text, 'sandbox', '+', ['board4'])
 
         # Pick out the correct error lines
-        expect_str = errors[4].rstrip().replace('%(basedir)s', '').split('\n')
+        expect_str = ERRORS[4].rstrip().replace('%(basedir)s', '').split('\n')
         expect = expect_str[3:8] + [expect_str[-1]]
         expect = '\n'.join(expect)
         if not filter_migration_warnings:
             self.assertEqual(
                 next(lines).text,
-                add_line_prefix('-', boards01234, migration, col.GREEN))
+                add_line_prefix('-', boards01234, MIGRATION, col.GREEN))
 
         self.assertEqual(next(lines).text,
                          add_line_prefix('+', boards4, expect, col.RED))
@@ -595,7 +595,7 @@ class TestBuild(unittest.TestCase):
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
-        dirname = f'/{2:02d}_g{commits[1][0]}_{subject[:20]}'
+        dirname = f'/{2:02d}_g{COMMITS[1][0]}_{subject[:20]}'
         self.check_dirs(build, dirname)
 
     def test_output_dir_current(self):
@@ -633,7 +633,7 @@ class TestBuild(unittest.TestCase):
 
     def test_toolchain_download(self):
         """Test that we can download toolchains"""
-        if use_network:
+        if USE_NETWORK:
             with terminal.capture():
                 url = self.toolchains.locate_arch_url('arm')
             self.assertRegex(url, 'https://www.kernel.org/pub/tools/'
@@ -663,7 +663,7 @@ class TestBuild(unittest.TestCase):
 
         # Test config with ccache wrapper
         bsettings.setup(None)
-        bsettings.add_file(settings_data_wrapper)
+        bsettings.add_file(SETTINGS_DATA_WRAPPER)
 
         tc = self.toolchains.select('arm')
         self.assertEqual('ccache arm-linux-',
@@ -685,7 +685,7 @@ class TestBuild(unittest.TestCase):
 
         # Test config with ccache wrapper
         bsettings.setup(None)
-        bsettings.add_file(settings_data_wrapper)
+        bsettings.add_file(SETTINGS_DATA_WRAPPER)
 
         tc = self.toolchains.select('arm')
         env = tc.make_environment(False)
@@ -711,7 +711,7 @@ class TestBuild(unittest.TestCase):
 
         build = builder.Builder(self.toolchains, base_dir, None, 1, 2)
         build.commits = self.commits
-        build.commit_count = len(commits)
+        build.commit_count = len(COMMITS)
         # pylint: disable=protected-access
         result = set(build._get_output_space_removals())
         expected = {os.path.join(base_dir, f) for f in to_remove}
@@ -1088,7 +1088,7 @@ class TestBuild(unittest.TestCase):
         """Test using ~ in a toolchain or toolchain-prefix section"""
         # Add some test settings
         bsettings.setup(None)
-        bsettings.add_file(settings_data_homedir)
+        bsettings.add_file(SETTINGS_DATA_HOMEDIR)
 
         # Set up the toolchains
         home = os.path.expanduser('~')
