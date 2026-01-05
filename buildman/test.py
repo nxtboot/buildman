@@ -712,7 +712,7 @@ class TestBuild(unittest.TestCase):
         build.commits = self.commits
         build.commit_count = len(commits)
         result = set(build._get_output_space_removals())
-        expected = set([os.path.join(base_dir, f) for f in to_remove])
+        expected = {os.path.join(base_dir, f) for f in to_remove}
         self.assertEqual(expected, result)
 
     def test_adjust_cfg_nop(self):
