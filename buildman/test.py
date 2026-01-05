@@ -2,7 +2,6 @@
 # Copyright (c) 2012 The Chromium OS Authors.
 #
 
-from filelock import FileLock
 import os
 import shutil
 import sys
@@ -10,6 +9,8 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+
+from filelock import FileLock
 
 from buildman import board
 from buildman import boards
@@ -22,7 +23,6 @@ from buildman import toolchain
 from patman import commit
 from u_boot_pylib import command
 from u_boot_pylib import terminal
-from u_boot_pylib import test_util
 from u_boot_pylib import tools
 
 use_network = True
