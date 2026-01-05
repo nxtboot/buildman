@@ -132,7 +132,21 @@ OUTCOME_OK, OUTCOME_WARN, OUTCOME_ERR = range(3)
 
 class Options:
     """Class that holds build options"""
-    pass
+    def __init__(self):
+        self.git = None
+        self.summary = False
+        self.jobs = None
+        self.dry_run = False
+        self.branch = None
+        self.force_build = False
+        self.list_tool_chains = False
+        self.count = -1
+        self.git_dir = None
+        self.threads = None
+        self.show_unknown = False
+        self.quick = False
+        self.show_errors = False
+        self.keep_outputs = False
 
 class TestBuild(unittest.TestCase):
     """Test buildman
