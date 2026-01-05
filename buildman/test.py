@@ -134,6 +134,7 @@ BASE_DIR = 'base'
 
 OUTCOME_OK, OUTCOME_WARN, OUTCOME_ERR = range(3)
 
+# pylint: disable=too-many-instance-attributes,too-few-public-methods
 class Options:
     """Class that holds build options"""
     def __init__(self):
