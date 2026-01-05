@@ -592,6 +592,56 @@ class BuilderThread(threading.Thread):
 
         return result, do_config
 
+    def _do_build(self, req, commit_upto, do_config, mrproper, config_only,
+                  out_dir, out_rel_dir, result):
+        """Perform a build if a toolchain can be obtained
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            do_config (bool): True to run a make <board>_defconfig on the source
+            mrproper (bool): True to run mrproper first
+            config_only (bool): Only configure the source, do not build it
+            out_dir (str): Output directory for the build
+            out_rel_dir (str): Output directory relative to the current dir
+            result (CommandResult): Previous result
+
+        Returns:
+            tuple:
+                result (CommandResult): Result of the build
+                do_config (bool): Whether config is needed next time
+                kconfig_reconfig (bool): Whether Kconfig triggered a reconfig
+        """
+        kconfig_reconfig = False
+
+        # We are going to have to build it. First, get a toolchain
+        if not self.toolchain:
+            try:
+                self.toolchain = self.builder.toolchains.select(req.brd.arch)
+            except ValueError as err:
+                result.return_code = 10
+                result.stdout = ''
+                result.stderr = f'Tool chain error for {req.brd.arch}: {err}'
+
+        if self.toolchain:
+            commit = self._checkout(commit_upto, req.work_dir)
+
+            # Check if Kconfig files have changed since last config
+            if self.builder.kconfig_check:
+                config_file = os.path.join(out_dir, '.config')
+                if kconfig_changed_since(config_file, req.work_dir,
+                                         req.brd.target):
+                    kconfig_reconfig = True
+                    do_config = True
+
+            result, do_config = self._config_and_build(
+                req, commit_upto, do_config, mrproper, config_only,
+                commit, out_dir, out_rel_dir, result)
+
+        result.already_done = False
+        result.kconfig_reconfig = kconfig_reconfig
+        return result, do_config, kconfig_reconfig
+
     def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
                    force_build, force_build_failures):
         """Build a particular commit.
@@ -623,35 +673,10 @@ class BuilderThread(threading.Thread):
                                                   force_build,
                                                   force_build_failures)
 
-        kconfig_reconfig = False
         if will_build:
-            # We are going to have to build it. First, get a toolchain
-            if not self.toolchain:
-                try:
-                    self.toolchain = self.builder.toolchains.select(
-                        req.brd.arch)
-                except ValueError as err:
-                    result.return_code = 10
-                    result.stdout = ''
-                    result.stderr = (f'Tool chain error for {req.brd.arch}: '
-                                     f'{str(err)}')
-
-            if self.toolchain:
-                commit = self._checkout(commit_upto, req.work_dir)
-
-                # Check if Kconfig files have changed since last config
-                if self.builder.kconfig_check:
-                    config_file = os.path.join(out_dir, '.config')
-                    if kconfig_changed_since(config_file, req.work_dir,
-                                             req.brd.target):
-                        kconfig_reconfig = True
-                        do_config = True
-
-                result, do_config = self._config_and_build(
-                    req, commit_upto, do_config, mrproper, config_only,
-                    commit, out_dir, out_rel_dir, result)
-            result.already_done = False
-            result.kconfig_reconfig = kconfig_reconfig
+            result, do_config, _ = self._do_build(
+                req, commit_upto, do_config, mrproper, config_only,
+                out_dir, out_rel_dir, result)
 
         result.toolchain = self.toolchain
         result.brd = req.brd
