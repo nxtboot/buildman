@@ -634,7 +634,7 @@ class TestBuild(unittest.TestCase):
     def test_toolchain_download(self):
         """Test that we can download toolchains"""
         if use_network:
-            with terminal.capture() as (stdout, stderr):
+            with terminal.capture():
                 url = self.toolchains.locate_arch_url('arm')
             self.assertRegex(url, 'https://www.kernel.org/pub/tools/'
                     'crosstool/files/bin/x86_64/.*/'
@@ -1000,7 +1000,6 @@ class TestBuild(unittest.TestCase):
         new_path = None
         if b'PATH' in diff:
             new_path = diff[b'PATH'].split(b':')
-            diff_paths = [p for p in new_path if p not in orig_path]
             diff_path = b':'.join(p for p in new_path if p not in orig_path)
             if diff_path:
                 diff[b'PATH'] = diff_path
