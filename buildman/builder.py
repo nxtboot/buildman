@@ -1241,32 +1241,26 @@ class Builder:
                                                  outcome.func_sizes[fname])
 
 
-    def print_size_summary(self, board_selected, board_dict, show_detail,
-                         show_bloat):
-        """Print a summary of image sizes broken down by section.
+    def _calc_size_changes(self, board_selected, board_dict):
+        """Calculate changes in size for different image parts
 
-        The summary takes the form of one line per architecture. The
-        line contains deltas for each of the sections (+ means the section
-        got bigger, - means smaller). The numbers are the average number
-        of bytes that a board in this section increased by.
-
-        For example:
-           powerpc: (622 boards)   text -0.0
-          arm: (285 boards)   text -0.0
+        The previous sizes are in Board.sizes, for each board
 
         Args:
             board_selected (dict): Dict containing boards to summarise, keyed
                 by board.target
             board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
-            show_detail (bool): Show size delta detail for each board
-            show_bloat (bool): Show detail for each function
+
+        Returns:
+            tuple: (arch_list, arch_count) where:
+                arch_list: dict keyed by arch name, containing a list of
+                    size-change dicts
+                arch_count: dict keyed by arch name, containing the number of
+                    boards for that arch
         """
         arch_list = {}
         arch_count = {}
-
-        # Calculate changes in size for different image parts
-        # The previous sizes are in Board.sizes, for each board
         for target in board_dict:
             if target not in board_selected:
                 continue
@@ -1303,6 +1297,31 @@ class Builder:
                 arch_list[arch] = [err]
             else:
                 arch_list[arch].append(err)
+        return arch_list, arch_count
+
+    def print_size_summary(self, board_selected, board_dict, show_detail,
+                         show_bloat):
+        """Print a summary of image sizes broken down by section.
+
+        The summary takes the form of one line per architecture. The
+        line contains deltas for each of the sections (+ means the section
+        got bigger, - means smaller). The numbers are the average number
+        of bytes that a board in this section increased by.
+
+        For example:
+           powerpc: (622 boards)   text -0.0
+          arm: (285 boards)   text -0.0
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            show_detail (bool): Show size delta detail for each board
+            show_bloat (bool): Show detail for each function
+        """
+        arch_list, arch_count = self._calc_size_changes(board_selected,
+                                                        board_dict)
 
         # We now have a list of image size changes sorted by arch
         # Print out a summary of these
