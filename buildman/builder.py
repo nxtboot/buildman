@@ -736,8 +736,8 @@ class Builder:
             line = line.strip()
             parts = line.split()
             if line and len(parts) == 3:
-                size, type, name = line.split()
-                if type in NM_SYMBOL_TYPES:
+                size, sym_type, name = line.split()
+                if sym_type in NM_SYMBOL_TYPES:
                     # function names begin with '.' on 64-bit powerpc
                     if '.' in name[1:]:
                         name = 'static.' + name.split('.')[0]
@@ -1003,14 +1003,14 @@ class Builder:
                 arch = board_dict[target].arch
             else:
                 arch = 'unknown'
-            str = self.col.build(color, ' ' + target)
+            text = self.col.build(color, ' ' + target)
             if not arch in done_arch:
-                str = ' %s  %s' % (self.col.build(color, char), str)
+                text = ' %s  %s' % (self.col.build(color, char), text)
                 done_arch[arch] = True
             if not arch in arch_list:
-                arch_list[arch] = str
+                arch_list[arch] = text
             else:
-                arch_list[arch] += str
+                arch_list[arch] += text
 
 
     def colour_num(self, num):
