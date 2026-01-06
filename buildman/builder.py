@@ -4,6 +4,8 @@
 # Bloat-o-meter code used here Copyright 2004 Matt Mackall <mpm@selenic.com>
 #
 
+"""Build manager for U-Boot builds across multiple boards and commits"""
+
 import collections
 from datetime import datetime, timedelta
 import glob
@@ -137,6 +139,13 @@ class Config:
             self.config[fname] = {}
 
     def add(self, fname, key, value):
+        """Add a configuration value
+
+        Args:
+            fname (str): Filename to add to (e.g. '.config')
+            key (str): Config key (e.g. 'CONFIG_DM')
+            value (str): Config value (e.g. 'y')
+        """
         self.config[fname][key] = value
 
     def __hash__(self):
@@ -154,6 +163,12 @@ class Environment:
         self.environment = {}
 
     def add(self, key, value):
+        """Add an environment variable
+
+        Args:
+            key (str): Environment variable name
+            value (str): Environment variable value
+        """
         self.environment[key] = value
 
 class Builder:
@@ -418,6 +433,12 @@ class Builder:
         self.threads.clear()
 
     def signal_handler(self, signal, frame):
+        """Handle a signal by exiting
+
+        Args:
+            signal (int): Signal number
+            frame (frame): Stack frame at point of signal
+        """
         sys.exit(1)
 
     def make_environment(self, toolchain):
@@ -444,19 +465,22 @@ class Builder:
         """Setup display options for the builder.
 
         Args:
-            show_errors: True to show summarised error/warning info
-            show_sizes: Show size deltas
-            show_detail: Show size delta detail for each board if show_sizes
-            show_bloat: Show detail for each function
-            list_error_boards: Show the boards which caused each error/warning
-            show_config: Show config deltas
-            show_environment: Show environment deltas
-            filter_dtb_warnings: Filter out any warnings from the device-tree
-                compiler
-            filter_migration_warnings: Filter out any warnings about migrating
-                a board to driver model
-            ide: Create output that can be parsed by an IDE. There is no '+' prefix on
-                error lines and output on stderr stays on stderr.
+            show_errors (bool): True to show summarised error/warning info
+            show_sizes (bool): Show size deltas
+            show_detail (bool): Show size delta detail for each board if
+                show_sizes
+            show_bloat (bool): Show detail for each function
+            list_error_boards (bool): Show the boards which caused each
+                error/warning
+            show_config (bool): Show config deltas
+            show_environment (bool): Show environment deltas
+            filter_dtb_warnings (bool): Filter out any warnings from the
+                device-tree compiler
+            filter_migration_warnings (bool): Filter out any warnings about
+                migrating a board to driver model
+            ide (bool): Create output that can be parsed by an IDE. There is
+                no '+' prefix on error lines and output on stderr stays on
+                stderr.
         """
         self._show_errors = show_errors
         self._show_sizes = show_sizes
@@ -500,6 +524,10 @@ class Builder:
 
     def select_commit(self, commit, checkout=True):
         """Checkout the selected commit for this build
+
+        Args:
+            commit (Commit): Commit object that is being built
+            checkout (bool): True to checkout the commit
         """
         self.commit = commit
         if checkout and self.checkout:
@@ -509,10 +537,11 @@ class Builder:
         """Run make
 
         Args:
-            commit: Commit object that is being built
-            brd: Board object that is being built
-            stage: Stage that we are at (mrproper, config, oldconfig, build)
-            cwd: Directory where make should be run
+            commit (Commit): Commit object that is being built
+            brd (Board): Board object that is being built
+            stage (str): Stage that we are at (mrproper, config, oldconfig,
+                build)
+            cwd (str): Directory where make should be run
             args: Arguments to pass to make
             kwargs: Arguments to pass to command.run_one()
         """
@@ -555,8 +584,8 @@ class Builder:
         """Process the result of a build, showing progress information
 
         Args:
-            result: A CommandResult object, which indicates the result for
-                    a single build
+            result (CommandResult): Result object, which indicates the result
+                for a single build
         """
         if result:
             target = result.brd.target
@@ -611,7 +640,7 @@ class Builder:
         The output directory is typically .../<branch>/<commit>.
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
+            commit_upto (int): Commit number to use (0..self.count-1)
         """
         if self.work_in_output:
             return self._working_dir
@@ -634,8 +663,8 @@ class Builder:
         The build directory is typically .../<branch>/<commit>/<target>.
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
 
         Return:
             str: Output directory to use, or '' if None
@@ -649,8 +678,8 @@ class Builder:
         """Get the name of the done file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'done')
 
@@ -658,8 +687,8 @@ class Builder:
         """Get the name of the sizes file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'sizes')
 
@@ -667,9 +696,9 @@ class Builder:
         """Get the name of the funcsizes file for a commit number and ELF file
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
-            elf_fname: Filename of elf image
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
+            elf_fname (str): Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.sizes")
@@ -678,9 +707,9 @@ class Builder:
         """Get the name of the objdump file for a commit number and ELF file
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
-            elf_fname: Filename of elf image
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
+            elf_fname (str): Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.objdump")
@@ -689,8 +718,8 @@ class Builder:
         """Get the name of the err file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         output_dir = self.get_build_dir(commit_upto, target)
         return os.path.join(output_dir, 'err')
@@ -701,9 +730,10 @@ class Builder:
         We should probably use map().
 
         Args:
-            lines: List of error lines, each a string
+            lines (list of str): List of error lines, each a string
+
         Returns:
-            New list with only interesting lines included
+            list of str: New list with only interesting lines included
         """
         out_lines = []
         if self._filter_migration_warnings:
@@ -722,12 +752,12 @@ class Builder:
         """Read function sizes from the output of 'nm'
 
         Args:
-            fd: File containing data to read
-            fname: Filename we are reading from (just for errors)
+            fname (str): Filename we are reading from (just for errors)
+            fd (file): File containing data to read
 
         Returns:
-            Dictionary containing size of each function in bytes, indexed by
-            function name.
+            dict: Dictionary containing size of each function in bytes, indexed
+                by function name.
         """
         sym = {}
         for line in fd.readlines():
@@ -809,14 +839,14 @@ class Builder:
         """Work out the outcome of a build.
 
         Args:
-            commit_upto: Commit number to check (0..n-1)
-            target: Target board to check
-            read_func_sizes: True to read function size information
-            read_config: True to read .config and autoconf.h files
-            read_environment: True to read uboot.env files
+            commit_upto (int): Commit number to check (0..n-1)
+            target (str): Target board to check
+            read_func_sizes (bool): True to read function size information
+            read_config (bool): True to read .config and autoconf.h files
+            read_environment (bool): True to read uboot.env files
 
         Returns:
-            Outcome object
+            Outcome: Outcome object
         """
         done_file = self.get_done_file(commit_upto, target)
         sizes_file = self.get_sizes_file(commit_upto, target)
@@ -893,14 +923,14 @@ class Builder:
         """Calculate a summary of the results of building a commit.
 
         Args:
-            board_selected: Dict containing boards to summarise
-            commit_upto: Commit number to summarize (0..self.count-1)
-            read_func_sizes: True to read function size information
-            read_config: True to read .config and autoconf.h files
-            read_environment: True to read uboot.env files
+            boards_selected (dict): Dict containing boards to summarise
+            commit_upto (int): Commit number to summarize (0..self.count-1)
+            read_func_sizes (bool): True to read function size information
+            read_config (bool): True to read .config and autoconf.h files
+            read_environment (bool): True to read uboot.env files
 
         Returns:
-            Tuple:
+            tuple: Tuple containing:
                 Dict containing boards which built this commit:
                     key: board.target
                     value: Builder.Outcome object
@@ -989,11 +1019,12 @@ class Builder:
         sorted by architecture.
 
         Args:
-             board_dict: Dict containing all boards
-             arch_list: Dict keyed by arch name. Value is a string containing
-                    a list of board names which failed for that arch.
-             changes: List of boards to add to arch_list
-             color: terminal.Colour object
+             board_dict (dict): Dict containing all boards
+             arch_list (dict): Dict keyed by arch name. Value is a string
+                 containing a list of board names which failed for that arch.
+             changes (list): List of boards to add to arch_list
+             char (str): Character to display for this board
+             color (int): terminal.Colour object
         """
         done_arch = {}
         for target in changes:
@@ -1012,6 +1043,14 @@ class Builder:
 
 
     def colour_num(self, num):
+        """Format a number with colour depending on its value
+
+        Args:
+            num (int): Number to format
+
+        Returns:
+            str: Formatted string (red if positive, green if negative/zero)
+        """
         color = self.col.RED if num > 0 else self.col.GREEN
         if num == 0:
             return '0'
@@ -1027,8 +1066,8 @@ class Builder:
         information to work out what has changed.
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
         """
         self._base_board_dict = {}
         for brd in board_selected:
@@ -1041,6 +1080,13 @@ class Builder:
         self._base_environment = None
 
     def print_func_size_detail(self, fname, old, new):
+        """Print detailed size information for each function
+
+        Args:
+            fname (str): Filename to print (e.g. 'u-boot')
+            old (dict): Dictionary of old function sizes, keyed by function name
+            new (dict): Dictionary of new function sizes, keyed by function name
+        """
         grow, shrink, add, remove, up, down = 0, 0, 0, 0, 0, 0
         delta, common = [], {}
 
@@ -1093,11 +1139,11 @@ class Builder:
         """Show details size information for each board
 
         Args:
-            target_list: List of targets, each a dict containing:
+            target_list (list): List of targets, each a dict containing:
                     'target': Target name
                     'total_diff': Total difference in bytes across all areas
                     <part_name>: Difference for that part
-            show_bloat: Show detail for each function
+            show_bloat (bool): Show detail for each function
         """
         targets_by_diff = sorted(target_list, reverse=True,
         key=lambda x: x['_total_diff'])
@@ -1140,12 +1186,12 @@ class Builder:
           arm: (285 boards)   text -0.0
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
-            board_dict: Dict containing boards for which we built this
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
-            show_detail: Show size delta detail for each board
-            show_bloat: Show detail for each function
+            show_detail (bool): Show size delta detail for each board
+            show_bloat (bool): Show detail for each function
         """
         arch_list = {}
         arch_count = {}
@@ -1241,29 +1287,30 @@ class Builder:
         the last call and what it sees now.
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
-            board_dict: Dict containing boards for which we built this
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
-            err_lines: A list of errors for this commit, or [] if there is
-                none, or we don't want to print errors
-            err_line_boards: Dict keyed by error line, containing a list of
-                the Board objects with that error
-            warn_lines: A list of warnings for this commit, or [] if there is
-                none, or we don't want to print errors
-            warn_line_boards: Dict keyed by warning line, containing a list of
-                the Board objects with that warning
-            config: Dictionary keyed by filename - e.g. '.config'. Each
+            err_lines (list): A list of errors for this commit, or [] if there
+                is none, or we don't want to print errors
+            err_line_boards (dict): Dict keyed by error line, containing a list
+                of the Board objects with that error
+            warn_lines (list): A list of warnings for this commit, or [] if
+                there is none, or we don't want to print errors
+            warn_line_boards (dict): Dict keyed by warning line, containing a
+                list of the Board objects with that warning
+            config (dict): Dictionary keyed by filename - e.g. '.config'. Each
                     value is itself a dictionary:
                         key: config name
                         value: config value
-            environment: Dictionary keyed by environment variable, Each
+            environment (dict): Dictionary keyed by environment variable, Each
                      value is the value of environment variable.
-            show_sizes: Show image size deltas
-            show_detail: Show size delta detail for each board if show_sizes
-            show_bloat: Show detail for each function
-            show_config: Show config changes
-            show_environment: Show environment changes
+            show_sizes (bool): Show image size deltas
+            show_detail (bool): Show size delta detail for each board if
+                show_sizes
+            show_bloat (bool): Show detail for each function
+            show_config (bool): Show config changes
+            show_environment (bool): Show environment changes
         """
         def _board_list(line, line_boards):
             """Helper function to get a line of boards containing a line
@@ -1618,6 +1665,13 @@ class Builder:
                    f"{', '.join(not_built)}")
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
+        """Produce a summary of the results for a single commit
+
+        Args:
+            commit_upto (int): Commit number to summarise (0..self.count-1)
+            commits (list): List of commits being built
+            board_selected (dict): Dict containing boards to summarise
+        """
         (board_dict, err_lines, err_line_boards, warn_lines,
          warn_line_boards, config, environment) = self.get_result_summary(
                 board_selected, commit_upto,
@@ -1640,8 +1694,8 @@ class Builder:
         each commit's results, then display the differences we see.
 
         Args:
-            commit: Commit objects to summarise
-            board_selected: Dict containing boards to summarise
+            commits (list): Commit objects to summarise
+            board_selected (dict): Dict containing boards to summarise
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
@@ -1658,8 +1712,8 @@ class Builder:
         """Set up ready to start a build.
 
         Args:
-            board_selected: Selected boards to build
-            commits: Selected commits to build
+            board_selected (dict): Selected boards to build
+            commits (list): Selected commits to build
         """
         # First work out how many commits we will build
         count = (self.commit_count + self._step - 1) // self._step
@@ -1671,8 +1725,8 @@ class Builder:
         """Get the directory path to the working dir for a thread.
 
         Args:
-            thread_num: Number of thread to check (-1 for main process, which
-                is treated as 0)
+            thread_num (int): Number of thread to check (-1 for main process,
+                which is treated as 0)
         """
         if self.work_in_output:
             return self._working_dir
@@ -1801,14 +1855,15 @@ class Builder:
         """Build all commits for a list of boards
 
         Args:
-            commits: List of commits to be build, each a Commit object
-            boards_selected: Dict of selected boards, key is target name,
+            commits (list): List of commits to be build, each a Commit object
+            board_selected (dict): Dict of selected boards, key is target name,
                     value is Board object
-            keep_outputs: True to save build output files
-            verbose: Display build results as they are completed
+            keep_outputs (bool): True to save build output files
+            verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
+
         Returns:
-            Tuple containing:
+            tuple: Tuple containing:
                 - number of boards that failed to build
                 - number of boards that issued warnings
                 - list of thread exceptions raised
