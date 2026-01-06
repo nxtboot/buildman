@@ -141,8 +141,8 @@ class Config:
 
     def __hash__(self):
         val = 0
-        for fname in self.config:
-            for key, value in self.config[fname].items():
+        for fname, config in self.config.items():
+            for key, value in config.items():
                 print(key, value)
                 val = val ^ hash(key) & hash(value)
         return val
@@ -415,8 +415,7 @@ class Builder:
 
     def __del__(self):
         """Get rid of all threads created by the builder"""
-        for t in self.threads:
-            del t
+        self.threads.clear()
 
     def signal_handler(self, signal, frame):
         sys.exit(1)
