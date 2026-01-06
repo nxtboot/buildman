@@ -1532,6 +1532,62 @@ class Builder:
                              environment_minus, environment_change)
         self._output_config_info(lines)
 
+    def _calc_config_changes(self, target, arch, config, arch_config_plus,
+                              arch_config_minus, arch_config_change):
+        """Calculate configuration changes for a single target
+
+        Args:
+            target (str): Target board name
+            arch (str): Architecture name
+            config (dict): Dict of config changes, keyed by board.target
+            arch_config_plus (dict): Dict to update with added configs by
+                arch
+            arch_config_minus (dict): Dict to update with removed configs by
+                arch
+            arch_config_change (dict): Dict to update with changed configs by
+                arch
+
+        Returns:
+            str: Summary of config changes for this target
+        """
+        all_config_plus = {}
+        all_config_minus = {}
+        all_config_change = {}
+        tbase = self._base_config[target]
+        tconfig = config[target]
+        lines = []
+        for name in self.config_filenames:
+            if not tconfig.config[name]:
+                continue
+            config_plus = {}
+            config_minus = {}
+            config_change = {}
+            base = tbase.config[name]
+            for key, value in tconfig.config[name].items():
+                if key not in base:
+                    config_plus[key] = value
+                    all_config_plus[key] = value
+            for key, value in base.items():
+                if key not in tconfig.config[name]:
+                    config_minus[key] = value
+                    all_config_minus[key] = value
+            for key, value in base.items():
+                new_value = tconfig.config.get(key)
+                if new_value and value != new_value:
+                    desc = f'{value} -> {new_value}'
+                    config_change[key] = desc
+                    all_config_change[key] = desc
+
+            arch_config_plus[arch][name].update(config_plus)
+            arch_config_minus[arch][name].update(config_minus)
+            arch_config_change[arch][name].update(config_change)
+
+            self._add_config(lines, name, config_plus, config_minus,
+                             config_change)
+        self._add_config(lines, 'all', all_config_plus,
+                         all_config_minus, all_config_change)
+        return '\n'.join(lines)
+
     def _show_config_changes(self, board_selected, board_dict, config):
         """Show changes in configuration
 
@@ -1567,46 +1623,10 @@ class Builder:
         for target in board_dict:
             if target not in board_selected:
                 continue
-
             arch = board_selected[target].arch
-
-            all_config_plus = {}
-            all_config_minus = {}
-            all_config_change = {}
-            tbase = self._base_config[target]
-            tconfig = config[target]
-            lines = []
-            for name in self.config_filenames:
-                if not tconfig.config[name]:
-                    continue
-                config_plus = {}
-                config_minus = {}
-                config_change = {}
-                base = tbase.config[name]
-                for key, value in tconfig.config[name].items():
-                    if key not in base:
-                        config_plus[key] = value
-                        all_config_plus[key] = value
-                for key, value in base.items():
-                    if key not in tconfig.config[name]:
-                        config_minus[key] = value
-                        all_config_minus[key] = value
-                for key, value in base.items():
-                    new_value = tconfig.config.get(key)
-                    if new_value and value != new_value:
-                        desc = f'{value} -> {new_value}'
-                        config_change[key] = desc
-                        all_config_change[key] = desc
-
-                arch_config_plus[arch][name].update(config_plus)
-                arch_config_minus[arch][name].update(config_minus)
-                arch_config_change[arch][name].update(config_change)
-
-                self._add_config(lines, name, config_plus, config_minus,
-                                 config_change)
-            self._add_config(lines, 'all', all_config_plus,
-                             all_config_minus, all_config_change)
-            summary[target] = '\n'.join(lines)
+            summary[target] = self._calc_config_changes(
+                target, arch, config, arch_config_plus, arch_config_minus,
+                arch_config_change)
 
         lines_by_target = {}
         for target, lines in summary.items():
