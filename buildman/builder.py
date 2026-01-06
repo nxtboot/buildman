@@ -232,8 +232,8 @@ class Builder:
             threading is not being used
         _terminated: Thread was terminated due to an error
         _restarting_config: True if 'Restart config' is detected in output
-        _ide: Produce output suitable for an Integrated Development Environment,
-            i.e. dont emit progress information and put errors/warnings on stderr
+        _ide: Produce output suitable for an Integrated Development Environment
+            i.e. don't emit progress information and put errors on stderr
     """
     class Outcome:
         """Records a build outcome for a single make invocation
@@ -394,9 +394,10 @@ class Builder:
         self._re_files = re.compile('In file included from.*')
         self._re_warning = re.compile(r'(.*):(\d*):(\d*): warning: .*')
         self._re_dtb_warning = re.compile('(.*): Warning .*')
-        self._re_note = re.compile(r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
-        self._re_migration_warning = re.compile(r'^={21} WARNING ={22}\n.*\n=+\n',
-                                                re.MULTILINE | re.DOTALL)
+        self._re_note = re.compile(
+            r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
+        self._re_migration_warning = re.compile(
+            r'^={21} WARNING ={22}\n.*\n=+\n', re.MULTILINE | re.DOTALL)
 
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions
@@ -453,7 +454,8 @@ class Builder:
             self._single_builder = builderthread.BuilderThread(
                 self, -1, mrproper, per_board_out_dir)
 
-        ignore_lines = ['(make.*Waiting for unfinished)', '(Segmentation fault)']
+        ignore_lines = ['(make.*Waiting for unfinished)',
+                        '(Segmentation fault)']
         self.re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
@@ -595,7 +597,8 @@ class Builder:
 
         if self._terminated:
             # Try to be helpful
-            result.stderr += '(** did you define an int/hex Kconfig with no default? **)'
+            result.stderr += \
+                '(** did you define an int/hex Kconfig with no default? **)'
 
         if self.verbose_build:
             result.stdout = f"{' '.join(cmd)}\n" + result.stdout
@@ -1376,8 +1379,8 @@ class Builder:
             worse_lines = []
             for line in lines:
                 if line not in base_lines:
-                    errline = ErrLine(char + '+', _board_list(line, line_boards),
-                                      line)
+                    errline = ErrLine(
+                        char + '+', _board_list(line, line_boards), line)
                     worse_lines.append(errline)
             for line in base_lines:
                 if line not in lines:
@@ -1513,8 +1516,8 @@ class Builder:
                     sys.stderr.write(line)
 
         # Display results by arch
-        elif any((ok_boards, warn_boards, err_boards, unknown_boards, new_boards,
-                worse_err, better_err, worse_warn, better_warn)):
+        elif any((ok_boards, warn_boards, err_boards, unknown_boards,
+                  new_boards, worse_err, better_err, worse_warn, better_warn)):
             arch_list = {}
             self.add_outcome(board_selected, arch_list, ok_boards, '',
                     self.col.GREEN)
@@ -1522,7 +1525,8 @@ class Builder:
                     self.col.YELLOW)
             self.add_outcome(board_selected, arch_list, err_boards, '+',
                     self.col.RED)
-            self.add_outcome(board_selected, arch_list, new_boards, '*', self.col.BLUE)
+            self.add_outcome(board_selected, arch_list, new_boards, '*',
+                             self.col.BLUE)
             if self._show_unknown:
                 self.add_outcome(board_selected, arch_list, unknown_boards, '?',
                         self.col.MAGENTA)
@@ -1841,7 +1845,7 @@ class Builder:
             List of full paths of directories to remove
         """
         if not self.commits:
-            return
+            return []
         dir_list = []
         for commit_upto in range(self.commit_count):
             dir_list.append(self.get_output_dir(commit_upto))
@@ -1944,12 +1948,13 @@ class Builder:
             if duration > timedelta(microseconds=1000000):
                 if duration.microseconds >= 500000:
                     duration = duration + timedelta(seconds=1)
-                duration = duration - timedelta(microseconds=duration.microseconds)
+                duration -= timedelta(microseconds=duration.microseconds)
                 rate = float(self.count) / duration.total_seconds()
                 msg += f', duration {duration}, rate {rate:1.2f}'
             tprint(msg)
             if self.thread_exceptions:
-                tprint(f'Failed: {len(self.thread_exceptions)} thread exceptions',
+                tprint(
+                    f'Failed: {len(self.thread_exceptions)} thread exceptions',
                     colour=self.col.RED)
 
         return (self.fail, self.warned, self.thread_exceptions)
