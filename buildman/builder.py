@@ -737,12 +737,12 @@ class Builder:
             line = line.strip()
             parts = line.split()
             if line and len(parts) == 3:
-                    size, type, name = line.split()
-                    if type in NM_SYMBOL_TYPES:
-                        # function names begin with '.' on 64-bit powerpc
-                        if '.' in name[1:]:
-                            name = 'static.' + name.split('.')[0]
-                        sym[name] = sym.get(name, 0) + int(size, 16)
+                size, type, name = line.split()
+                if type in NM_SYMBOL_TYPES:
+                    # function names begin with '.' on 64-bit powerpc
+                    if '.' in name[1:]:
+                        name = 'static.' + name.split('.')[0]
+                    sym[name] = sym.get(name, 0) + int(size, 16)
         return sym
 
     def _process_config(self, fname):
@@ -1064,12 +1064,12 @@ class Builder:
                 delta.append([new[name], name])
 
         for name in common:
-                diff = new.get(name, 0) - old.get(name, 0)
-                if diff > 0:
-                    grow, up = grow + 1, up + diff
-                elif diff < 0:
-                    shrink, down = shrink + 1, down - diff
-                delta.append([diff, name])
+            diff = new.get(name, 0) - old.get(name, 0)
+            if diff > 0:
+                grow, up = grow + 1, up + diff
+            elif diff < 0:
+                shrink, down = shrink + 1, down - diff
+            delta.append([diff, name])
 
         delta.sort()
         delta.reverse()
@@ -1621,21 +1621,21 @@ class Builder:
                   ', '.join(not_built)))
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
-            (board_dict, err_lines, err_line_boards, warn_lines,
-             warn_line_boards, config, environment) = self.get_result_summary(
-                    board_selected, commit_upto,
-                    read_func_sizes=self._show_bloat,
-                    read_config=self._show_config,
-                    read_environment=self._show_environment)
-            if commits:
-                msg = '%02d: %s' % (commit_upto + 1,
-                        commits[commit_upto].subject)
-                tprint(msg, colour=self.col.BLUE)
-            self.print_result_summary(board_selected, board_dict,
-                    err_lines if self._show_errors else [], err_line_boards,
-                    warn_lines if self._show_errors else [], warn_line_boards,
-                    config, environment, self._show_sizes, self._show_detail,
-                    self._show_bloat, self._show_config, self._show_environment)
+        (board_dict, err_lines, err_line_boards, warn_lines,
+         warn_line_boards, config, environment) = self.get_result_summary(
+                board_selected, commit_upto,
+                read_func_sizes=self._show_bloat,
+                read_config=self._show_config,
+                read_environment=self._show_environment)
+        if commits:
+            msg = '%02d: %s' % (commit_upto + 1,
+                    commits[commit_upto].subject)
+            tprint(msg, colour=self.col.BLUE)
+        self.print_result_summary(board_selected, board_dict,
+                err_lines if self._show_errors else [], err_line_boards,
+                warn_lines if self._show_errors else [], warn_line_boards,
+                config, environment, self._show_sizes, self._show_detail,
+                self._show_bloat, self._show_config, self._show_environment)
 
     def show_summary(self, commits, board_selected):
         """Show a build summary for U-Boot for a given board list.
