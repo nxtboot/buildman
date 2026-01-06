@@ -761,7 +761,7 @@ class Builder:
         """
         config = {}
         if os.path.exists(fname):
-            with open(fname) as fd:
+            with open(fname, encoding='utf-8') as fd:
                 for line in fd:
                     line = line.strip()
                     if line.startswith('#define'):
@@ -797,7 +797,7 @@ class Builder:
         """
         environment = {}
         if os.path.exists(fname):
-            with open(fname) as fd:
+            with open(fname, encoding='utf-8') as fd:
                 for line in fd.read().split('\0'):
                     try:
                         key, value = line.split('=', 1)
@@ -828,7 +828,7 @@ class Builder:
         config = {}
         environment = {}
         if os.path.exists(done_file):
-            with open(done_file, 'r') as fd:
+            with open(done_file, 'r', encoding='utf-8') as fd:
                 try:
                     return_code = int(fd.readline())
                 except ValueError:
@@ -838,7 +838,7 @@ class Builder:
                 err_lines = []
                 err_file = self.get_err_file(commit_upto, target)
                 if os.path.exists(err_file):
-                    with open(err_file, 'r') as fd:
+                    with open(err_file, 'r', encoding='utf-8') as fd:
                         err_lines = self.filter_errors(fd.readlines())
 
                 # Decide whether the build was ok, failed or created warnings
@@ -851,7 +851,7 @@ class Builder:
 
                 # Convert size information to our simple format
                 if os.path.exists(sizes_file):
-                    with open(sizes_file, 'r') as fd:
+                    with open(sizes_file, 'r', encoding='utf-8') as fd:
                         for line in fd.readlines():
                             values = line.split()
                             rodata = 0
@@ -870,7 +870,7 @@ class Builder:
             if read_func_sizes:
                 pattern = self.get_func_sizes_file(commit_upto, target, '*')
                 for fname in glob.glob(pattern):
-                    with open(fname, 'r') as fd:
+                    with open(fname, 'r', encoding='utf-8') as fd:
                         dict_name = os.path.basename(fname).replace('.sizes',
                                                                     '')
                         func_sizes[dict_name] = self.read_func_sizes(fname, fd)
