@@ -12,13 +12,10 @@ import re
 import queue
 import shutil
 import signal
-import string
 import sys
 import threading
-import time
 
 from buildman import builderthread
-from buildman import toolchain
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
