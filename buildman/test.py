@@ -4,6 +4,8 @@
 
 """Tests for the buildman build tool"""
 
+# pylint: disable=too-many-lines
+
 import os
 import shutil
 import sys
@@ -229,6 +231,7 @@ class TestBuildOutput(TestBuildBase):
         result.combined = result.stdout + result.stderr
         return result
 
+    # pylint: disable=too-many-arguments
     def assert_summary(self, text, arch, plus, brds, outcome=OUTCOME_ERR):
         """Check that the summary text matches expectations"""
         col = self._col
@@ -397,6 +400,7 @@ class TestBuildOutput(TestBuildBase):
         self._check_output_part2(lines, col, boards01234, boards34, boards4,
                                  filter_dtb_warnings, filter_migration_warnings)
 
+    # pylint: disable=too-many-arguments
     def _check_output_part2(self, lines, col, boards01234, boards34, boards4,
                             filter_dtb_warnings, filter_migration_warnings):
         """Check expected output from the build summary (commits 5-7)
