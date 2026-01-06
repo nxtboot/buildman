@@ -1877,10 +1877,19 @@ class Builder:
         self._base_config = config
         self._base_environment = environment
 
-        # Get a list of boards that did not get built, if needed
+        self._show_not_built(board_selected, board_dict)
+
+    @staticmethod
+    def _show_not_built(board_selected, board_dict):
+        """Show boards that were not built
+
+        Args:
+            board_selected (dict): Dict of selected boards, keyed by target
+            board_dict (dict): Dict of boards that were built, keyed by target
+        """
         not_built = []
         for brd in board_selected:
-            if not brd in board_dict:
+            if brd not in board_dict:
                 not_built.append(brd)
         if not_built:
             tprint(f"Boards not built ({len(not_built)}): "
