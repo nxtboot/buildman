@@ -1680,6 +1680,71 @@ class Builder:
             tprint(f"{' '.join(sorted(targets))} :")
             self._output_config_info(lines.split('\n'))
 
+    def _output_err_lines(self, err_lines, colour):
+        """Output the line of error/warning lines, if not empty
+
+        Also increments self._error_lines if err_lines not empty
+
+        Args:
+            err_lines: List of ErrLine objects, each an error or warning
+                line, possibly including a list of boards with that
+                error/warning
+            colour: Colour to use for output
+        """
+        if err_lines:
+            out_list = []
+            for line in err_lines:
+                names = [brd.target for brd in line.brds]
+                board_str = ' '.join(names) if names else ''
+                if board_str:
+                    out = self.col.build(colour, line.char + '(')
+                    out += self.col.build(self.col.MAGENTA, board_str,
+                                          bright=False)
+                    out += self.col.build(colour, f') {line.errline}')
+                else:
+                    out = self.col.build(colour, line.char + line.errline)
+                out_list.append(out)
+            tprint('\n'.join(out_list))
+            self._error_lines += 1
+
+    def _display_arch_results(self, board_selected, brd_status, better_err,
+                              worse_err, better_warn, worse_warn):
+        """Display results by architecture
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise
+            brd_status (BoardStatus): Named tuple with board classifications
+            better_err: List of ErrLine for fixed errors
+            worse_err: List of ErrLine for new errors
+            better_warn: List of ErrLine for fixed warnings
+            worse_warn: List of ErrLine for new warnings
+        """
+        if self._ide:
+            return
+        if not any((brd_status.ok, brd_status.warn, brd_status.err,
+                    brd_status.unknown, brd_status.new, worse_err, better_err,
+                    worse_warn, better_warn)):
+            return
+        arch_list = {}
+        self.add_outcome(board_selected, arch_list, brd_status.ok, '',
+                         self.col.GREEN)
+        self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
+                         self.col.YELLOW)
+        self.add_outcome(board_selected, arch_list, brd_status.err, '+',
+                         self.col.RED)
+        self.add_outcome(board_selected, arch_list, brd_status.new, '*',
+                         self.col.BLUE)
+        if self._show_unknown:
+            self.add_outcome(board_selected, arch_list, brd_status.unknown,
+                             '?', self.col.MAGENTA)
+        for arch, target_list in arch_list.items():
+            tprint(f'{arch:>10s}: {target_list}')
+            self._error_lines += 1
+        self._output_err_lines(better_err, colour=self.col.GREEN)
+        self._output_err_lines(worse_err, colour=self.col.RED)
+        self._output_err_lines(better_warn, colour=self.col.CYAN)
+        self._output_err_lines(worse_warn, colour=self.col.YELLOW)
+
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
                            config, environment, show_sizes, show_detail,
@@ -1770,34 +1835,6 @@ class Builder:
                     better_lines.append(errline)
             return better_lines, worse_lines
 
-        def _output_err_lines(err_lines, colour):
-            """Output the line of error/warning lines, if not empty
-
-            Also increments self._error_lines if err_lines not empty
-
-            Args:
-                err_lines: List of ErrLine objects, each an error or warning
-                    line, possibly including a list of boards with that
-                    error/warning
-                colour: Colour to use for output
-            """
-            if err_lines:
-                out_list = []
-                for line in err_lines:
-                    names = [brd.target for brd in line.brds]
-                    board_str = ' '.join(names) if names else ''
-                    if board_str:
-                        out = self.col.build(colour, line.char + '(')
-                        out += self.col.build(self.col.MAGENTA, board_str,
-                                              bright=False)
-                        out += self.col.build(colour, f') {line.errline}')
-                    else:
-                        out = self.col.build(colour, line.char + line.errline)
-                    out_list.append(out)
-                tprint('\n'.join(out_list))
-                self._error_lines += 1
-
-
         brd_status = self._classify_boards(board_selected, board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
@@ -1816,28 +1853,8 @@ class Builder:
                     sys.stderr.write(line)
 
         # Display results by arch
-        elif any((brd_status.ok, brd_status.warn, brd_status.err,
-                  brd_status.unknown, brd_status.new, worse_err, better_err,
-                  worse_warn, better_warn)):
-            arch_list = {}
-            self.add_outcome(board_selected, arch_list, brd_status.ok, '',
-                             self.col.GREEN)
-            self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
-                             self.col.YELLOW)
-            self.add_outcome(board_selected, arch_list, brd_status.err, '+',
-                             self.col.RED)
-            self.add_outcome(board_selected, arch_list, brd_status.new, '*',
-                             self.col.BLUE)
-            if self._show_unknown:
-                self.add_outcome(board_selected, arch_list, brd_status.unknown,
-                                 '?', self.col.MAGENTA)
-            for arch, target_list in arch_list.items():
-                tprint(f'{arch:>10s}: {target_list}')
-                self._error_lines += 1
-            _output_err_lines(better_err, colour=self.col.GREEN)
-            _output_err_lines(worse_err, colour=self.col.RED)
-            _output_err_lines(better_warn, colour=self.col.CYAN)
-            _output_err_lines(worse_warn, colour=self.col.YELLOW)
+        self._display_arch_results(board_selected, brd_status, better_err,
+                                   worse_err, better_warn, worse_warn)
 
         if show_sizes:
             self.print_size_summary(board_selected, board_dict, show_detail,
