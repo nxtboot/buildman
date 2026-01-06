@@ -1241,6 +1241,36 @@ class Builder:
                                                  outcome.func_sizes[fname])
 
 
+    @staticmethod
+    def _calc_image_size_changes(target, sizes, base_sizes):
+        """Calculate size changes for each image/part
+
+        Args:
+            target (str): Target board name
+            sizes (dict): Dict of image sizes, keyed by image name
+            base_sizes (dict): Dict of base image sizes, keyed by image name
+
+        Returns:
+            dict: Size changes, e.g.:
+                {'_target': 'snapper9g45', 'data': 5, 'u-boot-spl:text': -4}
+                meaning U-Boot data increased by 5 bytes, SPL text decreased
+                by 4
+        """
+        err = {'_target' : target}
+        for image in sizes:
+            if image in base_sizes:
+                base_image = base_sizes[image]
+                # Loop through the text, data, bss parts
+                for part in sorted(sizes[image]):
+                    diff = sizes[image][part] - base_image[part]
+                    if diff:
+                        if image == 'u-boot':
+                            name = part
+                        else:
+                            name = image + ':' + part
+                        err[name] = diff
+        return err
+
     def _calc_size_changes(self, board_selected, board_dict):
         """Calculate changes in size for different image parts
 
@@ -1267,25 +1297,7 @@ class Builder:
             base_sizes = self._base_board_dict[target].sizes
             outcome = board_dict[target]
             sizes = outcome.sizes
-
-            # Loop through the list of images, creating a dict of size
-            # changes for each image/part. We end up with something like
-            # {'target' : 'snapper9g45, 'data' : 5, 'u-boot-spl:text' : -4}
-            # which means that U-Boot data increased by 5 bytes and SPL
-            # text decreased by 4.
-            err = {'_target' : target}
-            for image in sizes:
-                if image in base_sizes:
-                    base_image = base_sizes[image]
-                    # Loop through the text, data, bss parts
-                    for part in sorted(sizes[image]):
-                        diff = sizes[image][part] - base_image[part]
-                        if diff:
-                            if image == 'u-boot':
-                                name = part
-                            else:
-                                name = image + ':' + part
-                            err[name] = diff
+            err = self._calc_image_size_changes(target, sizes, base_sizes)
             arch = board_selected[target].arch
             if not arch in arch_count:
                 arch_count[arch] = 1
