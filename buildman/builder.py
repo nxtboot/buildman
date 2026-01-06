@@ -547,8 +547,8 @@ class Builder:
             result.stderr += '(** did you define an int/hex Kconfig with no default? **)'
 
         if self.verbose_build:
-            result.stdout = '%s\n' % (' '.join(cmd)) + result.stdout
-            result.combined = '%s\n' % (' '.join(cmd)) + result.combined
+            result.stdout = f"{' '.join(cmd)}\n" + result.stdout
+            result.combined = f"{' '.join(cmd)}\n" + result.combined
         return result
 
     def process_result(self, result):
@@ -584,21 +584,21 @@ class Builder:
 
         # Display separate counts for ok, warned and fail
         ok = self.upto - self.warned - self.fail
-        line = '\r' + self.col.build(self.col.GREEN, '%5d' % ok)
-        line += self.col.build(self.col.YELLOW, '%5d' % self.warned)
-        line += self.col.build(self.col.RED, '%5d' % self.fail)
+        line = '\r' + self.col.build(self.col.GREEN, f'{ok:5d}')
+        line += self.col.build(self.col.YELLOW, f'{self.warned:5d}')
+        line += self.col.build(self.col.RED, f'{self.fail:5d}')
 
-        line += ' /%-5d  ' % self.count
+        line += f' /{self.count:<5d}  '
         remaining = self.count - self.upto
         if remaining:
-            line += self.col.build(self.col.MAGENTA, ' -%-5d  ' % remaining)
+            line += self.col.build(self.col.MAGENTA, f' -{remaining:<5d}  ')
         else:
             line += ' ' * 8
 
         # Add our current completion time estimate
         self._add_timestamp()
         if self._complete_delay:
-            line += '%s  : ' % self._complete_delay
+            line += f'{self._complete_delay}  : '
 
         line += target
         if not self._ide:
@@ -621,8 +621,7 @@ class Builder:
             commit = self.commits[commit_upto]
             subject = commit.subject.translate(trans_valid_chars)
             # See _get_output_space_removals() which parses this name
-            commit_dir = ('%02d_g%s_%s' % (commit_upto + 1,
-                    commit.hash, subject[:20]))
+            commit_dir = f'{commit_upto + 1:02d}_g{commit.hash}_{subject[:20]}'
         elif not self.no_subdirs:
             commit_dir = 'current'
         if not commit_dir:
@@ -673,7 +672,7 @@ class Builder:
             elf_fname: Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
-                            '%s.sizes' % elf_fname.replace('/', '-'))
+                            f"{elf_fname.replace('/', '-')}.sizes")
 
     def get_objdump_file(self, commit_upto, target, elf_fname):
         """Get the name of the objdump file for a commit number and ELF file
@@ -684,7 +683,7 @@ class Builder:
             elf_fname: Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
-                            '%s.objdump' % elf_fname.replace('/', '-'))
+                            f"{elf_fname.replace('/', '-')}.objdump")
 
     def get_err_file(self, commit_upto, target):
         """Get the name of the err file for a commit number
@@ -1004,7 +1003,7 @@ class Builder:
                 arch = 'unknown'
             text = self.col.build(color, ' ' + target)
             if not arch in done_arch:
-                text = ' %s  %s' % (self.col.build(color, char), text)
+                text = f' {self.col.build(color, char)}  {text}'
                 done_arch[arch] = True
             if not arch in arch_list:
                 arch_list[arch] = text
@@ -1077,15 +1076,16 @@ class Builder:
             return
         args = [self.colour_num(x) for x in args]
         indent = ' ' * 15
-        tprint('%s%s: add: %s/%s, grow: %s/%s bytes: %s/%s (%s)' %
-              tuple([indent, self.col.build(self.col.YELLOW, fname)] + args))
-        tprint('%s  %-38s %7s %7s %+7s' % (indent, 'function', 'old', 'new',
-                                         'delta'))
+        tprint(f'{indent}{self.col.build(self.col.YELLOW, fname)}: add: '
+               f'{args[0]}/{args[1]}, grow: {args[2]}/{args[3]} bytes: '
+               f'{args[4]}/{args[5]} ({args[6]})')
+        tprint(f'{indent}  {"function":<38s} {"old":>7s} {"new":>7s} '
+               f'{"delta":>+7s}')
         for diff, name in delta:
             if diff:
                 color = self.col.RED if diff > 0 else self.col.GREEN
-                msg = '%s  %-38s %7s %7s %+7d' % (indent, name,
-                        old.get(name, '-'), new.get(name,'-'), diff)
+                msg = (f'{indent}  {name:<38s} {old.get(name, "-"):>7} '
+                       f'{new.get(name, "-"):>7} {diff:+7d}')
                 tprint(msg, colour=color)
 
 
@@ -1108,9 +1108,9 @@ class Builder:
                 if name.startswith('_'):
                     continue
                 colour = self.col.RED if diff > 0 else self.col.GREEN
-                msg = ' %s %+d' % (name, diff)
+                msg = f' {name} {diff:+d}'
                 if not printed_target:
-                    tprint('%10s  %-15s:' % ('', result['_target']),
+                    tprint(f'{"":10s}  {result["_target"]:<15s}:',
                           newline=False)
                     printed_target = True
                 tprint(msg, colour=colour, newline=False)
@@ -1216,10 +1216,10 @@ class Builder:
                     # architecture
                     avg_diff = float(diff) / count
                     color = self.col.RED if avg_diff > 0 else self.col.GREEN
-                    msg = ' %s %+1.1f' % (name, avg_diff)
+                    msg = f' {name} {avg_diff:+1.1f}'
                     if not printed_arch:
-                        tprint('%10s: (for %d/%d boards)' % (arch, count,
-                              arch_count[arch]), newline=False)
+                        tprint(f'{arch:>10s}: (for {count}/{arch_count[arch]} '
+                               'boards)', newline=False)
                         printed_arch = True
                     tprint(msg, colour=color, newline=False)
 
@@ -1333,8 +1333,8 @@ class Builder:
             """
             out = ''
             for key in sorted(config.keys()):
-                out += '%s=%s ' % (key, config[key])
-            return '%s %s: %s' % (delta, name, out)
+                out += f'{key}={config[key]} '
+            return f'{delta} {name}: {out}'
 
         def _add_config(lines, name, config_plus, config_minus, config_change):
             """Add changes in configuration to a list
@@ -1392,7 +1392,7 @@ class Builder:
                         out = self.col.build(colour, line.char + '(')
                         out += self.col.build(self.col.MAGENTA, board_str,
                                               bright=False)
-                        out += self.col.build(colour, ') %s' % line.errline)
+                        out += self.col.build(colour, f') {line.errline}')
                     else:
                         out = self.col.build(colour, line.char + line.errline)
                     out_list.append(out)
@@ -1459,7 +1459,7 @@ class Builder:
                 self.add_outcome(board_selected, arch_list, unknown_boards, '?',
                         self.col.MAGENTA)
             for arch, target_list in arch_list.items():
-                tprint('%10s: %s' % (arch, target_list))
+                tprint(f'{arch:>10s}: {target_list}')
                 self._error_lines += 1
             _output_err_lines(better_err, colour=self.col.GREEN)
             _output_err_lines(worse_err, colour=self.col.RED)
@@ -1492,7 +1492,7 @@ class Builder:
                 for key, value in base.items():
                     new_value = tenvironment.environment.get(key)
                     if new_value and value != new_value:
-                        desc = '%s -> %s' % (value, new_value)
+                        desc = f'{value} -> {new_value}'
                         environment_change[key] = desc
 
                 _add_config(lines, target, environment_plus, environment_minus,
@@ -1553,7 +1553,7 @@ class Builder:
                     for key, value in base.items():
                         new_value = tconfig.config.get(key)
                         if new_value and value != new_value:
-                            desc = '%s -> %s' % (value, new_value)
+                            desc = f'{value} -> {new_value}'
                             config_change[key] = desc
                             all_config_change[key] = desc
 
@@ -1589,13 +1589,13 @@ class Builder:
                 _add_config(lines, 'all', all_plus, all_minus, all_change)
                 #arch_summary[target] = '\n'.join(lines)
                 if lines:
-                    tprint('%s:' % arch)
+                    tprint(f'{arch}:')
                     _output_config_info(lines)
 
             for lines, targets in lines_by_target.items():
                 if not lines:
                     continue
-                tprint('%s :' % ' '.join(sorted(targets)))
+                tprint(f"{' '.join(sorted(targets))} :")
                 _output_config_info(lines.split('\n'))
 
 
@@ -1614,8 +1614,8 @@ class Builder:
             if not brd in board_dict:
                 not_built.append(brd)
         if not_built:
-            tprint("Boards not built (%d): %s" % (len(not_built),
-                  ', '.join(not_built)))
+            tprint(f"Boards not built ({len(not_built)}): "
+                   f"{', '.join(not_built)}")
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
         (board_dict, err_lines, err_line_boards, warn_lines,
@@ -1625,8 +1625,7 @@ class Builder:
                 read_config=self._show_config,
                 read_environment=self._show_environment)
         if commits:
-            msg = '%02d: %s' % (commit_upto + 1,
-                    commits[commit_upto].subject)
+            msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self.col.BLUE)
         self.print_result_summary(board_selected, board_dict,
                 err_lines if self._show_errors else [], err_line_boards,
@@ -1677,7 +1676,7 @@ class Builder:
         """
         if self.work_in_output:
             return self._working_dir
-        return os.path.join(self._working_dir, '%02d' % max(thread_num, 0))
+        return os.path.join(self._working_dir, f'{max(thread_num, 0):02d}')
 
     def _prepare_thread(self, thread_num, setup_git):
         """Prepare the working directory for a thread.
@@ -1703,7 +1702,7 @@ class Builder:
             if os.path.isdir(git_dir):
                 # This is a clone of the src_dir repo, we can keep using
                 # it but need to fetch from src_dir.
-                tprint('\rFetching repo for thread %d' % thread_num,
+                tprint(f'\rFetching repo for thread {thread_num}',
                       newline=False)
                 gitutil.fetch(git_dir, thread_dir)
                 terminal.print_clear()
@@ -1714,20 +1713,20 @@ class Builder:
             elif os.path.exists(git_dir):
                 # Don't know what could trigger this, but we probably
                 # can't create a git worktree/clone here.
-                raise ValueError('Git dir %s exists, but is not a file '
-                                 'or a directory.' % git_dir)
+                raise ValueError(f'Git dir {git_dir} exists, but is not a '
+                                 'file or a directory.')
             elif setup_git == 'worktree':
-                tprint('\rChecking out worktree for thread %d' % thread_num,
+                tprint(f'\rChecking out worktree for thread {thread_num}',
                       newline=False)
                 gitutil.add_worktree(src_dir, thread_dir)
                 terminal.print_clear()
             elif setup_git == 'clone' or setup_git == True:
-                tprint('\rCloning repo for thread %d' % thread_num,
+                tprint(f'\rCloning repo for thread {thread_num}',
                       newline=False)
                 gitutil.clone(src_dir, thread_dir)
                 terminal.print_clear()
             else:
-                raise ValueError("Can't setup git repo with %s." % setup_git)
+                raise ValueError(f"Can't setup git repo with {setup_git}.")
 
     def _prepare_working_space(self, max_threads, setup_git):
         """Prepare the working directory for use.
@@ -1791,7 +1790,7 @@ class Builder:
         """
         to_remove = self._get_output_space_removals()
         if to_remove:
-            tprint('Removing %d old build directories...' % len(to_remove),
+            tprint(f'Removing {len(to_remove)} old build directories...',
                   newline=False)
             for dirname in to_remove:
                 shutil.rmtree(dirname)
@@ -1856,15 +1855,15 @@ class Builder:
         if not self._ide:
             tprint()
 
-            msg = 'Completed: %d total built' % self.count
+            msg = f'Completed: {self.count} total built'
             if self.already_done or self.kconfig_reconfig:
                 parts = []
                 if self.already_done:
-                    parts.append('%d previously' % self.already_done)
+                    parts.append(f'{self.already_done} previously')
                 if self.already_done != self.count:
-                    parts.append('%d newly' % (self.count - self.already_done))
+                    parts.append(f'{self.count - self.already_done} newly')
                 if self.kconfig_reconfig:
-                    parts.append('%d reconfig' % self.kconfig_reconfig)
+                    parts.append(f'{self.kconfig_reconfig} reconfig')
                 msg += ' (' + ', '.join(parts) + ')'
             duration = datetime.now() - self._start_time
             if duration > timedelta(microseconds=1000000):
@@ -1872,10 +1871,10 @@ class Builder:
                     duration = duration + timedelta(seconds=1)
                 duration = duration - timedelta(microseconds=duration.microseconds)
                 rate = float(self.count) / duration.total_seconds()
-                msg += ', duration %s, rate %1.2f' % (duration, rate)
+                msg += f', duration {duration}, rate {rate:1.2f}'
             tprint(msg)
             if self.thread_exceptions:
-                tprint('Failed: %d thread exceptions' % len(self.thread_exceptions),
+                tprint(f'Failed: {len(self.thread_exceptions)} thread exceptions',
                     colour=self.col.RED)
 
         return (self.fail, self.warned, self.thread_exceptions)
