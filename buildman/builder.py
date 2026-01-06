@@ -463,13 +463,8 @@ class Builder:
         """Get rid of all threads created by the builder"""
         self.threads.clear()
 
-    def signal_handler(self, signum, frame):
-        """Handle a signal by exiting
-
-        Args:
-            signum (int): Signal number
-            frame (frame): Stack frame at point of signal
-        """
+    def signal_handler(self, _signum, _frame):
+        """Handle a signal by exiting"""
         sys.exit(1)
 
     def make_environment(self, toolchain):
@@ -564,20 +559,16 @@ class Builder:
         if checkout and self.checkout:
             gitutil.checkout(commit.hash)
 
-    def make(self, commit, brd, stage, cwd, *args, **kwargs):
+    def make(self, _commit, _brd, _stage, cwd, *args, **kwargs):
         """Run make
 
         Args:
-            commit (Commit): Commit object that is being built
-            brd (Board): Board object that is being built
-            stage (str): Stage that we are at (mrproper, config, oldconfig,
-                build)
             cwd (str): Directory where make should be run
             args: Arguments to pass to make
             kwargs: Arguments to pass to command.run_one()
         """
 
-        def check_output(stream, data):
+        def check_output(_stream, data):
             if b'Restart config' in data:
                 self._restarting_config = True
 
@@ -779,11 +770,10 @@ class Builder:
             out_lines.append(line)
         return out_lines
 
-    def read_func_sizes(self, fname, fd):
+    def read_func_sizes(self, _fname, fd):
         """Read function sizes from the output of 'nm'
 
         Args:
-            fname (str): Filename we are reading from (just for errors)
             fd (file): File containing data to read
 
         Returns:
@@ -1739,12 +1729,11 @@ class Builder:
             tprint('(no errors to report)', colour=self.col.GREEN)
 
 
-    def setup_build(self, board_selected, commits):
+    def setup_build(self, board_selected, _commits):
         """Set up ready to start a build.
 
         Args:
             board_selected (dict): Selected boards to build
-            commits (list): Selected commits to build
         """
         # First work out how many commits we will build
         count = (self.commit_count + self._step - 1) // self._step
