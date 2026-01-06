@@ -961,6 +961,62 @@ class Builder:
 
         return Builder.Outcome(OUTCOME_UNKNOWN, [], {}, {}, {}, {})
 
+    @staticmethod
+    def _add_line(lines_summary, lines_boards, line, brd):
+        """Add a line to the summary and boards list
+
+        Args:
+            lines_summary (list): List of line strings
+            lines_boards (dict): Dict of line strings to list of boards
+            line (str): Line to add
+            brd (Board): Board that produced this line
+        """
+        line = line.rstrip()
+        if line in lines_boards:
+            lines_boards[line].append(brd)
+        else:
+            lines_boards[line] = [brd]
+            lines_summary.append(line)
+
+    def _categorise_err_lines(self, err_lines, brd, err_lines_summary,
+                              err_lines_boards, warn_lines_summary,
+                              warn_lines_boards):
+        """Categorise error lines into errors and warnings
+
+        Args:
+            err_lines (list): List of error-line strings
+            brd (Board): Board that produced these lines
+            err_lines_summary (list): List of error-line strings
+            err_lines_boards (dict): Dict of error-line strings to boards
+            warn_lines_summary (list): List of warning-line strings
+            warn_lines_boards (dict): Dict of warning-line strings to boards
+        """
+        last_func = None
+        last_was_warning = False
+        for line in err_lines:
+            if line:
+                if (self._re_function.match(line) or
+                        self._re_files.match(line)):
+                    last_func = line
+                else:
+                    is_warning = (self._re_warning.match(line) or
+                                  self._re_dtb_warning.match(line))
+                    is_note = self._re_note.match(line)
+                    if is_warning or (last_was_warning and is_note):
+                        if last_func:
+                            self._add_line(warn_lines_summary,
+                                           warn_lines_boards, last_func, brd)
+                        self._add_line(warn_lines_summary, warn_lines_boards,
+                                       line, brd)
+                    else:
+                        if last_func:
+                            self._add_line(err_lines_summary, err_lines_boards,
+                                           last_func, brd)
+                        self._add_line(err_lines_summary, err_lines_boards,
+                                       line, brd)
+                    last_was_warning = is_warning
+                    last_func = None
+
     def get_result_summary(self, boards_selected, commit_upto, read_func_sizes,
                          read_config, read_environment):
         """Calculate a summary of the results of building a commit.
@@ -992,14 +1048,6 @@ class Builder:
                     key: environment variable
                     value: value of environment variable
         """
-        def add_line(lines_summary, lines_boards, line, board):
-            line = line.rstrip()
-            if line in lines_boards:
-                lines_boards[line].append(board)
-            else:
-                lines_boards[line] = [board]
-                lines_summary.append(line)
-
         board_dict = {}
         err_lines_summary = []
         err_lines_boards = {}
@@ -1013,31 +1061,9 @@ class Builder:
                                            read_func_sizes, read_config,
                                            read_environment)
             board_dict[brd.target] = outcome
-            last_func = None
-            last_was_warning = False
-            for line in outcome.err_lines:
-                if line:
-                    if (self._re_function.match(line) or
-                            self._re_files.match(line)):
-                        last_func = line
-                    else:
-                        is_warning = (self._re_warning.match(line) or
-                                      self._re_dtb_warning.match(line))
-                        is_note = self._re_note.match(line)
-                        if is_warning or (last_was_warning and is_note):
-                            if last_func:
-                                add_line(warn_lines_summary, warn_lines_boards,
-                                        last_func, brd)
-                            add_line(warn_lines_summary, warn_lines_boards,
-                                    line, brd)
-                        else:
-                            if last_func:
-                                add_line(err_lines_summary, err_lines_boards,
-                                        last_func, brd)
-                            add_line(err_lines_summary, err_lines_boards,
-                                    line, brd)
-                        last_was_warning = is_warning
-                        last_func = None
+            self._categorise_err_lines(outcome.err_lines, brd,
+                                       err_lines_summary, err_lines_boards,
+                                       warn_lines_summary, warn_lines_boards)
             tconfig = Config(self.config_filenames, brd.target)
             for fname in self.config_filenames:
                 if outcome.config:
