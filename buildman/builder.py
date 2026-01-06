@@ -858,6 +858,62 @@ class Builder:
                         pass
         return environment
 
+    def _read_done_file(self, commit_upto, target, done_file, sizes_file):
+        """Read the done file and collect build results
+
+        Args:
+            commit_upto (int): Commit number to check (0..n-1)
+            target (str): Target board to check
+            done_file (str): Filename of done file
+            sizes_file (str): Filename of sizes file
+
+        Returns:
+            tuple: (rc, err_lines, sizes) where:
+                rc: OUTCOME_OK, OUTCOME_WARNING or OUTCOME_ERROR
+                err_lines: list of error lines
+                sizes: dict of sizes
+        """
+        with open(done_file, 'r', encoding='utf-8') as fd:
+            try:
+                return_code = int(fd.readline())
+            except ValueError:
+                # The file may be empty due to running out of disk space.
+                # Try a rebuild
+                return_code = 1
+            err_lines = []
+            err_file = self.get_err_file(commit_upto, target)
+            if os.path.exists(err_file):
+                with open(err_file, 'r', encoding='utf-8') as fd:
+                    err_lines = self.filter_errors(fd.readlines())
+
+            # Decide whether the build was ok, failed or created warnings
+            if return_code:
+                rc = OUTCOME_ERROR
+            elif err_lines:
+                rc = OUTCOME_WARNING
+            else:
+                rc = OUTCOME_OK
+
+            # Convert size information to our simple format
+            sizes = {}
+            if os.path.exists(sizes_file):
+                with open(sizes_file, 'r', encoding='utf-8') as fd:
+                    for line in fd.readlines():
+                        values = line.split()
+                        rodata = 0
+                        if len(values) > 6:
+                            rodata = int(values[6], 16)
+                        size_dict = {
+                            'all' : int(values[0]) + int(values[1]) +
+                                    int(values[2]),
+                            'text' : int(values[0]) - rodata,
+                            'data' : int(values[1]),
+                            'bss' : int(values[2]),
+                            'rodata' : rodata,
+                        }
+                        sizes[values[5]] = size_dict
+        return rc, err_lines, sizes
+
     def get_build_outcome(self, commit_upto, target, read_func_sizes,
                         read_config, read_environment):
         """Work out the outcome of a build.
@@ -874,49 +930,12 @@ class Builder:
         """
         done_file = self.get_done_file(commit_upto, target)
         sizes_file = self.get_sizes_file(commit_upto, target)
-        sizes = {}
         func_sizes = {}
         config = {}
         environment = {}
         if os.path.exists(done_file):
-            with open(done_file, 'r', encoding='utf-8') as fd:
-                try:
-                    return_code = int(fd.readline())
-                except ValueError:
-                    # The file may be empty due to running out of disk space.
-                    # Try a rebuild
-                    return_code = 1
-                err_lines = []
-                err_file = self.get_err_file(commit_upto, target)
-                if os.path.exists(err_file):
-                    with open(err_file, 'r', encoding='utf-8') as fd:
-                        err_lines = self.filter_errors(fd.readlines())
-
-                # Decide whether the build was ok, failed or created warnings
-                if return_code:
-                    rc = OUTCOME_ERROR
-                elif err_lines:
-                    rc = OUTCOME_WARNING
-                else:
-                    rc = OUTCOME_OK
-
-                # Convert size information to our simple format
-                if os.path.exists(sizes_file):
-                    with open(sizes_file, 'r', encoding='utf-8') as fd:
-                        for line in fd.readlines():
-                            values = line.split()
-                            rodata = 0
-                            if len(values) > 6:
-                                rodata = int(values[6], 16)
-                            size_dict = {
-                                'all' : int(values[0]) + int(values[1]) +
-                                        int(values[2]),
-                                'text' : int(values[0]) - rodata,
-                                'data' : int(values[1]),
-                                'bss' : int(values[2]),
-                                'rodata' : rodata,
-                            }
-                            sizes[values[5]] = size_dict
+            rc, err_lines, sizes = self._read_done_file(
+                commit_upto, target, done_file, sizes_file)
 
             if read_func_sizes:
                 pattern = self.get_func_sizes_file(commit_upto, target, '*')
