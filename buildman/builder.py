@@ -112,6 +112,14 @@ u-boot/             source directory
 #   errline: The text of the error line
 ErrLine = collections.namedtuple('ErrLine', 'char,brds,errline')
 
+# Holds the outcome of classifying the boards:
+#   ok: List of boards fixed since last commit
+#   warn: List of boards with warnings since last commit
+#   err: List of new broken boards since last commit
+#   new: List of boards that didn't exist last time
+#   unknown: List of boards that were not built
+BoardStatus = collections.namedtuple('BoardStatus', 'ok,warn,err,new,unknown')
+
 # Possible build outcomes
 OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
 
@@ -1399,14 +1407,13 @@ class Builder:
                 commit, keyed by board.target. The value is an Outcome object.
 
         Returns:
-            tuple: (ok_boards, warn_boards, err_boards, new_boards,
-                unknown_boards) where each is a list of board targets
+            BoardStatus: Named tuple containing lists of board targets
         """
-        ok_boards = []      # List of boards fixed since last commit
-        warn_boards = []    # List of boards with warnings since last commit
-        err_boards = []     # List of new broken boards since last commit
-        new_boards = []     # List of boards that didn't exist last time
-        unknown_boards = [] # List of boards that were not built
+        ok = []      # List of boards fixed since last commit
+        warn = []    # List of boards with warnings since last commit
+        err = []     # List of new broken boards since last commit
+        new = []     # List of boards that didn't exist last time
+        unknown = [] # List of boards that were not built
 
         for target in board_dict:
             if target not in board_selected:
@@ -1417,20 +1424,20 @@ class Builder:
                 base_outcome = self._base_board_dict[target].rc
                 outcome = board_dict[target]
                 if outcome.rc == OUTCOME_UNKNOWN:
-                    unknown_boards.append(target)
+                    unknown.append(target)
                 elif outcome.rc < base_outcome:
                     if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
+                        warn.append(target)
                     else:
-                        ok_boards.append(target)
+                        ok.append(target)
                 elif outcome.rc > base_outcome:
                     if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
+                        warn.append(target)
                     else:
-                        err_boards.append(target)
+                        err.append(target)
             else:
-                new_boards.append(target)
-        return ok_boards, warn_boards, err_boards, new_boards, unknown_boards
+                new.append(target)
+        return BoardStatus(ok, warn, err, new, unknown)
 
     @staticmethod
     def _calc_config(delta, name, config):
@@ -1791,8 +1798,7 @@ class Builder:
                 self._error_lines += 1
 
 
-        ok_boards, warn_boards, err_boards, new_boards, unknown_boards = \
-            self._classify_boards(board_selected, board_dict)
+        brd_status = self._classify_boards(board_selected, board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
         better_err, worse_err = _calc_error_delta(self._base_err_lines,
@@ -1810,20 +1816,21 @@ class Builder:
                     sys.stderr.write(line)
 
         # Display results by arch
-        elif any((ok_boards, warn_boards, err_boards, unknown_boards,
-                  new_boards, worse_err, better_err, worse_warn, better_warn)):
+        elif any((brd_status.ok, brd_status.warn, brd_status.err,
+                  brd_status.unknown, brd_status.new, worse_err, better_err,
+                  worse_warn, better_warn)):
             arch_list = {}
-            self.add_outcome(board_selected, arch_list, ok_boards, '',
-                    self.col.GREEN)
-            self.add_outcome(board_selected, arch_list, warn_boards, 'w+',
-                    self.col.YELLOW)
-            self.add_outcome(board_selected, arch_list, err_boards, '+',
-                    self.col.RED)
-            self.add_outcome(board_selected, arch_list, new_boards, '*',
+            self.add_outcome(board_selected, arch_list, brd_status.ok, '',
+                             self.col.GREEN)
+            self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
+                             self.col.YELLOW)
+            self.add_outcome(board_selected, arch_list, brd_status.err, '+',
+                             self.col.RED)
+            self.add_outcome(board_selected, arch_list, brd_status.new, '*',
                              self.col.BLUE)
             if self._show_unknown:
-                self.add_outcome(board_selected, arch_list, unknown_boards, '?',
-                        self.col.MAGENTA)
+                self.add_outcome(board_selected, arch_list, brd_status.unknown,
+                                 '?', self.col.MAGENTA)
             for arch, target_list in arch_list.items():
                 tprint(f'{arch:>10s}: {target_list}')
                 self._error_lines += 1
