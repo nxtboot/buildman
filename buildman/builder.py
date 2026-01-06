@@ -402,6 +402,39 @@ class Builder:
 
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions
+
+        # Attributes used by set_display_options()
+        self._show_errors = False
+        self._show_sizes = False
+        self._show_detail = False
+        self._show_bloat = False
+        self._list_error_boards = False
+        self._show_config = False
+        self._show_environment = False
+        self._filter_dtb_warnings = False
+        self._filter_migration_warnings = False
+
+        # Attributes set by other methods
+        self._build_period = None
+        self.commit = None
+        self.upto = 0
+        self.warned = 0
+        self.fail = 0
+        self.commit_count = 0
+        self.commits = None
+        self.count = 0
+        self._timestamps = None
+        self._verbose = False
+
+        # Attributes for result summaries
+        self._base_board_dict = {}
+        self._base_err_lines = []
+        self._base_warn_lines = []
+        self._base_err_line_boards = {}
+        self._base_warn_line_boards = {}
+        self._base_config = None
+        self._base_environment = None
+
         if self.num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
