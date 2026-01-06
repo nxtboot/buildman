@@ -1745,6 +1745,22 @@ class Builder:
         self._output_err_lines(better_warn, colour=self.col.CYAN)
         self._output_err_lines(worse_warn, colour=self.col.YELLOW)
 
+    def _print_ide_output(self, board_selected, board_dict):
+        """Print output for IDE mode
+
+        Args:
+            board_selected (dict): Dict of selected boards, keyed by target
+            board_dict (dict): Dict of boards that were built, keyed by target
+        """
+        if not self._ide:
+            return
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            outcome = board_dict[target]
+            for line in outcome.err_lines:
+                sys.stderr.write(line)
+
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
                            config, environment, show_sizes, show_detail,
@@ -1844,13 +1860,7 @@ class Builder:
                 self._base_warn_line_boards, warn_lines, warn_line_boards, 'w')
 
         # For the IDE mode, print out all the output
-        if self._ide:
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-                outcome = board_dict[target]
-                for line in outcome.err_lines:
-                    sys.stderr.write(line)
+        self._print_ide_output(board_selected, board_dict)
 
         # Display results by arch
         self._display_arch_results(board_selected, brd_status, better_err,
