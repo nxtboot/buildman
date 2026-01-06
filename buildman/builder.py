@@ -105,13 +105,11 @@ u-boot/             source directory
     .git/           repository
 """
 
-"""Holds information about a particular error line we are outputing
-
-   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
-       'w-' = fixed warning
-   boards: List of Board objects which have line in the error/warning output
-   errline: The text of the error line
-"""
+# Holds information about a particular error line we are outputting
+#   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
+#       'w-' = fixed warning
+#   boards: List of Board objects which have line in the error/warning output
+#   errline: The text of the error line
 ErrLine = collections.namedtuple('ErrLine', 'char,brds,errline')
 
 # Possible build outcomes
@@ -150,7 +148,7 @@ class Config:
 
     def __hash__(self):
         val = 0
-        for fname, config in self.config.items():
+        for _, config in self.config.items():
             for key, value in config.items():
                 print(key, value)
                 val = val ^ hash(key) & hash(value)
@@ -465,11 +463,11 @@ class Builder:
         """Get rid of all threads created by the builder"""
         self.threads.clear()
 
-    def signal_handler(self, signal, frame):
+    def signal_handler(self, signum, frame):
         """Handle a signal by exiting
 
         Args:
-            signal (int): Signal number
+            signum (int): Signal number
             frame (frame): Stack frame at point of signal
         """
         sys.exit(1)
@@ -904,7 +902,7 @@ class Builder:
                 # Decide whether the build was ok, failed or created warnings
                 if return_code:
                     rc = OUTCOME_ERROR
-                elif len(err_lines):
+                elif err_lines:
                     rc = OUTCOME_WARNING
                 else:
                     rc = OUTCOME_OK
@@ -1066,10 +1064,10 @@ class Builder:
             else:
                 arch = 'unknown'
             text = self.col.build(color, ' ' + target)
-            if not arch in done_arch:
+            if arch not in done_arch:
                 text = f' {self.col.build(color, char)}  {text}'
                 done_arch[arch] = True
-            if not arch in arch_list:
+            if arch not in arch_list:
                 arch_list[arch] = text
             else:
                 arch_list[arch] += text
@@ -1807,7 +1805,7 @@ class Builder:
                       newline=False)
                 gitutil.add_worktree(src_dir, thread_dir)
                 terminal.print_clear()
-            elif setup_git == 'clone' or setup_git == True:
+            elif setup_git == 'clone' or setup_git is True:
                 tprint(f'\rCloning repo for thread {thread_num}',
                       newline=False)
                 gitutil.clone(src_dir, thread_dir)
