@@ -6,6 +6,8 @@
 
 """Build manager for U-Boot builds across multiple boards and commits"""
 
+# pylint: disable=R0902,R0903
+
 import collections
 from datetime import datetime, timedelta
 import glob
