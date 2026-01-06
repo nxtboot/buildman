@@ -1588,6 +1588,33 @@ class Builder:
                          all_config_minus, all_config_change)
         return '\n'.join(lines)
 
+    def _print_arch_config_summary(self, arch, arch_config_plus,
+                                    arch_config_minus, arch_config_change):
+        """Print configuration summary for a single architecture
+
+        Args:
+            arch (str): Architecture name
+            arch_config_plus (dict): Dict of added configs by arch/filename
+            arch_config_minus (dict): Dict of removed configs by arch/filename
+            arch_config_change (dict): Dict of changed configs by arch/filename
+        """
+        lines = []
+        all_plus = {}
+        all_minus = {}
+        all_change = {}
+        for name in self.config_filenames:
+            all_plus.update(arch_config_plus[arch][name])
+            all_minus.update(arch_config_minus[arch][name])
+            all_change.update(arch_config_change[arch][name])
+            self._add_config(lines, name,
+                             arch_config_plus[arch][name],
+                             arch_config_minus[arch][name],
+                             arch_config_change[arch][name])
+        self._add_config(lines, 'all', all_plus, all_minus, all_change)
+        if lines:
+            tprint(f'{arch}:')
+            self._output_config_info(lines)
+
     def _show_config_changes(self, board_selected, board_dict, config):
         """Show changes in configuration
 
@@ -1636,22 +1663,9 @@ class Builder:
                 lines_by_target[lines] = [target]
 
         for arch in arch_list:
-            lines = []
-            all_plus = {}
-            all_minus = {}
-            all_change = {}
-            for name in self.config_filenames:
-                all_plus.update(arch_config_plus[arch][name])
-                all_minus.update(arch_config_minus[arch][name])
-                all_change.update(arch_config_change[arch][name])
-                self._add_config(lines, name,
-                                 arch_config_plus[arch][name],
-                                 arch_config_minus[arch][name],
-                                 arch_config_change[arch][name])
-            self._add_config(lines, 'all', all_plus, all_minus, all_change)
-            if lines:
-                tprint(f'{arch}:')
-                self._output_config_info(lines)
+            self._print_arch_config_summary(arch, arch_config_plus,
+                                            arch_config_minus,
+                                            arch_config_change)
 
         for lines, targets in lines_by_target.items():
             if not lines:
