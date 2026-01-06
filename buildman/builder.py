@@ -4,6 +4,10 @@
 # Bloat-o-meter code used here Copyright 2004 Matt Mackall <mpm@selenic.com>
 #
 
+"""Build manager for U-Boot builds across multiple boards and commits"""
+
+# pylint: disable=R0902,R0903
+
 import collections
 from datetime import datetime, timedelta
 import glob
@@ -12,13 +16,10 @@ import re
 import queue
 import shutil
 import signal
-import string
 import sys
 import threading
-import time
 
 from buildman import builderthread
-from buildman import toolchain
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -35,6 +36,17 @@ from u_boot_pylib.terminal import tprint
 # <<
 # which indicates that BREAK_ME has an empty default
 RE_NO_DEFAULT = re.compile(br'\((\w+)\) \[] \(NEW\)')
+
+# Regex patterns for matching compiler output
+RE_FUNCTION = re.compile('(.*): In function.*')
+RE_FILES = re.compile('In file included from.*')
+RE_WARNING = re.compile(r'(.*):(\d*):(\d*): warning: .*')
+RE_DTB_WARNING = re.compile('(.*): Warning .*')
+RE_NOTE = re.compile(
+    r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
+RE_MIGRATION_WARNING = re.compile(r'^={21} WARNING ={22}\n.*\n=+\n',
+                                  re.MULTILINE | re.DOTALL)
+RE_MAKE_ERR = re.compile('(make.*Waiting for unfinished)|(Segmentation fault)')
 
 # Symbol types which appear in the bloat feature (-B). Others are silently
 # dropped when reading in the 'nm' output
@@ -106,14 +118,20 @@ u-boot/             source directory
     .git/           repository
 """
 
-"""Holds information about a particular error line we are outputing
-
-   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
-       'w-' = fixed warning
-   boards: List of Board objects which have line in the error/warning output
-   errline: The text of the error line
-"""
+# Holds information about a particular error line we are outputting
+#   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
+#       'w-' = fixed warning
+#   boards: List of Board objects which have line in the error/warning output
+#   errline: The text of the error line
 ErrLine = collections.namedtuple('ErrLine', 'char,brds,errline')
+
+# Holds the outcome of classifying the boards:
+#   ok: List of boards fixed since last commit
+#   warn: List of boards with warnings since last commit
+#   err: List of new broken boards since last commit
+#   new: List of boards that didn't exist last time
+#   unknown: List of boards that were not built
+BoardStatus = collections.namedtuple('BoardStatus', 'ok,warn,err,new,unknown')
 
 # Possible build outcomes
 OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
@@ -140,12 +158,19 @@ class Config:
             self.config[fname] = {}
 
     def add(self, fname, key, value):
+        """Add a configuration value
+
+        Args:
+            fname (str): Filename to add to (e.g. '.config')
+            key (str): Config key (e.g. 'CONFIG_DM')
+            value (str): Config value (e.g. 'y')
+        """
         self.config[fname][key] = value
 
     def __hash__(self):
         val = 0
-        for fname in self.config:
-            for key, value in self.config[fname].items():
+        for _, config in self.config.items():
+            for key, value in config.items():
                 print(key, value)
                 val = val ^ hash(key) & hash(value)
         return val
@@ -157,6 +182,12 @@ class Environment:
         self.environment = {}
 
     def add(self, key, value):
+        """Add an environment variable
+
+        Args:
+            key (str): Environment variable name
+            value (str): Environment variable value
+        """
         self.environment[key] = value
 
 class Builder:
@@ -183,7 +214,6 @@ class Builder:
         num_jobs: Number of jobs to run at once (passed to make as -j)
         num_threads: Number of builder threads to run
         out_queue: Queue of results to process
-        re_make_err: Compiled regular expression for ignore_lines
         queue: Queue of jobs to run
         threads: List of active threads
         toolchains: Toolchains object to use for building
@@ -222,8 +252,8 @@ class Builder:
             threading is not being used
         _terminated: Thread was terminated due to an error
         _restarting_config: True if 'Restart config' is detected in output
-        _ide: Produce output suitable for an Integrated Development Environment,
-            i.e. dont emit progress information and put errors/warnings on stderr
+        _ide: Produce output suitable for an Integrated Development Environment
+            i.e. don't emit progress information and put errors on stderr
     """
     class Outcome:
         """Records a build outcome for a single make invocation
@@ -380,16 +410,61 @@ class Builder:
         self.warnings_as_errors = warnings_as_errors
         self.col = terminal.Color()
 
-        self._re_function = re.compile('(.*): In function.*')
-        self._re_files = re.compile('In file included from.*')
-        self._re_warning = re.compile(r'(.*):(\d*):(\d*): warning: .*')
-        self._re_dtb_warning = re.compile('(.*): Warning .*')
-        self._re_note = re.compile(r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
-        self._re_migration_warning = re.compile(r'^={21} WARNING ={22}\n.*\n=+\n',
-                                                re.MULTILINE | re.DOTALL)
-
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions
+
+        # Attributes used by set_display_options()
+        self._show_errors = False
+        self._show_sizes = False
+        self._show_detail = False
+        self._show_bloat = False
+        self._list_error_boards = False
+        self._show_config = False
+        self._show_environment = False
+        self._filter_dtb_warnings = False
+        self._filter_migration_warnings = False
+
+        # Attributes set by other methods
+        self._build_period = None
+        self.commit = None
+        self.upto = 0
+        self.warned = 0
+        self.fail = 0
+        self.commit_count = 0
+        self.commits = None
+        self.count = 0
+        self._timestamps = None
+        self._verbose = False
+
+        # Attributes for result summaries
+        self._base_board_dict = {}
+        self._base_err_lines = []
+        self._base_warn_lines = []
+        self._base_err_line_boards = {}
+        self._base_warn_line_boards = {}
+        self._base_config = None
+        self._base_environment = None
+
+        self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
+
+        ignore_lines = ['(make.*Waiting for unfinished)',
+                        '(Segmentation fault)']
+        self.re_make_err = re.compile('|'.join(ignore_lines))
+
+        # Handle existing graceful with SIGINT / Ctrl-C
+        signal.signal(signal.SIGINT, self.signal_handler)
+
+    def _setup_threads(self, mrproper, per_board_out_dir,
+                       test_thread_exceptions):
+        """Set up builder threads
+
+        Args:
+            mrproper (bool): True to run 'make mrproper' before building
+            per_board_out_dir (bool): True to use a separate output directory
+                per board
+            test_thread_exceptions (bool): True to make threads raise an
+                exception instead of reporting their result (for tests)
+        """
         if self.num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
@@ -398,30 +473,24 @@ class Builder:
                 t = builderthread.BuilderThread(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
-                t.setDaemon(True)
+                t.daemon = True
                 t.start()
                 self.threads.append(t)
 
             t = builderthread.ResultThread(self)
-            t.setDaemon(True)
+            t.daemon = True
             t.start()
             self.threads.append(t)
         else:
             self._single_builder = builderthread.BuilderThread(
                 self, -1, mrproper, per_board_out_dir)
 
-        ignore_lines = ['(make.*Waiting for unfinished)', '(Segmentation fault)']
-        self.re_make_err = re.compile('|'.join(ignore_lines))
-
-        # Handle existing graceful with SIGINT / Ctrl-C
-        signal.signal(signal.SIGINT, self.signal_handler)
-
     def __del__(self):
         """Get rid of all threads created by the builder"""
-        for t in self.threads:
-            del t
+        self.threads.clear()
 
-    def signal_handler(self, signal, frame):
+    def signal_handler(self, _signum, _frame):
+        """Handle a signal by exiting"""
         sys.exit(1)
 
     def make_environment(self, toolchain):
@@ -448,19 +517,22 @@ class Builder:
         """Setup display options for the builder.
 
         Args:
-            show_errors: True to show summarised error/warning info
-            show_sizes: Show size deltas
-            show_detail: Show size delta detail for each board if show_sizes
-            show_bloat: Show detail for each function
-            list_error_boards: Show the boards which caused each error/warning
-            show_config: Show config deltas
-            show_environment: Show environment deltas
-            filter_dtb_warnings: Filter out any warnings from the device-tree
-                compiler
-            filter_migration_warnings: Filter out any warnings about migrating
-                a board to driver model
-            ide: Create output that can be parsed by an IDE. There is no '+' prefix on
-                error lines and output on stderr stays on stderr.
+            show_errors (bool): True to show summarised error/warning info
+            show_sizes (bool): Show size deltas
+            show_detail (bool): Show size delta detail for each board if
+                show_sizes
+            show_bloat (bool): Show detail for each function
+            list_error_boards (bool): Show the boards which caused each
+                error/warning
+            show_config (bool): Show config deltas
+            show_environment (bool): Show environment deltas
+            filter_dtb_warnings (bool): Filter out any warnings from the
+                device-tree compiler
+            filter_migration_warnings (bool): Filter out any warnings about
+                migrating a board to driver model
+            ide (bool): Create output that can be parsed by an IDE. There is
+                no '+' prefix on error lines and output on stderr stays on
+                stderr.
         """
         self._show_errors = show_errors
         self._show_sizes = show_sizes
@@ -504,24 +576,25 @@ class Builder:
 
     def select_commit(self, commit, checkout=True):
         """Checkout the selected commit for this build
+
+        Args:
+            commit (Commit): Commit object that is being built
+            checkout (bool): True to checkout the commit
         """
         self.commit = commit
         if checkout and self.checkout:
             gitutil.checkout(commit.hash)
 
-    def make(self, commit, brd, stage, cwd, *args, **kwargs):
+    def make(self, _commit, _brd, _stage, cwd, *args, **kwargs):
         """Run make
 
         Args:
-            commit: Commit object that is being built
-            brd: Board object that is being built
-            stage: Stage that we are at (mrproper, config, oldconfig, build)
-            cwd: Directory where make should be run
+            cwd (str): Directory where make should be run
             args: Arguments to pass to make
             kwargs: Arguments to pass to command.run_one()
         """
 
-        def check_output(stream, data):
+        def check_output(_stream, data):
             if b'Restart config' in data:
                 self._restarting_config = True
 
@@ -548,21 +621,21 @@ class Builder:
 
         if self._terminated:
             # Try to be helpful
-            result.stderr += '(** did you define an int/hex Kconfig with no default? **)'
+            result.stderr += \
+                '(** did you define an int/hex Kconfig with no default? **)'
 
         if self.verbose_build:
-            result.stdout = '%s\n' % (' '.join(cmd)) + result.stdout
-            result.combined = '%s\n' % (' '.join(cmd)) + result.combined
+            result.stdout = f"{' '.join(cmd)}\n" + result.stdout
+            result.combined = f"{' '.join(cmd)}\n" + result.combined
         return result
 
     def process_result(self, result):
         """Process the result of a build, showing progress information
 
         Args:
-            result: A CommandResult object, which indicates the result for
-                    a single build
+            result (CommandResult): Result object, which indicates the result
+                for a single build
         """
-        col = terminal.Color()
         if result:
             target = result.brd.target
 
@@ -589,21 +662,21 @@ class Builder:
 
         # Display separate counts for ok, warned and fail
         ok = self.upto - self.warned - self.fail
-        line = '\r' + self.col.build(self.col.GREEN, '%5d' % ok)
-        line += self.col.build(self.col.YELLOW, '%5d' % self.warned)
-        line += self.col.build(self.col.RED, '%5d' % self.fail)
+        line = '\r' + self.col.build(self.col.GREEN, f'{ok:5d}')
+        line += self.col.build(self.col.YELLOW, f'{self.warned:5d}')
+        line += self.col.build(self.col.RED, f'{self.fail:5d}')
 
-        line += ' /%-5d  ' % self.count
+        line += f' /{self.count:<5d}  '
         remaining = self.count - self.upto
         if remaining:
-            line += self.col.build(self.col.MAGENTA, ' -%-5d  ' % remaining)
+            line += self.col.build(self.col.MAGENTA, f' -{remaining:<5d}  ')
         else:
             line += ' ' * 8
 
         # Add our current completion time estimate
         self._add_timestamp()
         if self._complete_delay:
-            line += '%s  : ' % self._complete_delay
+            line += f'{self._complete_delay}  : '
 
         line += target
         if not self._ide:
@@ -616,7 +689,7 @@ class Builder:
         The output directory is typically .../<branch>/<commit>.
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
+            commit_upto (int): Commit number to use (0..self.count-1)
         """
         if self.work_in_output:
             return self._working_dir
@@ -626,8 +699,7 @@ class Builder:
             commit = self.commits[commit_upto]
             subject = commit.subject.translate(trans_valid_chars)
             # See _get_output_space_removals() which parses this name
-            commit_dir = ('%02d_g%s_%s' % (commit_upto + 1,
-                    commit.hash, subject[:20]))
+            commit_dir = f'{commit_upto + 1:02d}_g{commit.hash}_{subject[:20]}'
         elif not self.no_subdirs:
             commit_dir = 'current'
         if not commit_dir:
@@ -640,8 +712,8 @@ class Builder:
         The build directory is typically .../<branch>/<commit>/<target>.
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
 
         Return:
             str: Output directory to use, or '' if None
@@ -655,8 +727,8 @@ class Builder:
         """Get the name of the done file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'done')
 
@@ -664,8 +736,8 @@ class Builder:
         """Get the name of the sizes file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'sizes')
 
@@ -673,30 +745,30 @@ class Builder:
         """Get the name of the funcsizes file for a commit number and ELF file
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
-            elf_fname: Filename of elf image
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
+            elf_fname (str): Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
-                            '%s.sizes' % elf_fname.replace('/', '-'))
+                            f"{elf_fname.replace('/', '-')}.sizes")
 
     def get_objdump_file(self, commit_upto, target, elf_fname):
         """Get the name of the objdump file for a commit number and ELF file
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
-            elf_fname: Filename of elf image
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
+            elf_fname (str): Filename of elf image
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
-                            '%s.objdump' % elf_fname.replace('/', '-'))
+                            f"{elf_fname.replace('/', '-')}.objdump")
 
     def get_err_file(self, commit_upto, target):
         """Get the name of the err file for a commit number
 
         Args:
-            commit_upto: Commit number to use (0..self.count-1)
-            target: Target name
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
         """
         output_dir = self.get_build_dir(commit_upto, target)
         return os.path.join(output_dir, 'err')
@@ -707,45 +779,45 @@ class Builder:
         We should probably use map().
 
         Args:
-            lines: List of error lines, each a string
+            lines (list of str): List of error lines, each a string
+
         Returns:
-            New list with only interesting lines included
+            list of str: New list with only interesting lines included
         """
         out_lines = []
         if self._filter_migration_warnings:
             text = '\n'.join(lines)
-            text = self._re_migration_warning.sub('', text)
+            text = RE_MIGRATION_WARNING.sub('', text)
             lines = text.splitlines()
         for line in lines:
-            if self.re_make_err.search(line):
+            if RE_MAKE_ERR.search(line):
                 continue
-            if self._filter_dtb_warnings and self._re_dtb_warning.search(line):
+            if self._filter_dtb_warnings and RE_DTB_WARNING.search(line):
                 continue
             out_lines.append(line)
         return out_lines
 
-    def read_func_sizes(self, fname, fd):
+    def read_func_sizes(self, _fname, fd):
         """Read function sizes from the output of 'nm'
 
         Args:
-            fd: File containing data to read
-            fname: Filename we are reading from (just for errors)
+            fd (file): File containing data to read
 
         Returns:
-            Dictionary containing size of each function in bytes, indexed by
-            function name.
+            dict: Dictionary containing size of each function in bytes, indexed
+                by function name.
         """
         sym = {}
         for line in fd.readlines():
             line = line.strip()
             parts = line.split()
             if line and len(parts) == 3:
-                    size, type, name = line.split()
-                    if type in NM_SYMBOL_TYPES:
-                        # function names begin with '.' on 64-bit powerpc
-                        if '.' in name[1:]:
-                            name = 'static.' + name.split('.')[0]
-                        sym[name] = sym.get(name, 0) + int(size, 16)
+                size, sym_type, name = line.split()
+                if sym_type in NM_SYMBOL_TYPES:
+                    # function names begin with '.' on 64-bit powerpc
+                    if '.' in name[1:]:
+                        name = 'static.' + name.split('.')[0]
+                    sym[name] = sym.get(name, 0) + int(size, 16)
         return sym
 
     def _process_config(self, fname):
@@ -764,7 +836,7 @@ class Builder:
         """
         config = {}
         if os.path.exists(fname):
-            with open(fname) as fd:
+            with open(fname, encoding='utf-8') as fd:
                 for line in fd:
                     line = line.strip()
                     if line.startswith('#define'):
@@ -800,7 +872,7 @@ class Builder:
         """
         environment = {}
         if os.path.exists(fname):
-            with open(fname) as fd:
+            with open(fname, encoding='utf-8') as fd:
                 for line in fd.read().split('\0'):
                     try:
                         key, value = line.split('=', 1)
@@ -810,70 +882,89 @@ class Builder:
                         pass
         return environment
 
+    def _read_done_file(self, commit_upto, target, done_file, sizes_file):
+        """Read the done file and collect build results
+
+        Args:
+            commit_upto (int): Commit number to check (0..n-1)
+            target (str): Target board to check
+            done_file (str): Filename of done file
+            sizes_file (str): Filename of sizes file
+
+        Returns:
+            tuple: (rc, err_lines, sizes) where:
+                rc: OUTCOME_OK, OUTCOME_WARNING or OUTCOME_ERROR
+                err_lines: list of error lines
+                sizes: dict of sizes
+        """
+        with open(done_file, 'r', encoding='utf-8') as fd:
+            try:
+                return_code = int(fd.readline())
+            except ValueError:
+                # The file may be empty due to running out of disk space.
+                # Try a rebuild
+                return_code = 1
+            err_lines = []
+            err_file = self.get_err_file(commit_upto, target)
+            if os.path.exists(err_file):
+                with open(err_file, 'r', encoding='utf-8') as fd:
+                    err_lines = self.filter_errors(fd.readlines())
+
+            # Decide whether the build was ok, failed or created warnings
+            if return_code:
+                rc = OUTCOME_ERROR
+            elif err_lines:
+                rc = OUTCOME_WARNING
+            else:
+                rc = OUTCOME_OK
+
+            # Convert size information to our simple format
+            sizes = {}
+            if os.path.exists(sizes_file):
+                with open(sizes_file, 'r', encoding='utf-8') as fd:
+                    for line in fd.readlines():
+                        values = line.split()
+                        rodata = 0
+                        if len(values) > 6:
+                            rodata = int(values[6], 16)
+                        size_dict = {
+                            'all' : int(values[0]) + int(values[1]) +
+                                    int(values[2]),
+                            'text' : int(values[0]) - rodata,
+                            'data' : int(values[1]),
+                            'bss' : int(values[2]),
+                            'rodata' : rodata,
+                        }
+                        sizes[values[5]] = size_dict
+        return rc, err_lines, sizes
+
     def get_build_outcome(self, commit_upto, target, read_func_sizes,
                         read_config, read_environment):
         """Work out the outcome of a build.
 
         Args:
-            commit_upto: Commit number to check (0..n-1)
-            target: Target board to check
-            read_func_sizes: True to read function size information
-            read_config: True to read .config and autoconf.h files
-            read_environment: True to read uboot.env files
+            commit_upto (int): Commit number to check (0..n-1)
+            target (str): Target board to check
+            read_func_sizes (bool): True to read function size information
+            read_config (bool): True to read .config and autoconf.h files
+            read_environment (bool): True to read uboot.env files
 
         Returns:
-            Outcome object
+            Outcome: Outcome object
         """
         done_file = self.get_done_file(commit_upto, target)
         sizes_file = self.get_sizes_file(commit_upto, target)
-        sizes = {}
         func_sizes = {}
         config = {}
         environment = {}
         if os.path.exists(done_file):
-            with open(done_file, 'r') as fd:
-                try:
-                    return_code = int(fd.readline())
-                except ValueError:
-                    # The file may be empty due to running out of disk space.
-                    # Try a rebuild
-                    return_code = 1
-                err_lines = []
-                err_file = self.get_err_file(commit_upto, target)
-                if os.path.exists(err_file):
-                    with open(err_file, 'r') as fd:
-                        err_lines = self.filter_errors(fd.readlines())
-
-                # Decide whether the build was ok, failed or created warnings
-                if return_code:
-                    rc = OUTCOME_ERROR
-                elif len(err_lines):
-                    rc = OUTCOME_WARNING
-                else:
-                    rc = OUTCOME_OK
-
-                # Convert size information to our simple format
-                if os.path.exists(sizes_file):
-                    with open(sizes_file, 'r') as fd:
-                        for line in fd.readlines():
-                            values = line.split()
-                            rodata = 0
-                            if len(values) > 6:
-                                rodata = int(values[6], 16)
-                            size_dict = {
-                                'all' : int(values[0]) + int(values[1]) +
-                                        int(values[2]),
-                                'text' : int(values[0]) - rodata,
-                                'data' : int(values[1]),
-                                'bss' : int(values[2]),
-                                'rodata' : rodata,
-                            }
-                            sizes[values[5]] = size_dict
+            rc, err_lines, sizes = self._read_done_file(
+                commit_upto, target, done_file, sizes_file)
 
             if read_func_sizes:
                 pattern = self.get_func_sizes_file(commit_upto, target, '*')
                 for fname in glob.glob(pattern):
-                    with open(fname, 'r') as fd:
+                    with open(fname, 'r', encoding='utf-8') as fd:
                         dict_name = os.path.basename(fname).replace('.sizes',
                                                                     '')
                         func_sizes[dict_name] = self.read_func_sizes(fname, fd)
@@ -894,19 +985,75 @@ class Builder:
 
         return Builder.Outcome(OUTCOME_UNKNOWN, [], {}, {}, {}, {})
 
+    @staticmethod
+    def _add_line(lines_summary, lines_boards, line, brd):
+        """Add a line to the summary and boards list
+
+        Args:
+            lines_summary (list): List of line strings
+            lines_boards (dict): Dict of line strings to list of boards
+            line (str): Line to add
+            brd (Board): Board that produced this line
+        """
+        line = line.rstrip()
+        if line in lines_boards:
+            lines_boards[line].append(brd)
+        else:
+            lines_boards[line] = [brd]
+            lines_summary.append(line)
+
+    def _categorise_err_lines(self, err_lines, brd, err_lines_summary,
+                              err_lines_boards, warn_lines_summary,
+                              warn_lines_boards):
+        """Categorise error lines into errors and warnings
+
+        Args:
+            err_lines (list): List of error-line strings
+            brd (Board): Board that produced these lines
+            err_lines_summary (list): List of error-line strings
+            err_lines_boards (dict): Dict of error-line strings to boards
+            warn_lines_summary (list): List of warning-line strings
+            warn_lines_boards (dict): Dict of warning-line strings to boards
+        """
+        last_func = None
+        last_was_warning = False
+        for line in err_lines:
+            if line:
+                if (RE_FUNCTION.match(line) or
+                        RE_FILES.match(line)):
+                    last_func = line
+                else:
+                    is_warning = (RE_WARNING.match(line) or
+                                  RE_DTB_WARNING.match(line))
+                    is_note = RE_NOTE.match(line)
+                    if is_warning or (last_was_warning and is_note):
+                        if last_func:
+                            self._add_line(warn_lines_summary,
+                                           warn_lines_boards, last_func, brd)
+                        self._add_line(warn_lines_summary, warn_lines_boards,
+                                       line, brd)
+                    else:
+                        if last_func:
+                            self._add_line(err_lines_summary, err_lines_boards,
+                                           last_func, brd)
+                        self._add_line(err_lines_summary, err_lines_boards,
+                                       line, brd)
+                    last_was_warning = is_warning
+                    last_func = None
+
     def get_result_summary(self, boards_selected, commit_upto, read_func_sizes,
                          read_config, read_environment):
         """Calculate a summary of the results of building a commit.
 
         Args:
-            board_selected: Dict containing boards to summarise
-            commit_upto: Commit number to summarize (0..self.count-1)
-            read_func_sizes: True to read function size information
-            read_config: True to read .config and autoconf.h files
-            read_environment: True to read uboot.env files
+            boards_selected (dict): Dict containing boards to summarise
+            commit_upto (int): Commit number to summarize (0..self.count-1)
+            read_func_sizes (bool): True to read function size information
+            read_config (bool): True to read .config and autoconf.h files
+            read_environment (bool): True to read uboot.env files
 
         Returns:
-            Tuple:
+            tuple: Tuple containing:
                 Dict containing boards which built this commit:
                     key: board.target
                     value: Builder.Outcome object
@@ -925,14 +1072,6 @@ class Builder:
                     key: environment variable
                     value: value of environment variable
         """
-        def add_line(lines_summary, lines_boards, line, board):
-            line = line.rstrip()
-            if line in lines_boards:
-                lines_boards[line].append(board)
-            else:
-                lines_boards[line] = [board]
-                lines_summary.append(line)
-
         board_dict = {}
         err_lines_summary = []
         err_lines_boards = {}
@@ -946,31 +1085,9 @@ class Builder:
                                            read_func_sizes, read_config,
                                            read_environment)
             board_dict[brd.target] = outcome
-            last_func = None
-            last_was_warning = False
-            for line in outcome.err_lines:
-                if line:
-                    if (self._re_function.match(line) or
-                            self._re_files.match(line)):
-                        last_func = line
-                    else:
-                        is_warning = (self._re_warning.match(line) or
-                                      self._re_dtb_warning.match(line))
-                        is_note = self._re_note.match(line)
-                        if is_warning or (last_was_warning and is_note):
-                            if last_func:
-                                add_line(warn_lines_summary, warn_lines_boards,
-                                        last_func, brd)
-                            add_line(warn_lines_summary, warn_lines_boards,
-                                    line, brd)
-                        else:
-                            if last_func:
-                                add_line(err_lines_summary, err_lines_boards,
-                                        last_func, brd)
-                            add_line(err_lines_summary, err_lines_boards,
-                                    line, brd)
-                        last_was_warning = is_warning
-                        last_func = None
+            self._categorise_err_lines(outcome.err_lines, brd,
+                                       err_lines_summary, err_lines_boards,
+                                       warn_lines_summary, warn_lines_boards)
             tconfig = Config(self.config_filenames, brd.target)
             for fname in self.config_filenames:
                 if outcome.config:
@@ -995,11 +1112,12 @@ class Builder:
         sorted by architecture.
 
         Args:
-             board_dict: Dict containing all boards
-             arch_list: Dict keyed by arch name. Value is a string containing
-                    a list of board names which failed for that arch.
-             changes: List of boards to add to arch_list
-             color: terminal.Colour object
+             board_dict (dict): Dict containing all boards
+             arch_list (dict): Dict keyed by arch name. Value is a string
+                 containing a list of board names which failed for that arch.
+             changes (list): List of boards to add to arch_list
+             char (str): Character to display for this board
+             color (int): terminal.Colour object
         """
         done_arch = {}
         for target in changes:
@@ -1007,17 +1125,25 @@ class Builder:
                 arch = board_dict[target].arch
             else:
                 arch = 'unknown'
-            str = self.col.build(color, ' ' + target)
-            if not arch in done_arch:
-                str = ' %s  %s' % (self.col.build(color, char), str)
+            text = self.col.build(color, ' ' + target)
+            if arch not in done_arch:
+                text = f' {self.col.build(color, char)}  {text}'
                 done_arch[arch] = True
-            if not arch in arch_list:
-                arch_list[arch] = str
+            if arch not in arch_list:
+                arch_list[arch] = text
             else:
-                arch_list[arch] += str
+                arch_list[arch] += text
 
 
     def colour_num(self, num):
+        """Format a number with colour depending on its value
+
+        Args:
+            num (int): Number to format
+
+        Returns:
+            str: Formatted string (red if positive, green if negative/zero)
+        """
         color = self.col.RED if num > 0 else self.col.GREEN
         if num == 0:
             return '0'
@@ -1033,8 +1159,8 @@ class Builder:
         information to work out what has changed.
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
         """
         self._base_board_dict = {}
         for brd in board_selected:
@@ -1047,6 +1173,13 @@ class Builder:
         self._base_environment = None
 
     def print_func_size_detail(self, fname, old, new):
+        """Print detailed size information for each function
+
+        Args:
+            fname (str): Filename to print (e.g. 'u-boot')
+            old (dict): Dictionary of old function sizes, keyed by function name
+            new (dict): Dictionary of new function sizes, keyed by function name
+        """
         grow, shrink, add, remove, up, down = 0, 0, 0, 0, 0, 0
         delta, common = [], {}
 
@@ -1067,12 +1200,12 @@ class Builder:
                 delta.append([new[name], name])
 
         for name in common:
-                diff = new.get(name, 0) - old.get(name, 0)
-                if diff > 0:
-                    grow, up = grow + 1, up + diff
-                elif diff < 0:
-                    shrink, down = shrink + 1, down - diff
-                delta.append([diff, name])
+            diff = new.get(name, 0) - old.get(name, 0)
+            if diff > 0:
+                grow, up = grow + 1, up + diff
+            elif diff < 0:
+                shrink, down = shrink + 1, down - diff
+            delta.append([diff, name])
 
         delta.sort()
         delta.reverse()
@@ -1082,15 +1215,16 @@ class Builder:
             return
         args = [self.colour_num(x) for x in args]
         indent = ' ' * 15
-        tprint('%s%s: add: %s/%s, grow: %s/%s bytes: %s/%s (%s)' %
-              tuple([indent, self.col.build(self.col.YELLOW, fname)] + args))
-        tprint('%s  %-38s %7s %7s %+7s' % (indent, 'function', 'old', 'new',
-                                         'delta'))
+        tprint(f'{indent}{self.col.build(self.col.YELLOW, fname)}: add: '
+               f'{args[0]}/{args[1]}, grow: {args[2]}/{args[3]} bytes: '
+               f'{args[4]}/{args[5]} ({args[6]})')
+        tprint(f'{indent}  {"function":<38s} {"old":>7s} {"new":>7s} '
+               f'{"delta":>+7s}')
         for diff, name in delta:
             if diff:
                 color = self.col.RED if diff > 0 else self.col.GREEN
-                msg = '%s  %-38s %7s %7s %+7d' % (indent, name,
-                        old.get(name, '-'), new.get(name,'-'), diff)
+                msg = (f'{indent}  {name:<38s} {old.get(name, "-"):>7} '
+                       f'{new.get(name, "-"):>7} {diff:+7d}')
                 tprint(msg, colour=color)
 
 
@@ -1098,11 +1232,11 @@ class Builder:
         """Show details size information for each board
 
         Args:
-            target_list: List of targets, each a dict containing:
+            target_list (list): List of targets, each a dict containing:
                     'target': Target name
                     'total_diff': Total difference in bytes across all areas
                     <part_name>: Difference for that part
-            show_bloat: Show detail for each function
+            show_bloat (bool): Show detail for each function
         """
         targets_by_diff = sorted(target_list, reverse=True,
         key=lambda x: x['_total_diff'])
@@ -1113,9 +1247,9 @@ class Builder:
                 if name.startswith('_'):
                     continue
                 colour = self.col.RED if diff > 0 else self.col.GREEN
-                msg = ' %s %+d' % (name, diff)
+                msg = f' {name} {diff:+d}'
                 if not printed_target:
-                    tprint('%10s  %-15s:' % ('', result['_target']),
+                    tprint(f'{"":10s}  {result["_target"]:<15s}:',
                           newline=False)
                     printed_target = True
                 tprint(msg, colour=colour, newline=False)
@@ -1131,6 +1265,76 @@ class Builder:
                                                  outcome.func_sizes[fname])
 
 
+    @staticmethod
+    def _calc_image_size_changes(target, sizes, base_sizes):
+        """Calculate size changes for each image/part
+
+        Args:
+            target (str): Target board name
+            sizes (dict): Dict of image sizes, keyed by image name
+            base_sizes (dict): Dict of base image sizes, keyed by image name
+
+        Returns:
+            dict: Size changes, e.g.:
+                {'_target': 'snapper9g45', 'data': 5, 'u-boot-spl:text': -4}
+                meaning U-Boot data increased by 5 bytes, SPL text decreased
+                by 4
+        """
+        err = {'_target' : target}
+        for image in sizes:
+            if image in base_sizes:
+                base_image = base_sizes[image]
+                # Loop through the text, data, bss parts
+                for part in sorted(sizes[image]):
+                    diff = sizes[image][part] - base_image[part]
+                    if diff:
+                        if image == 'u-boot':
+                            name = part
+                        else:
+                            name = image + ':' + part
+                        err[name] = diff
+        return err
+
+    def _calc_size_changes(self, board_selected, board_dict):
+        """Calculate changes in size for different image parts
+
+        The previous sizes are in Board.sizes, for each board
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+
+        Returns:
+            tuple: (arch_list, arch_count) where:
+                arch_list: dict keyed by arch name, containing a list of
+                    size-change dicts
+                arch_count: dict keyed by arch name, containing the number of
+                    boards for that arch
+        """
+        arch_list = {}
+        arch_count = {}
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            base_sizes = self._base_board_dict[target].sizes
+            outcome = board_dict[target]
+            sizes = outcome.sizes
+            err = self._calc_image_size_changes(target, sizes, base_sizes)
+            arch = board_selected[target].arch
+            if not arch in arch_count:
+                arch_count[arch] = 1
+            else:
+                arch_count[arch] += 1
+            if not sizes:
+                pass    # Only add to our list when we have some stats
+            elif not arch in arch_list:
+                arch_list[arch] = [err]
+            else:
+                arch_list[arch].append(err)
+        return arch_list, arch_count
+
     def print_size_summary(self, board_selected, board_dict, show_detail,
                          show_bloat):
         """Print a summary of image sizes broken down by section.
@@ -1145,55 +1349,15 @@ class Builder:
           arm: (285 boards)   text -0.0
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
-            board_dict: Dict containing boards for which we built this
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
-            show_detail: Show size delta detail for each board
-            show_bloat: Show detail for each function
+            show_detail (bool): Show size delta detail for each board
+            show_bloat (bool): Show detail for each function
         """
-        arch_list = {}
-        arch_count = {}
-
-        # Calculate changes in size for different image parts
-        # The previous sizes are in Board.sizes, for each board
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-            base_sizes = self._base_board_dict[target].sizes
-            outcome = board_dict[target]
-            sizes = outcome.sizes
-
-            # Loop through the list of images, creating a dict of size
-            # changes for each image/part. We end up with something like
-            # {'target' : 'snapper9g45, 'data' : 5, 'u-boot-spl:text' : -4}
-            # which means that U-Boot data increased by 5 bytes and SPL
-            # text decreased by 4.
-            err = {'_target' : target}
-            for image in sizes:
-                if image in base_sizes:
-                    base_image = base_sizes[image]
-                    # Loop through the text, data, bss parts
-                    for part in sorted(sizes[image]):
-                        diff = sizes[image][part] - base_image[part]
-                        col = None
-                        if diff:
-                            if image == 'u-boot':
-                                name = part
-                            else:
-                                name = image + ':' + part
-                            err[name] = diff
-            arch = board_selected[target].arch
-            if not arch in arch_count:
-                arch_count[arch] = 1
-            else:
-                arch_count[arch] += 1
-            if not sizes:
-                pass    # Only add to our list when we have some stats
-            elif not arch in arch_list:
-                arch_list[arch] = [err]
-            else:
-                arch_list[arch].append(err)
+        arch_list, arch_count = self._calc_size_changes(board_selected,
+                                                        board_dict)
 
         # We now have a list of image size changes sorted by arch
         # Print out a summary of these
@@ -1213,27 +1377,405 @@ class Builder:
                 result['_total_diff'] = total
                 result['_outcome'] = board_dict[result['_target']]
 
-            count = len(target_list)
-            printed_arch = False
-            for name in sorted(totals):
-                diff = totals[name]
-                if diff:
-                    # Display the average difference in this name for this
-                    # architecture
-                    avg_diff = float(diff) / count
-                    color = self.col.RED if avg_diff > 0 else self.col.GREEN
-                    msg = ' %s %+1.1f' % (name, avg_diff)
-                    if not printed_arch:
-                        tprint('%10s: (for %d/%d boards)' % (arch, count,
-                              arch_count[arch]), newline=False)
-                        printed_arch = True
-                    tprint(msg, colour=color, newline=False)
+            self._print_arch_size_summary(arch, target_list, arch_count,
+                                          totals, show_detail, show_bloat)
 
-            if printed_arch:
-                tprint()
-                if show_detail:
-                    self.print_size_detail(target_list, show_bloat)
+    def _print_arch_size_summary(self, arch, target_list, arch_count, totals,
+                                 show_detail, show_bloat):
+        """Print size summary for a single architecture
 
+        Args:
+            arch (str): Architecture name
+            target_list (list): List of size-change dicts for this arch
+            arch_count (dict): Dict of arch name to board count
+            totals (dict): Dict of name to total size diff
+            show_detail (bool): Show size delta detail for each board
+            show_bloat (bool): Show detail for each function
+        """
+        count = len(target_list)
+        printed_arch = False
+        for name in sorted(totals):
+            diff = totals[name]
+            if diff:
+                # Display the average difference in this name for this
+                # architecture
+                avg_diff = float(diff) / count
+                color = self.col.RED if avg_diff > 0 else self.col.GREEN
+                msg = f' {name} {avg_diff:+1.1f}'
+                if not printed_arch:
+                    tprint(f'{arch:>10s}: (for {count}/{arch_count[arch]} '
+                           'boards)', newline=False)
+                    printed_arch = True
+                tprint(msg, colour=color, newline=False)
+
+        if printed_arch:
+            tprint()
+            if show_detail:
+                self.print_size_detail(target_list, show_bloat)
+
+    def _classify_boards(self, board_selected, board_dict):
+        """Classify boards into outcome categories
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+
+        Returns:
+            BoardStatus: Named tuple containing lists of board targets
+        """
+        ok = []      # List of boards fixed since last commit
+        warn = []    # List of boards with warnings since last commit
+        err = []     # List of new broken boards since last commit
+        new = []     # List of boards that didn't exist last time
+        unknown = [] # List of boards that were not built
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+
+            # If the board was built last time, add its outcome to a list
+            if target in self._base_board_dict:
+                base_outcome = self._base_board_dict[target].rc
+                outcome = board_dict[target]
+                if outcome.rc == OUTCOME_UNKNOWN:
+                    unknown.append(target)
+                elif outcome.rc < base_outcome:
+                    if outcome.rc == OUTCOME_WARNING:
+                        warn.append(target)
+                    else:
+                        ok.append(target)
+                elif outcome.rc > base_outcome:
+                    if outcome.rc == OUTCOME_WARNING:
+                        warn.append(target)
+                    else:
+                        err.append(target)
+            else:
+                new.append(target)
+        return BoardStatus(ok, warn, err, new, unknown)
+
+    @staticmethod
+    def _calc_config(delta, name, config):
+        """Calculate configuration changes
+
+        Args:
+            delta: Type of the delta, e.g. '+'
+            name: name of the file which changed (e.g. .config)
+            config: configuration change dictionary
+                key: config name
+                value: config value
+        Returns:
+            String containing the configuration changes which can be
+                printed
+        """
+        out = ''
+        for key in sorted(config.keys()):
+            out += f'{key}={config[key]} '
+        return f'{delta} {name}: {out}'
+
+    @classmethod
+    def _add_config(cls, lines, name, config_plus, config_minus, config_change):
+        """Add changes in configuration to a list
+
+        Args:
+            lines: list to add to
+            name: config file name
+            config_plus: configurations added, dictionary
+                key: config name
+                value: config value
+            config_minus: configurations removed, dictionary
+                key: config name
+                value: config value
+            config_change: configurations changed, dictionary
+                key: config name
+                value: config value
+        """
+        if config_plus:
+            lines.append(cls._calc_config('+', name, config_plus))
+        if config_minus:
+            lines.append(cls._calc_config('-', name, config_minus))
+        if config_change:
+            lines.append(cls._calc_config('c', name, config_change))
+
+    def _output_config_info(self, lines):
+        """Output configuration change information
+
+        Args:
+            lines: List of configuration change strings
+        """
+        for line in lines:
+            if not line:
+                continue
+            col = None
+            if line[0] == '+':
+                col = self.col.GREEN
+            elif line[0] == '-':
+                col = self.col.RED
+            elif line[0] == 'c':
+                col = self.col.YELLOW
+            tprint('   ' + line, newline=True, colour=col)
+
+    def _show_environment_changes(self, board_selected, board_dict,
+                                  environment):
+        """Show changes in environment variables
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            environment (dict): Dict of environment changes, keyed by
+                board.target
+        """
+        lines = []
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+
+            tbase = self._base_environment[target]
+            tenvironment = environment[target]
+            environment_plus = {}
+            environment_minus = {}
+            environment_change = {}
+            base = tbase.environment
+            for key, value in tenvironment.environment.items():
+                if key not in base:
+                    environment_plus[key] = value
+            for key, value in base.items():
+                if key not in tenvironment.environment:
+                    environment_minus[key] = value
+            for key, value in base.items():
+                new_value = tenvironment.environment.get(key)
+                if new_value and value != new_value:
+                    desc = f'{value} -> {new_value}'
+                    environment_change[key] = desc
+
+            self._add_config(lines, target, environment_plus,
+                             environment_minus, environment_change)
+        self._output_config_info(lines)
+
+    def _calc_config_changes(self, target, arch, config, arch_config_plus,
+                              arch_config_minus, arch_config_change):
+        """Calculate configuration changes for a single target
+
+        Args:
+            target (str): Target board name
+            arch (str): Architecture name
+            config (dict): Dict of config changes, keyed by board.target
+            arch_config_plus (dict): Dict to update with added configs by
+                arch
+            arch_config_minus (dict): Dict to update with removed configs by
+                arch
+            arch_config_change (dict): Dict to update with changed configs by
+                arch
+
+        Returns:
+            str: Summary of config changes for this target
+        """
+        all_config_plus = {}
+        all_config_minus = {}
+        all_config_change = {}
+        tbase = self._base_config[target]
+        tconfig = config[target]
+        lines = []
+        for name in self.config_filenames:
+            if not tconfig.config[name]:
+                continue
+            config_plus = {}
+            config_minus = {}
+            config_change = {}
+            base = tbase.config[name]
+            for key, value in tconfig.config[name].items():
+                if key not in base:
+                    config_plus[key] = value
+                    all_config_plus[key] = value
+            for key, value in base.items():
+                if key not in tconfig.config[name]:
+                    config_minus[key] = value
+                    all_config_minus[key] = value
+            for key, value in base.items():
+                new_value = tconfig.config.get(key)
+                if new_value and value != new_value:
+                    desc = f'{value} -> {new_value}'
+                    config_change[key] = desc
+                    all_config_change[key] = desc
+
+            arch_config_plus[arch][name].update(config_plus)
+            arch_config_minus[arch][name].update(config_minus)
+            arch_config_change[arch][name].update(config_change)
+
+            self._add_config(lines, name, config_plus, config_minus,
+                             config_change)
+        self._add_config(lines, 'all', all_config_plus,
+                         all_config_minus, all_config_change)
+        return '\n'.join(lines)
+
+    def _print_arch_config_summary(self, arch, arch_config_plus,
+                                    arch_config_minus, arch_config_change):
+        """Print configuration summary for a single architecture
+
+        Args:
+            arch (str): Architecture name
+            arch_config_plus (dict): Dict of added configs by arch/filename
+            arch_config_minus (dict): Dict of removed configs by arch/filename
+            arch_config_change (dict): Dict of changed configs by arch/filename
+        """
+        lines = []
+        all_plus = {}
+        all_minus = {}
+        all_change = {}
+        for name in self.config_filenames:
+            all_plus.update(arch_config_plus[arch][name])
+            all_minus.update(arch_config_minus[arch][name])
+            all_change.update(arch_config_change[arch][name])
+            self._add_config(lines, name,
+                             arch_config_plus[arch][name],
+                             arch_config_minus[arch][name],
+                             arch_config_change[arch][name])
+        self._add_config(lines, 'all', all_plus, all_minus, all_change)
+        if lines:
+            tprint(f'{arch}:')
+            self._output_config_info(lines)
+
+    def _show_config_changes(self, board_selected, board_dict, config):
+        """Show changes in configuration
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            config (dict): Dict of config changes, keyed by board.target
+        """
+        summary = {}
+        arch_config_plus = {}
+        arch_config_minus = {}
+        arch_config_change = {}
+        arch_list = []
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            arch = board_selected[target].arch
+            if arch not in arch_list:
+                arch_list.append(arch)
+
+        for arch in arch_list:
+            arch_config_plus[arch] = {}
+            arch_config_minus[arch] = {}
+            arch_config_change[arch] = {}
+            for name in self.config_filenames:
+                arch_config_plus[arch][name] = {}
+                arch_config_minus[arch][name] = {}
+                arch_config_change[arch][name] = {}
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            arch = board_selected[target].arch
+            summary[target] = self._calc_config_changes(
+                target, arch, config, arch_config_plus, arch_config_minus,
+                arch_config_change)
+
+        lines_by_target = {}
+        for target, lines in summary.items():
+            if lines in lines_by_target:
+                lines_by_target[lines].append(target)
+            else:
+                lines_by_target[lines] = [target]
+
+        for arch in arch_list:
+            self._print_arch_config_summary(arch, arch_config_plus,
+                                            arch_config_minus,
+                                            arch_config_change)
+
+        for lines, targets in lines_by_target.items():
+            if not lines:
+                continue
+            tprint(f"{' '.join(sorted(targets))} :")
+            self._output_config_info(lines.split('\n'))
+
+    def _output_err_lines(self, err_lines, colour):
+        """Output the line of error/warning lines, if not empty
+
+        Also increments self._error_lines if err_lines not empty
+
+        Args:
+            err_lines: List of ErrLine objects, each an error or warning
+                line, possibly including a list of boards with that
+                error/warning
+            colour: Colour to use for output
+        """
+        if err_lines:
+            out_list = []
+            for line in err_lines:
+                names = [brd.target for brd in line.brds]
+                board_str = ' '.join(names) if names else ''
+                if board_str:
+                    out = self.col.build(colour, line.char + '(')
+                    out += self.col.build(self.col.MAGENTA, board_str,
+                                          bright=False)
+                    out += self.col.build(colour, f') {line.errline}')
+                else:
+                    out = self.col.build(colour, line.char + line.errline)
+                out_list.append(out)
+            tprint('\n'.join(out_list))
+            self._error_lines += 1
+
+    def _display_arch_results(self, board_selected, brd_status, better_err,
+                              worse_err, better_warn, worse_warn):
+        """Display results by architecture
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise
+            brd_status (BoardStatus): Named tuple with board classifications
+            better_err: List of ErrLine for fixed errors
+            worse_err: List of ErrLine for new errors
+            better_warn: List of ErrLine for fixed warnings
+            worse_warn: List of ErrLine for new warnings
+        """
+        if self._ide:
+            return
+        if not any((brd_status.ok, brd_status.warn, brd_status.err,
+                    brd_status.unknown, brd_status.new, worse_err, better_err,
+                    worse_warn, better_warn)):
+            return
+        arch_list = {}
+        self.add_outcome(board_selected, arch_list, brd_status.ok, '',
+                         self.col.GREEN)
+        self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
+                         self.col.YELLOW)
+        self.add_outcome(board_selected, arch_list, brd_status.err, '+',
+                         self.col.RED)
+        self.add_outcome(board_selected, arch_list, brd_status.new, '*',
+                         self.col.BLUE)
+        if self._show_unknown:
+            self.add_outcome(board_selected, arch_list, brd_status.unknown,
+                             '?', self.col.MAGENTA)
+        for arch, target_list in arch_list.items():
+            tprint(f'{arch:>10s}: {target_list}')
+            self._error_lines += 1
+        self._output_err_lines(better_err, colour=self.col.GREEN)
+        self._output_err_lines(worse_err, colour=self.col.RED)
+        self._output_err_lines(better_warn, colour=self.col.CYAN)
+        self._output_err_lines(worse_warn, colour=self.col.YELLOW)
+
+    def _print_ide_output(self, board_selected, board_dict):
+        """Print output for IDE mode
+
+        Args:
+            board_selected (dict): Dict of selected boards, keyed by target
+            board_dict (dict): Dict of boards that were built, keyed by target
+        """
+        if not self._ide:
+            return
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            outcome = board_dict[target]
+            for line in outcome.err_lines:
+                sys.stderr.write(line)
 
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
@@ -1247,29 +1789,30 @@ class Builder:
         the last call and what it sees now.
 
         Args:
-            board_selected: Dict containing boards to summarise, keyed by
-                board.target
-            board_dict: Dict containing boards for which we built this
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
-            err_lines: A list of errors for this commit, or [] if there is
-                none, or we don't want to print errors
-            err_line_boards: Dict keyed by error line, containing a list of
-                the Board objects with that error
-            warn_lines: A list of warnings for this commit, or [] if there is
-                none, or we don't want to print errors
-            warn_line_boards: Dict keyed by warning line, containing a list of
-                the Board objects with that warning
-            config: Dictionary keyed by filename - e.g. '.config'. Each
+            err_lines (list): A list of errors for this commit, or [] if there
+                is none, or we don't want to print errors
+            err_line_boards (dict): Dict keyed by error line, containing a list
+                of the Board objects with that error
+            warn_lines (list): A list of warnings for this commit, or [] if
+                there is none, or we don't want to print errors
+            warn_line_boards (dict): Dict keyed by warning line, containing a
+                list of the Board objects with that warning
+            config (dict): Dictionary keyed by filename - e.g. '.config'. Each
                     value is itself a dictionary:
                         key: config name
                         value: config value
-            environment: Dictionary keyed by environment variable, Each
+            environment (dict): Dictionary keyed by environment variable, Each
                      value is the value of environment variable.
-            show_sizes: Show image size deltas
-            show_detail: Show size delta detail for each board if show_sizes
-            show_bloat: Show detail for each function
-            show_config: Show config changes
-            show_environment: Show environment changes
+            show_sizes (bool): Show image size deltas
+            show_detail (bool): Show size delta detail for each board if
+                show_sizes
+            show_bloat (bool): Show detail for each function
+            show_config (bool): Show config changes
+            show_environment (bool): Show environment changes
         """
         def _board_list(line, line_boards):
             """Helper function to get a line of boards containing a line
@@ -1314,8 +1857,8 @@ class Builder:
             worse_lines = []
             for line in lines:
                 if line not in base_lines:
-                    errline = ErrLine(char + '+', _board_list(line, line_boards),
-                                      line)
+                    errline = ErrLine(
+                        char + '+', _board_list(line, line_boards), line)
                     worse_lines.append(errline)
             for line in base_lines:
                 if line not in lines:
@@ -1324,116 +1867,7 @@ class Builder:
                     better_lines.append(errline)
             return better_lines, worse_lines
 
-        def _calc_config(delta, name, config):
-            """Calculate configuration changes
-
-            Args:
-                delta: Type of the delta, e.g. '+'
-                name: name of the file which changed (e.g. .config)
-                config: configuration change dictionary
-                    key: config name
-                    value: config value
-            Returns:
-                String containing the configuration changes which can be
-                    printed
-            """
-            out = ''
-            for key in sorted(config.keys()):
-                out += '%s=%s ' % (key, config[key])
-            return '%s %s: %s' % (delta, name, out)
-
-        def _add_config(lines, name, config_plus, config_minus, config_change):
-            """Add changes in configuration to a list
-
-            Args:
-                lines: list to add to
-                name: config file name
-                config_plus: configurations added, dictionary
-                    key: config name
-                    value: config value
-                config_minus: configurations removed, dictionary
-                    key: config name
-                    value: config value
-                config_change: configurations changed, dictionary
-                    key: config name
-                    value: config value
-            """
-            if config_plus:
-                lines.append(_calc_config('+', name, config_plus))
-            if config_minus:
-                lines.append(_calc_config('-', name, config_minus))
-            if config_change:
-                lines.append(_calc_config('c', name, config_change))
-
-        def _output_config_info(lines):
-            for line in lines:
-                if not line:
-                    continue
-                col = None
-                if line[0] == '+':
-                    col = self.col.GREEN
-                elif line[0] == '-':
-                    col = self.col.RED
-                elif line[0] == 'c':
-                    col = self.col.YELLOW
-                tprint('   ' + line, newline=True, colour=col)
-
-        def _output_err_lines(err_lines, colour):
-            """Output the line of error/warning lines, if not empty
-
-            Also increments self._error_lines if err_lines not empty
-
-            Args:
-                err_lines: List of ErrLine objects, each an error or warning
-                    line, possibly including a list of boards with that
-                    error/warning
-                colour: Colour to use for output
-            """
-            if err_lines:
-                out_list = []
-                for line in err_lines:
-                    names = [brd.target for brd in line.brds]
-                    board_str = ' '.join(names) if names else ''
-                    if board_str:
-                        out = self.col.build(colour, line.char + '(')
-                        out += self.col.build(self.col.MAGENTA, board_str,
-                                              bright=False)
-                        out += self.col.build(colour, ') %s' % line.errline)
-                    else:
-                        out = self.col.build(colour, line.char + line.errline)
-                    out_list.append(out)
-                tprint('\n'.join(out_list))
-                self._error_lines += 1
-
-
-        ok_boards = []      # List of boards fixed since last commit
-        warn_boards = []    # List of boards with warnings since last commit
-        err_boards = []     # List of new broken boards since last commit
-        new_boards = []     # List of boards that didn't exist last time
-        unknown_boards = [] # List of boards that were not built
-
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-
-            # If the board was built last time, add its outcome to a list
-            if target in self._base_board_dict:
-                base_outcome = self._base_board_dict[target].rc
-                outcome = board_dict[target]
-                if outcome.rc == OUTCOME_UNKNOWN:
-                    unknown_boards.append(target)
-                elif outcome.rc < base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
-                    else:
-                        ok_boards.append(target)
-                elif outcome.rc > base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
-                    else:
-                        err_boards.append(target)
-            else:
-                new_boards.append(target)
+        brd_status = self._classify_boards(board_selected, board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
         better_err, worse_err = _calc_error_delta(self._base_err_lines,
@@ -1442,167 +1876,22 @@ class Builder:
                 self._base_warn_line_boards, warn_lines, warn_line_boards, 'w')
 
         # For the IDE mode, print out all the output
-        if self._ide:
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-                outcome = board_dict[target]
-                for line in outcome.err_lines:
-                    sys.stderr.write(line)
+        self._print_ide_output(board_selected, board_dict)
 
         # Display results by arch
-        elif any((ok_boards, warn_boards, err_boards, unknown_boards, new_boards,
-                worse_err, better_err, worse_warn, better_warn)):
-            arch_list = {}
-            self.add_outcome(board_selected, arch_list, ok_boards, '',
-                    self.col.GREEN)
-            self.add_outcome(board_selected, arch_list, warn_boards, 'w+',
-                    self.col.YELLOW)
-            self.add_outcome(board_selected, arch_list, err_boards, '+',
-                    self.col.RED)
-            self.add_outcome(board_selected, arch_list, new_boards, '*', self.col.BLUE)
-            if self._show_unknown:
-                self.add_outcome(board_selected, arch_list, unknown_boards, '?',
-                        self.col.MAGENTA)
-            for arch, target_list in arch_list.items():
-                tprint('%10s: %s' % (arch, target_list))
-                self._error_lines += 1
-            _output_err_lines(better_err, colour=self.col.GREEN)
-            _output_err_lines(worse_err, colour=self.col.RED)
-            _output_err_lines(better_warn, colour=self.col.CYAN)
-            _output_err_lines(worse_warn, colour=self.col.YELLOW)
+        self._display_arch_results(board_selected, brd_status, better_err,
+                                   worse_err, better_warn, worse_warn)
 
         if show_sizes:
             self.print_size_summary(board_selected, board_dict, show_detail,
                                   show_bloat)
 
         if show_environment and self._base_environment:
-            lines = []
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-
-                tbase = self._base_environment[target]
-                tenvironment = environment[target]
-                environment_plus = {}
-                environment_minus = {}
-                environment_change = {}
-                base = tbase.environment
-                for key, value in tenvironment.environment.items():
-                    if key not in base:
-                        environment_plus[key] = value
-                for key, value in base.items():
-                    if key not in tenvironment.environment:
-                        environment_minus[key] = value
-                for key, value in base.items():
-                    new_value = tenvironment.environment.get(key)
-                    if new_value and value != new_value:
-                        desc = '%s -> %s' % (value, new_value)
-                        environment_change[key] = desc
-
-                _add_config(lines, target, environment_plus, environment_minus,
-                           environment_change)
-
-            _output_config_info(lines)
+            self._show_environment_changes(board_selected, board_dict,
+                                           environment)
 
         if show_config and self._base_config:
-            summary = {}
-            arch_config_plus = {}
-            arch_config_minus = {}
-            arch_config_change = {}
-            arch_list = []
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-                arch = board_selected[target].arch
-                if arch not in arch_list:
-                    arch_list.append(arch)
-
-            for arch in arch_list:
-                arch_config_plus[arch] = {}
-                arch_config_minus[arch] = {}
-                arch_config_change[arch] = {}
-                for name in self.config_filenames:
-                    arch_config_plus[arch][name] = {}
-                    arch_config_minus[arch][name] = {}
-                    arch_config_change[arch][name] = {}
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-
-                arch = board_selected[target].arch
-
-                all_config_plus = {}
-                all_config_minus = {}
-                all_config_change = {}
-                tbase = self._base_config[target]
-                tconfig = config[target]
-                lines = []
-                for name in self.config_filenames:
-                    if not tconfig.config[name]:
-                        continue
-                    config_plus = {}
-                    config_minus = {}
-                    config_change = {}
-                    base = tbase.config[name]
-                    for key, value in tconfig.config[name].items():
-                        if key not in base:
-                            config_plus[key] = value
-                            all_config_plus[key] = value
-                    for key, value in base.items():
-                        if key not in tconfig.config[name]:
-                            config_minus[key] = value
-                            all_config_minus[key] = value
-                    for key, value in base.items():
-                        new_value = tconfig.config.get(key)
-                        if new_value and value != new_value:
-                            desc = '%s -> %s' % (value, new_value)
-                            config_change[key] = desc
-                            all_config_change[key] = desc
-
-                    arch_config_plus[arch][name].update(config_plus)
-                    arch_config_minus[arch][name].update(config_minus)
-                    arch_config_change[arch][name].update(config_change)
-
-                    _add_config(lines, name, config_plus, config_minus,
-                               config_change)
-                _add_config(lines, 'all', all_config_plus, all_config_minus,
-                           all_config_change)
-                summary[target] = '\n'.join(lines)
-
-            lines_by_target = {}
-            for target, lines in summary.items():
-                if lines in lines_by_target:
-                    lines_by_target[lines].append(target)
-                else:
-                    lines_by_target[lines] = [target]
-
-            for arch in arch_list:
-                lines = []
-                all_plus = {}
-                all_minus = {}
-                all_change = {}
-                for name in self.config_filenames:
-                    all_plus.update(arch_config_plus[arch][name])
-                    all_minus.update(arch_config_minus[arch][name])
-                    all_change.update(arch_config_change[arch][name])
-                    _add_config(lines, name, arch_config_plus[arch][name],
-                               arch_config_minus[arch][name],
-                               arch_config_change[arch][name])
-                _add_config(lines, 'all', all_plus, all_minus, all_change)
-                #arch_summary[target] = '\n'.join(lines)
-                if lines:
-                    tprint('%s:' % arch)
-                    _output_config_info(lines)
-
-            for lines, targets in lines_by_target.items():
-                if not lines:
-                    continue
-                tprint('%s :' % ' '.join(sorted(targets)))
-                _output_config_info(lines.split('\n'))
+            self._show_config_changes(board_selected, board_dict, config)
 
 
         # Save our updated information for the next call to this function
@@ -1614,31 +1903,46 @@ class Builder:
         self._base_config = config
         self._base_environment = environment
 
-        # Get a list of boards that did not get built, if needed
+        self._show_not_built(board_selected, board_dict)
+
+    @staticmethod
+    def _show_not_built(board_selected, board_dict):
+        """Show boards that were not built
+
+        Args:
+            board_selected (dict): Dict of selected boards, keyed by target
+            board_dict (dict): Dict of boards that were built, keyed by target
+        """
         not_built = []
         for brd in board_selected:
-            if not brd in board_dict:
+            if brd not in board_dict:
                 not_built.append(brd)
         if not_built:
-            tprint("Boards not built (%d): %s" % (len(not_built),
-                  ', '.join(not_built)))
+            tprint(f"Boards not built ({len(not_built)}): "
+                   f"{', '.join(not_built)}")
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
-            (board_dict, err_lines, err_line_boards, warn_lines,
-             warn_line_boards, config, environment) = self.get_result_summary(
-                    board_selected, commit_upto,
-                    read_func_sizes=self._show_bloat,
-                    read_config=self._show_config,
-                    read_environment=self._show_environment)
-            if commits:
-                msg = '%02d: %s' % (commit_upto + 1,
-                        commits[commit_upto].subject)
-                tprint(msg, colour=self.col.BLUE)
-            self.print_result_summary(board_selected, board_dict,
-                    err_lines if self._show_errors else [], err_line_boards,
-                    warn_lines if self._show_errors else [], warn_line_boards,
-                    config, environment, self._show_sizes, self._show_detail,
-                    self._show_bloat, self._show_config, self._show_environment)
+        """Produce a summary of the results for a single commit
+
+        Args:
+            commit_upto (int): Commit number to summarise (0..self.count-1)
+            commits (list): List of commits being built
+            board_selected (dict): Dict containing boards to summarise
+        """
+        (board_dict, err_lines, err_line_boards, warn_lines,
+         warn_line_boards, config, environment) = self.get_result_summary(
+                board_selected, commit_upto,
+                read_func_sizes=self._show_bloat,
+                read_config=self._show_config,
+                read_environment=self._show_environment)
+        if commits:
+            msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
+            tprint(msg, colour=self.col.BLUE)
+        self.print_result_summary(board_selected, board_dict,
+                err_lines if self._show_errors else [], err_line_boards,
+                warn_lines if self._show_errors else [], warn_line_boards,
+                config, environment, self._show_sizes, self._show_detail,
+                self._show_bloat, self._show_config, self._show_environment)
 
     def show_summary(self, commits, board_selected):
         """Show a build summary for U-Boot for a given board list.
@@ -1647,8 +1951,8 @@ class Builder:
         each commit's results, then display the differences we see.
 
         Args:
-            commit: Commit objects to summarise
-            board_selected: Dict containing boards to summarise
+            commits (list): Commit objects to summarise
+            board_selected (dict): Dict containing boards to summarise
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
@@ -1661,12 +1965,11 @@ class Builder:
             tprint('(no errors to report)', colour=self.col.GREEN)
 
 
-    def setup_build(self, board_selected, commits):
+    def setup_build(self, board_selected, _commits):
         """Set up ready to start a build.
 
         Args:
-            board_selected: Selected boards to build
-            commits: Selected commits to build
+            board_selected (dict): Selected boards to build
         """
         # First work out how many commits we will build
         count = (self.commit_count + self._step - 1) // self._step
@@ -1678,12 +1981,12 @@ class Builder:
         """Get the directory path to the working dir for a thread.
 
         Args:
-            thread_num: Number of thread to check (-1 for main process, which
-                is treated as 0)
+            thread_num (int): Number of thread to check (-1 for main process,
+                which is treated as 0)
         """
         if self.work_in_output:
             return self._working_dir
-        return os.path.join(self._working_dir, '%02d' % max(thread_num, 0))
+        return os.path.join(self._working_dir, f'{max(thread_num, 0):02d}')
 
     def _prepare_thread(self, thread_num, setup_git):
         """Prepare the working directory for a thread.
@@ -1709,7 +2012,7 @@ class Builder:
             if os.path.isdir(git_dir):
                 # This is a clone of the src_dir repo, we can keep using
                 # it but need to fetch from src_dir.
-                tprint('\rFetching repo for thread %d' % thread_num,
+                tprint(f'\rFetching repo for thread {thread_num}',
                       newline=False)
                 gitutil.fetch(git_dir, thread_dir)
                 terminal.print_clear()
@@ -1720,20 +2023,20 @@ class Builder:
             elif os.path.exists(git_dir):
                 # Don't know what could trigger this, but we probably
                 # can't create a git worktree/clone here.
-                raise ValueError('Git dir %s exists, but is not a file '
-                                 'or a directory.' % git_dir)
+                raise ValueError(f'Git dir {git_dir} exists, but is not a '
+                                 'file or a directory.')
             elif setup_git == 'worktree':
-                tprint('\rChecking out worktree for thread %d' % thread_num,
+                tprint(f'\rChecking out worktree for thread {thread_num}',
                       newline=False)
                 gitutil.add_worktree(src_dir, thread_dir)
                 terminal.print_clear()
-            elif setup_git == 'clone' or setup_git == True:
-                tprint('\rCloning repo for thread %d' % thread_num,
+            elif setup_git == 'clone' or setup_git is True:
+                tprint(f'\rCloning repo for thread {thread_num}',
                       newline=False)
                 gitutil.clone(src_dir, thread_dir)
                 terminal.print_clear()
             else:
-                raise ValueError("Can't setup git repo with %s." % setup_git)
+                raise ValueError(f"Can't setup git repo with {setup_git}.")
 
     def _prepare_working_space(self, max_threads, setup_git):
         """Prepare the working directory for use.
@@ -1774,7 +2077,7 @@ class Builder:
             List of full paths of directories to remove
         """
         if not self.commits:
-            return
+            return []
         dir_list = []
         for commit_upto in range(self.commit_count):
             dir_list.append(self.get_output_dir(commit_upto))
@@ -1797,7 +2100,7 @@ class Builder:
         """
         to_remove = self._get_output_space_removals()
         if to_remove:
-            tprint('Removing %d old build directories...' % len(to_remove),
+            tprint(f'Removing {len(to_remove)} old build directories...',
                   newline=False)
             for dirname in to_remove:
                 shutil.rmtree(dirname)
@@ -1808,14 +2111,15 @@ class Builder:
         """Build all commits for a list of boards
 
         Args:
-            commits: List of commits to be build, each a Commit object
-            boards_selected: Dict of selected boards, key is target name,
+            commits (list): List of commits to be build, each a Commit object
+            board_selected (dict): Dict of selected boards, key is target name,
                     value is Board object
-            keep_outputs: True to save build output files
-            verbose: Display build results as they are completed
+            keep_outputs (bool): True to save build output files
+            verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
+
         Returns:
-            Tuple containing:
+            tuple: Tuple containing:
                 - number of boards that failed to build
                 - number of boards that issued warnings
                 - list of thread exceptions raised
@@ -1852,7 +2156,7 @@ class Builder:
 
         if self.num_threads:
             term = threading.Thread(target=self.queue.join)
-            term.setDaemon(True)
+            term.daemon = True
             term.start()
             while term.is_alive():
                 term.join(100)
@@ -1862,26 +2166,27 @@ class Builder:
         if not self._ide:
             tprint()
 
-            msg = 'Completed: %d total built' % self.count
+            msg = f'Completed: {self.count} total built'
             if self.already_done or self.kconfig_reconfig:
                 parts = []
                 if self.already_done:
-                    parts.append('%d previously' % self.already_done)
+                    parts.append(f'{self.already_done} previously')
                 if self.already_done != self.count:
-                    parts.append('%d newly' % (self.count - self.already_done))
+                    parts.append(f'{self.count - self.already_done} newly')
                 if self.kconfig_reconfig:
-                    parts.append('%d reconfig' % self.kconfig_reconfig)
+                    parts.append(f'{self.kconfig_reconfig} reconfig')
                 msg += ' (' + ', '.join(parts) + ')'
             duration = datetime.now() - self._start_time
             if duration > timedelta(microseconds=1000000):
                 if duration.microseconds >= 500000:
                     duration = duration + timedelta(seconds=1)
-                duration = duration - timedelta(microseconds=duration.microseconds)
+                duration -= timedelta(microseconds=duration.microseconds)
                 rate = float(self.count) / duration.total_seconds()
-                msg += ', duration %s, rate %1.2f' % (duration, rate)
+                msg += f', duration {duration}, rate {rate:1.2f}'
             tprint(msg)
             if self.thread_exceptions:
-                tprint('Failed: %d thread exceptions' % len(self.thread_exceptions),
+                tprint(
+                    f'Failed: {len(self.thread_exceptions)} thread exceptions',
                     colour=self.col.RED)
 
         return (self.fail, self.warned, self.thread_exceptions)
