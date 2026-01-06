@@ -37,6 +37,17 @@ from u_boot_pylib.terminal import tprint
 # which indicates that BREAK_ME has an empty default
 RE_NO_DEFAULT = re.compile(br'\((\w+)\) \[] \(NEW\)')
 
+# Regex patterns for matching compiler output
+RE_FUNCTION = re.compile('(.*): In function.*')
+RE_FILES = re.compile('In file included from.*')
+RE_WARNING = re.compile(r'(.*):(\d*):(\d*): warning: .*')
+RE_DTB_WARNING = re.compile('(.*): Warning .*')
+RE_NOTE = re.compile(
+    r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
+RE_MIGRATION_WARNING = re.compile(r'^={21} WARNING ={22}\n.*\n=+\n',
+                                  re.MULTILINE | re.DOTALL)
+RE_MAKE_ERR = re.compile('(make.*Waiting for unfinished)|(Segmentation fault)')
+
 # Symbol types which appear in the bloat feature (-B). Others are silently
 # dropped when reading in the 'nm' output
 NM_SYMBOL_TYPES = 'tTdDbBr'
@@ -203,7 +214,6 @@ class Builder:
         num_jobs: Number of jobs to run at once (passed to make as -j)
         num_threads: Number of builder threads to run
         out_queue: Queue of results to process
-        re_make_err: Compiled regular expression for ignore_lines
         queue: Queue of jobs to run
         threads: List of active threads
         toolchains: Toolchains object to use for building
@@ -400,15 +410,6 @@ class Builder:
         self.warnings_as_errors = warnings_as_errors
         self.col = terminal.Color()
 
-        self._re_function = re.compile('(.*): In function.*')
-        self._re_files = re.compile('In file included from.*')
-        self._re_warning = re.compile(r'(.*):(\d*):(\d*): warning: .*')
-        self._re_dtb_warning = re.compile('(.*): Warning .*')
-        self._re_note = re.compile(
-            r'(.*):(\d*):(\d*): note: this is the location of the previous.*')
-        self._re_migration_warning = re.compile(
-            r'^={21} WARNING ={22}\n.*\n=+\n', re.MULTILINE | re.DOTALL)
-
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions
 
@@ -463,10 +464,6 @@ class Builder:
         else:
             self._single_builder = builderthread.BuilderThread(
                 self, -1, mrproper, per_board_out_dir)
-
-        ignore_lines = ['(make.*Waiting for unfinished)',
-                        '(Segmentation fault)']
-        self.re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -773,12 +770,12 @@ class Builder:
         out_lines = []
         if self._filter_migration_warnings:
             text = '\n'.join(lines)
-            text = self._re_migration_warning.sub('', text)
+            text = RE_MIGRATION_WARNING.sub('', text)
             lines = text.splitlines()
         for line in lines:
-            if self.re_make_err.search(line):
+            if RE_MAKE_ERR.search(line):
                 continue
-            if self._filter_dtb_warnings and self._re_dtb_warning.search(line):
+            if self._filter_dtb_warnings and RE_DTB_WARNING.search(line):
                 continue
             out_lines.append(line)
         return out_lines
@@ -1005,13 +1002,13 @@ class Builder:
         last_was_warning = False
         for line in err_lines:
             if line:
-                if (self._re_function.match(line) or
-                        self._re_files.match(line)):
+                if (RE_FUNCTION.match(line) or
+                        RE_FILES.match(line)):
                     last_func = line
                 else:
-                    is_warning = (self._re_warning.match(line) or
-                                  self._re_dtb_warning.match(line))
-                    is_note = self._re_note.match(line)
+                    is_warning = (RE_WARNING.match(line) or
+                                  RE_DTB_WARNING.match(line))
+                    is_note = RE_NOTE.match(line)
                     if is_warning or (last_was_warning and is_note):
                         if last_func:
                             self._add_line(warn_lines_summary,
