@@ -1353,26 +1353,41 @@ class Builder:
                 result['_total_diff'] = total
                 result['_outcome'] = board_dict[result['_target']]
 
-            count = len(target_list)
-            printed_arch = False
-            for name in sorted(totals):
-                diff = totals[name]
-                if diff:
-                    # Display the average difference in this name for this
-                    # architecture
-                    avg_diff = float(diff) / count
-                    color = self.col.RED if avg_diff > 0 else self.col.GREEN
-                    msg = f' {name} {avg_diff:+1.1f}'
-                    if not printed_arch:
-                        tprint(f'{arch:>10s}: (for {count}/{arch_count[arch]} '
-                               'boards)', newline=False)
-                        printed_arch = True
-                    tprint(msg, colour=color, newline=False)
+            self._print_arch_size_summary(arch, target_list, arch_count,
+                                          totals, show_detail, show_bloat)
 
-            if printed_arch:
-                tprint()
-                if show_detail:
-                    self.print_size_detail(target_list, show_bloat)
+    def _print_arch_size_summary(self, arch, target_list, arch_count, totals,
+                                 show_detail, show_bloat):
+        """Print size summary for a single architecture
+
+        Args:
+            arch (str): Architecture name
+            target_list (list): List of size-change dicts for this arch
+            arch_count (dict): Dict of arch name to board count
+            totals (dict): Dict of name to total size diff
+            show_detail (bool): Show size delta detail for each board
+            show_bloat (bool): Show detail for each function
+        """
+        count = len(target_list)
+        printed_arch = False
+        for name in sorted(totals):
+            diff = totals[name]
+            if diff:
+                # Display the average difference in this name for this
+                # architecture
+                avg_diff = float(diff) / count
+                color = self.col.RED if avg_diff > 0 else self.col.GREEN
+                msg = f' {name} {avg_diff:+1.1f}'
+                if not printed_arch:
+                    tprint(f'{arch:>10s}: (for {count}/{arch_count[arch]} '
+                           'boards)', newline=False)
+                    printed_arch = True
+                tprint(msg, colour=color, newline=False)
+
+        if printed_arch:
+            tprint()
+            if show_detail:
+                self.print_size_detail(target_list, show_bloat)
 
 
     def print_result_summary(self, board_selected, board_dict, err_lines,
