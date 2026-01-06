@@ -395,12 +395,12 @@ class Builder:
                 t = builderthread.BuilderThread(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
-                t.setDaemon(True)
+                t.daemon = True
                 t.start()
                 self.threads.append(t)
 
             t = builderthread.ResultThread(self)
-            t.setDaemon(True)
+            t.daemon = True
             t.start()
             self.threads.append(t)
         else:
@@ -1849,7 +1849,7 @@ class Builder:
 
         if self.num_threads:
             term = threading.Thread(target=self.queue.join)
-            term.setDaemon(True)
+            term.daemon = True
             term.start()
             while term.is_alive():
                 term.join(100)
