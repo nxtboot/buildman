@@ -445,6 +445,26 @@ class Builder:
         self._base_config = None
         self._base_environment = None
 
+        self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
+
+        ignore_lines = ['(make.*Waiting for unfinished)',
+                        '(Segmentation fault)']
+        self.re_make_err = re.compile('|'.join(ignore_lines))
+
+        # Handle existing graceful with SIGINT / Ctrl-C
+        signal.signal(signal.SIGINT, self.signal_handler)
+
+    def _setup_threads(self, mrproper, per_board_out_dir,
+                       test_thread_exceptions):
+        """Set up builder threads
+
+        Args:
+            mrproper (bool): True to run 'make mrproper' before building
+            per_board_out_dir (bool): True to use a separate output directory
+                per board
+            test_thread_exceptions (bool): True to make threads raise an
+                exception instead of reporting their result (for tests)
+        """
         if self.num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
@@ -464,9 +484,6 @@ class Builder:
         else:
             self._single_builder = builderthread.BuilderThread(
                 self, -1, mrproper, per_board_out_dir)
-
-        # Handle existing graceful with SIGINT / Ctrl-C
-        signal.signal(signal.SIGINT, self.signal_handler)
 
     def __del__(self):
         """Get rid of all threads created by the builder"""
