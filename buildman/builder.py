@@ -1389,6 +1389,109 @@ class Builder:
             if show_detail:
                 self.print_size_detail(target_list, show_bloat)
 
+    def _classify_boards(self, board_selected, board_dict):
+        """Classify boards into outcome categories
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+
+        Returns:
+            tuple: (ok_boards, warn_boards, err_boards, new_boards,
+                unknown_boards) where each is a list of board targets
+        """
+        ok_boards = []      # List of boards fixed since last commit
+        warn_boards = []    # List of boards with warnings since last commit
+        err_boards = []     # List of new broken boards since last commit
+        new_boards = []     # List of boards that didn't exist last time
+        unknown_boards = [] # List of boards that were not built
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+
+            # If the board was built last time, add its outcome to a list
+            if target in self._base_board_dict:
+                base_outcome = self._base_board_dict[target].rc
+                outcome = board_dict[target]
+                if outcome.rc == OUTCOME_UNKNOWN:
+                    unknown_boards.append(target)
+                elif outcome.rc < base_outcome:
+                    if outcome.rc == OUTCOME_WARNING:
+                        warn_boards.append(target)
+                    else:
+                        ok_boards.append(target)
+                elif outcome.rc > base_outcome:
+                    if outcome.rc == OUTCOME_WARNING:
+                        warn_boards.append(target)
+                    else:
+                        err_boards.append(target)
+            else:
+                new_boards.append(target)
+        return ok_boards, warn_boards, err_boards, new_boards, unknown_boards
+
+    @staticmethod
+    def _calc_config(delta, name, config):
+        """Calculate configuration changes
+
+        Args:
+            delta: Type of the delta, e.g. '+'
+            name: name of the file which changed (e.g. .config)
+            config: configuration change dictionary
+                key: config name
+                value: config value
+        Returns:
+            String containing the configuration changes which can be
+                printed
+        """
+        out = ''
+        for key in sorted(config.keys()):
+            out += f'{key}={config[key]} '
+        return f'{delta} {name}: {out}'
+
+    @classmethod
+    def _add_config(cls, lines, name, config_plus, config_minus, config_change):
+        """Add changes in configuration to a list
+
+        Args:
+            lines: list to add to
+            name: config file name
+            config_plus: configurations added, dictionary
+                key: config name
+                value: config value
+            config_minus: configurations removed, dictionary
+                key: config name
+                value: config value
+            config_change: configurations changed, dictionary
+                key: config name
+                value: config value
+        """
+        if config_plus:
+            lines.append(cls._calc_config('+', name, config_plus))
+        if config_minus:
+            lines.append(cls._calc_config('-', name, config_minus))
+        if config_change:
+            lines.append(cls._calc_config('c', name, config_change))
+
+    def _output_config_info(self, lines):
+        """Output configuration change information
+
+        Args:
+            lines: List of configuration change strings
+        """
+        for line in lines:
+            if not line:
+                continue
+            col = None
+            if line[0] == '+':
+                col = self.col.GREEN
+            elif line[0] == '-':
+                col = self.col.RED
+            elif line[0] == 'c':
+                col = self.col.YELLOW
+            tprint('   ' + line, newline=True, colour=col)
 
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
@@ -1480,60 +1583,6 @@ class Builder:
                     better_lines.append(errline)
             return better_lines, worse_lines
 
-        def _calc_config(delta, name, config):
-            """Calculate configuration changes
-
-            Args:
-                delta: Type of the delta, e.g. '+'
-                name: name of the file which changed (e.g. .config)
-                config: configuration change dictionary
-                    key: config name
-                    value: config value
-            Returns:
-                String containing the configuration changes which can be
-                    printed
-            """
-            out = ''
-            for key in sorted(config.keys()):
-                out += f'{key}={config[key]} '
-            return f'{delta} {name}: {out}'
-
-        def _add_config(lines, name, config_plus, config_minus, config_change):
-            """Add changes in configuration to a list
-
-            Args:
-                lines: list to add to
-                name: config file name
-                config_plus: configurations added, dictionary
-                    key: config name
-                    value: config value
-                config_minus: configurations removed, dictionary
-                    key: config name
-                    value: config value
-                config_change: configurations changed, dictionary
-                    key: config name
-                    value: config value
-            """
-            if config_plus:
-                lines.append(_calc_config('+', name, config_plus))
-            if config_minus:
-                lines.append(_calc_config('-', name, config_minus))
-            if config_change:
-                lines.append(_calc_config('c', name, config_change))
-
-        def _output_config_info(lines):
-            for line in lines:
-                if not line:
-                    continue
-                col = None
-                if line[0] == '+':
-                    col = self.col.GREEN
-                elif line[0] == '-':
-                    col = self.col.RED
-                elif line[0] == 'c':
-                    col = self.col.YELLOW
-                tprint('   ' + line, newline=True, colour=col)
-
         def _output_err_lines(err_lines, colour):
             """Output the line of error/warning lines, if not empty
 
@@ -1562,34 +1611,8 @@ class Builder:
                 self._error_lines += 1
 
 
-        ok_boards = []      # List of boards fixed since last commit
-        warn_boards = []    # List of boards with warnings since last commit
-        err_boards = []     # List of new broken boards since last commit
-        new_boards = []     # List of boards that didn't exist last time
-        unknown_boards = [] # List of boards that were not built
-
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-
-            # If the board was built last time, add its outcome to a list
-            if target in self._base_board_dict:
-                base_outcome = self._base_board_dict[target].rc
-                outcome = board_dict[target]
-                if outcome.rc == OUTCOME_UNKNOWN:
-                    unknown_boards.append(target)
-                elif outcome.rc < base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
-                    else:
-                        ok_boards.append(target)
-                elif outcome.rc > base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn_boards.append(target)
-                    else:
-                        err_boards.append(target)
-            else:
-                new_boards.append(target)
+        ok_boards, warn_boards, err_boards, new_boards, unknown_boards = \
+            self._classify_boards(board_selected, board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
         better_err, worse_err = _calc_error_delta(self._base_err_lines,
@@ -1658,10 +1681,10 @@ class Builder:
                         desc = f'{value} -> {new_value}'
                         environment_change[key] = desc
 
-                _add_config(lines, target, environment_plus, environment_minus,
-                           environment_change)
+                self._add_config(lines, target, environment_plus,
+                                 environment_minus, environment_change)
 
-            _output_config_info(lines)
+            self._output_config_info(lines)
 
         if show_config and self._base_config:
             summary = {}
@@ -1724,10 +1747,10 @@ class Builder:
                     arch_config_minus[arch][name].update(config_minus)
                     arch_config_change[arch][name].update(config_change)
 
-                    _add_config(lines, name, config_plus, config_minus,
-                               config_change)
-                _add_config(lines, 'all', all_config_plus, all_config_minus,
-                           all_config_change)
+                    self._add_config(lines, name, config_plus, config_minus,
+                                     config_change)
+                self._add_config(lines, 'all', all_config_plus,
+                                 all_config_minus, all_config_change)
                 summary[target] = '\n'.join(lines)
 
             lines_by_target = {}
@@ -1746,20 +1769,21 @@ class Builder:
                     all_plus.update(arch_config_plus[arch][name])
                     all_minus.update(arch_config_minus[arch][name])
                     all_change.update(arch_config_change[arch][name])
-                    _add_config(lines, name, arch_config_plus[arch][name],
-                               arch_config_minus[arch][name],
-                               arch_config_change[arch][name])
-                _add_config(lines, 'all', all_plus, all_minus, all_change)
+                    self._add_config(lines, name,
+                                     arch_config_plus[arch][name],
+                                     arch_config_minus[arch][name],
+                                     arch_config_change[arch][name])
+                self._add_config(lines, 'all', all_plus, all_minus, all_change)
                 #arch_summary[target] = '\n'.join(lines)
                 if lines:
                     tprint(f'{arch}:')
-                    _output_config_info(lines)
+                    self._output_config_info(lines)
 
             for lines, targets in lines_by_target.items():
                 if not lines:
                     continue
                 tprint(f"{' '.join(sorted(targets))} :")
-                _output_config_info(lines.split('\n'))
+                self._output_config_info(lines.split('\n'))
 
 
         # Save our updated information for the next call to this function
