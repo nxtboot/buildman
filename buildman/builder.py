@@ -1493,6 +1493,152 @@ class Builder:
                 col = self.col.YELLOW
             tprint('   ' + line, newline=True, colour=col)
 
+    def _show_environment_changes(self, board_selected, board_dict,
+                                  environment):
+        """Show changes in environment variables
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            environment (dict): Dict of environment changes, keyed by
+                board.target
+        """
+        lines = []
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+
+            tbase = self._base_environment[target]
+            tenvironment = environment[target]
+            environment_plus = {}
+            environment_minus = {}
+            environment_change = {}
+            base = tbase.environment
+            for key, value in tenvironment.environment.items():
+                if key not in base:
+                    environment_plus[key] = value
+            for key, value in base.items():
+                if key not in tenvironment.environment:
+                    environment_minus[key] = value
+            for key, value in base.items():
+                new_value = tenvironment.environment.get(key)
+                if new_value and value != new_value:
+                    desc = f'{value} -> {new_value}'
+                    environment_change[key] = desc
+
+            self._add_config(lines, target, environment_plus,
+                             environment_minus, environment_change)
+        self._output_config_info(lines)
+
+    def _show_config_changes(self, board_selected, board_dict, config):
+        """Show changes in configuration
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            config (dict): Dict of config changes, keyed by board.target
+        """
+        summary = {}
+        arch_config_plus = {}
+        arch_config_minus = {}
+        arch_config_change = {}
+        arch_list = []
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            arch = board_selected[target].arch
+            if arch not in arch_list:
+                arch_list.append(arch)
+
+        for arch in arch_list:
+            arch_config_plus[arch] = {}
+            arch_config_minus[arch] = {}
+            arch_config_change[arch] = {}
+            for name in self.config_filenames:
+                arch_config_plus[arch][name] = {}
+                arch_config_minus[arch][name] = {}
+                arch_config_change[arch][name] = {}
+
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+
+            arch = board_selected[target].arch
+
+            all_config_plus = {}
+            all_config_minus = {}
+            all_config_change = {}
+            tbase = self._base_config[target]
+            tconfig = config[target]
+            lines = []
+            for name in self.config_filenames:
+                if not tconfig.config[name]:
+                    continue
+                config_plus = {}
+                config_minus = {}
+                config_change = {}
+                base = tbase.config[name]
+                for key, value in tconfig.config[name].items():
+                    if key not in base:
+                        config_plus[key] = value
+                        all_config_plus[key] = value
+                for key, value in base.items():
+                    if key not in tconfig.config[name]:
+                        config_minus[key] = value
+                        all_config_minus[key] = value
+                for key, value in base.items():
+                    new_value = tconfig.config.get(key)
+                    if new_value and value != new_value:
+                        desc = f'{value} -> {new_value}'
+                        config_change[key] = desc
+                        all_config_change[key] = desc
+
+                arch_config_plus[arch][name].update(config_plus)
+                arch_config_minus[arch][name].update(config_minus)
+                arch_config_change[arch][name].update(config_change)
+
+                self._add_config(lines, name, config_plus, config_minus,
+                                 config_change)
+            self._add_config(lines, 'all', all_config_plus,
+                             all_config_minus, all_config_change)
+            summary[target] = '\n'.join(lines)
+
+        lines_by_target = {}
+        for target, lines in summary.items():
+            if lines in lines_by_target:
+                lines_by_target[lines].append(target)
+            else:
+                lines_by_target[lines] = [target]
+
+        for arch in arch_list:
+            lines = []
+            all_plus = {}
+            all_minus = {}
+            all_change = {}
+            for name in self.config_filenames:
+                all_plus.update(arch_config_plus[arch][name])
+                all_minus.update(arch_config_minus[arch][name])
+                all_change.update(arch_config_change[arch][name])
+                self._add_config(lines, name,
+                                 arch_config_plus[arch][name],
+                                 arch_config_minus[arch][name],
+                                 arch_config_change[arch][name])
+            self._add_config(lines, 'all', all_plus, all_minus, all_change)
+            if lines:
+                tprint(f'{arch}:')
+                self._output_config_info(lines)
+
+        for lines, targets in lines_by_target.items():
+            if not lines:
+                continue
+            tprint(f"{' '.join(sorted(targets))} :")
+            self._output_config_info(lines.split('\n'))
+
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
                            config, environment, show_sizes, show_detail,
@@ -1657,133 +1803,11 @@ class Builder:
                                   show_bloat)
 
         if show_environment and self._base_environment:
-            lines = []
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-
-                tbase = self._base_environment[target]
-                tenvironment = environment[target]
-                environment_plus = {}
-                environment_minus = {}
-                environment_change = {}
-                base = tbase.environment
-                for key, value in tenvironment.environment.items():
-                    if key not in base:
-                        environment_plus[key] = value
-                for key, value in base.items():
-                    if key not in tenvironment.environment:
-                        environment_minus[key] = value
-                for key, value in base.items():
-                    new_value = tenvironment.environment.get(key)
-                    if new_value and value != new_value:
-                        desc = f'{value} -> {new_value}'
-                        environment_change[key] = desc
-
-                self._add_config(lines, target, environment_plus,
-                                 environment_minus, environment_change)
-
-            self._output_config_info(lines)
+            self._show_environment_changes(board_selected, board_dict,
+                                           environment)
 
         if show_config and self._base_config:
-            summary = {}
-            arch_config_plus = {}
-            arch_config_minus = {}
-            arch_config_change = {}
-            arch_list = []
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-                arch = board_selected[target].arch
-                if arch not in arch_list:
-                    arch_list.append(arch)
-
-            for arch in arch_list:
-                arch_config_plus[arch] = {}
-                arch_config_minus[arch] = {}
-                arch_config_change[arch] = {}
-                for name in self.config_filenames:
-                    arch_config_plus[arch][name] = {}
-                    arch_config_minus[arch][name] = {}
-                    arch_config_change[arch][name] = {}
-
-            for target in board_dict:
-                if target not in board_selected:
-                    continue
-
-                arch = board_selected[target].arch
-
-                all_config_plus = {}
-                all_config_minus = {}
-                all_config_change = {}
-                tbase = self._base_config[target]
-                tconfig = config[target]
-                lines = []
-                for name in self.config_filenames:
-                    if not tconfig.config[name]:
-                        continue
-                    config_plus = {}
-                    config_minus = {}
-                    config_change = {}
-                    base = tbase.config[name]
-                    for key, value in tconfig.config[name].items():
-                        if key not in base:
-                            config_plus[key] = value
-                            all_config_plus[key] = value
-                    for key, value in base.items():
-                        if key not in tconfig.config[name]:
-                            config_minus[key] = value
-                            all_config_minus[key] = value
-                    for key, value in base.items():
-                        new_value = tconfig.config.get(key)
-                        if new_value and value != new_value:
-                            desc = f'{value} -> {new_value}'
-                            config_change[key] = desc
-                            all_config_change[key] = desc
-
-                    arch_config_plus[arch][name].update(config_plus)
-                    arch_config_minus[arch][name].update(config_minus)
-                    arch_config_change[arch][name].update(config_change)
-
-                    self._add_config(lines, name, config_plus, config_minus,
-                                     config_change)
-                self._add_config(lines, 'all', all_config_plus,
-                                 all_config_minus, all_config_change)
-                summary[target] = '\n'.join(lines)
-
-            lines_by_target = {}
-            for target, lines in summary.items():
-                if lines in lines_by_target:
-                    lines_by_target[lines].append(target)
-                else:
-                    lines_by_target[lines] = [target]
-
-            for arch in arch_list:
-                lines = []
-                all_plus = {}
-                all_minus = {}
-                all_change = {}
-                for name in self.config_filenames:
-                    all_plus.update(arch_config_plus[arch][name])
-                    all_minus.update(arch_config_minus[arch][name])
-                    all_change.update(arch_config_change[arch][name])
-                    self._add_config(lines, name,
-                                     arch_config_plus[arch][name],
-                                     arch_config_minus[arch][name],
-                                     arch_config_change[arch][name])
-                self._add_config(lines, 'all', all_plus, all_minus, all_change)
-                #arch_summary[target] = '\n'.join(lines)
-                if lines:
-                    tprint(f'{arch}:')
-                    self._output_config_info(lines)
-
-            for lines, targets in lines_by_target.items():
-                if not lines:
-                    continue
-                tprint(f"{' '.join(sorted(targets))} :")
-                self._output_config_info(lines.split('\n'))
+            self._show_config_changes(board_selected, board_dict, config)
 
 
         # Save our updated information for the next call to this function
