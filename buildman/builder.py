@@ -559,7 +559,6 @@ class Builder:
             result: A CommandResult object, which indicates the result for
                     a single build
         """
-        col = terminal.Color()
         if result:
             target = result.brd.target
 
@@ -1173,7 +1172,6 @@ class Builder:
                     # Loop through the text, data, bss parts
                     for part in sorted(sizes[image]):
                         diff = sizes[image][part] - base_image[part]
-                        col = None
                         if diff:
                             if image == 'u-boot':
                                 name = part
