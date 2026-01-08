@@ -1219,7 +1219,7 @@ class Builder:
                f'{args[0]}/{args[1]}, grow: {args[2]}/{args[3]} bytes: '
                f'{args[4]}/{args[5]} ({args[6]})')
         tprint(f'{indent}  {"function":<38s} {"old":>7s} {"new":>7s} '
-               f'{"delta":>+7s}')
+               f'{"delta":>7s}')
         for diff, name in delta:
             if diff:
                 color = self.col.RED if diff > 0 else self.col.GREEN
