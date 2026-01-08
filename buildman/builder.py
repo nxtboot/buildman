@@ -592,9 +592,20 @@ class Builder:
             cwd (str): Directory where make should be run
             args: Arguments to pass to make
             kwargs: Arguments to pass to command.run_one()
+
+        Returns:
+            CommandResult: Result of the make operation
         """
 
         def check_output(_stream, data):
+            """Check output for config restart loops
+
+            Args:
+                data (bytes): Output data to check
+
+            Returns:
+                bool: True to terminate the command, False to continue
+            """
             if b'Restart config' in data:
                 self._restarting_config = True
 
@@ -690,6 +701,9 @@ class Builder:
 
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
+
+        Returns:
+            str: Path to the output directory
         """
         if self.work_in_output:
             return self._working_dir
@@ -729,6 +743,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the done file
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'done')
 
@@ -738,6 +755,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the sizes file
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'sizes')
 
@@ -748,6 +768,9 @@ class Builder:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
             elf_fname (str): Filename of elf image
+
+        Returns:
+            str: Path to the funcsizes file
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.sizes")
@@ -759,6 +782,9 @@ class Builder:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
             elf_fname (str): Filename of elf image
+
+        Returns:
+            str: Path to the objdump file
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.objdump")
@@ -769,6 +795,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the err file
         """
         output_dir = self.get_build_dir(commit_upto, target)
         return os.path.join(output_dir, 'err')
@@ -1983,6 +2012,9 @@ class Builder:
         Args:
             thread_num (int): Number of thread to check (-1 for main process,
                 which is treated as 0)
+
+        Returns:
+            str: Path to the thread's working directory
         """
         if self.work_in_output:
             return self._working_dir
