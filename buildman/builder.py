@@ -1011,36 +1011,6 @@ class Builder:
         return (board_dict, err_lines_summary, err_lines_boards,
                 warn_lines_summary, warn_lines_boards, config, environment)
 
-    def add_outcome(self, board_dict, arch_list, changes, char, color):
-        """Add an output to our list of outcomes for each architecture
-
-        This simple function adds failing boards (changes) to the
-        relevant architecture string, so we can print the results out
-        sorted by architecture.
-
-        Args:
-             board_dict (dict): Dict containing all boards
-             arch_list (dict): Dict keyed by arch name. Value is a string
-                 containing a list of board names which failed for that arch.
-             changes (list): List of boards to add to arch_list
-             char (str): Character to display for this board
-             color (int): terminal.Colour object
-        """
-        done_arch = {}
-        for target in changes:
-            if target in board_dict:
-                arch = board_dict[target].arch
-            else:
-                arch = 'unknown'
-            text = self.col.build(color, ' ' + target)
-            if arch not in done_arch:
-                text = f' {self.col.build(color, char)}  {text}'
-                done_arch[arch] = True
-            if arch not in arch_list:
-                arch_list[arch] = text
-            else:
-                arch_list[arch] += text
-
     def reset_result_summary(self, board_selected):
         """Reset the results summary ready for use.
 
@@ -1347,87 +1317,6 @@ class Builder:
             tprint(f"{' '.join(sorted(targets))} :")
             self._output_config_info(lines.split('\n'))
 
-    def _output_err_lines(self, err_lines, colour):
-        """Output the line of error/warning lines, if not empty
-
-        Also increments self._error_lines if err_lines not empty
-
-        Args:
-            err_lines: List of ErrLine objects, each an error or warning
-                line, possibly including a list of boards with that
-                error/warning
-            colour: Colour to use for output
-        """
-        if err_lines:
-            out_list = []
-            for line in err_lines:
-                names = [brd.target for brd in line.brds]
-                board_str = ' '.join(names) if names else ''
-                if board_str:
-                    out = self.col.build(colour, line.char + '(')
-                    out += self.col.build(self.col.MAGENTA, board_str,
-                                          bright=False)
-                    out += self.col.build(colour, f') {line.errline}')
-                else:
-                    out = self.col.build(colour, line.char + line.errline)
-                out_list.append(out)
-            tprint('\n'.join(out_list))
-            self._error_lines += 1
-
-    def _display_arch_results(self, board_selected, brd_status, better_err,
-                              worse_err, better_warn, worse_warn):
-        """Display results by architecture
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise
-            brd_status (BoardStatus): Named tuple with board classifications
-            better_err: List of ErrLine for fixed errors
-            worse_err: List of ErrLine for new errors
-            better_warn: List of ErrLine for fixed warnings
-            worse_warn: List of ErrLine for new warnings
-        """
-        if self._opts.ide:
-            return
-        if not any((brd_status.ok, brd_status.warn, brd_status.err,
-                    brd_status.unknown, brd_status.new, worse_err, better_err,
-                    worse_warn, better_warn)):
-            return
-        arch_list = {}
-        self.add_outcome(board_selected, arch_list, brd_status.ok, '',
-                         self.col.GREEN)
-        self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
-                         self.col.YELLOW)
-        self.add_outcome(board_selected, arch_list, brd_status.err, '+',
-                         self.col.RED)
-        self.add_outcome(board_selected, arch_list, brd_status.new, '*',
-                         self.col.BLUE)
-        if self._opts.show_unknown:
-            self.add_outcome(board_selected, arch_list, brd_status.unknown,
-                             '?', self.col.MAGENTA)
-        for arch, target_list in arch_list.items():
-            tprint(f'{arch:>10s}: {target_list}')
-            self._error_lines += 1
-        self._output_err_lines(better_err, colour=self.col.GREEN)
-        self._output_err_lines(worse_err, colour=self.col.RED)
-        self._output_err_lines(better_warn, colour=self.col.CYAN)
-        self._output_err_lines(worse_warn, colour=self.col.YELLOW)
-
-    def _print_ide_output(self, board_selected, board_dict):
-        """Print output for IDE mode
-
-        Args:
-            board_selected (dict): Dict of selected boards, keyed by target
-            board_dict (dict): Dict of boards that were built, keyed by target
-        """
-        if not self._opts.ide:
-            return
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-            outcome = board_dict[target]
-            for line in outcome.err_lines:
-                sys.stderr.write(line)
-
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
                            config, environment, show_sizes, show_detail,
@@ -1527,11 +1416,14 @@ class Builder:
                 self._base_warn_line_boards, warn_lines, warn_line_boards, 'w')
 
         # For the IDE mode, print out all the output
-        self._print_ide_output(board_selected, board_dict)
+        if self._opts.ide:
+            self._result_handler.print_ide_output(board_selected, board_dict)
 
         # Display results by arch
-        self._display_arch_results(board_selected, brd_status, better_err,
-                                   worse_err, better_warn, worse_warn)
+        if not self._opts.ide:
+            self._error_lines += self._result_handler.display_arch_results(
+                board_selected, brd_status, better_err, worse_err, better_warn,
+                worse_warn, self._opts.show_unknown)
 
         if show_sizes:
             self._result_handler.print_size_summary(

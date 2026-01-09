@@ -6,6 +6,8 @@
 
 """Result writer for buildman build results"""
 
+import sys
+
 from u_boot_pylib.terminal import tprint
 
 
@@ -301,3 +303,119 @@ class ResultHandler:
             if show_detail:
                 self.print_size_detail(target_list, base_board_dict, board_dict,
                                        show_bloat)
+
+    def add_outcome(self, board_dict, arch_list, changes, char, color):
+        """Add an output to our list of outcomes for each architecture
+
+        This simple function adds failing boards (changes) to the
+        relevant architecture string, so we can print the results out
+        sorted by architecture.
+
+        Args:
+             board_dict (dict): Dict containing all boards
+             arch_list (dict): Dict keyed by arch name. Value is a string
+                 containing a list of board names which failed for that arch.
+             changes (list): List of boards to add to arch_list
+             char (str): Character to display for this board
+             color (int): terminal.Colour object
+        """
+        done_arch = {}
+        for target in changes:
+            if target in board_dict:
+                arch = board_dict[target].arch
+            else:
+                arch = 'unknown'
+            text = self._col.build(color, ' ' + target)
+            if arch not in done_arch:
+                text = f' {self._col.build(color, char)}  {text}'
+                done_arch[arch] = True
+            if arch not in arch_list:
+                arch_list[arch] = text
+            else:
+                arch_list[arch] += text
+
+    def output_err_lines(self, err_lines, colour):
+        """Output the line of error/warning lines, if not empty
+
+        Args:
+            err_lines: List of ErrLine objects, each an error or warning
+                line, possibly including a list of boards with that
+                error/warning
+            colour: Colour to use for output
+
+        Returns:
+            int: 1 if any lines were output, 0 otherwise
+        """
+        if err_lines:
+            out_list = []
+            for line in err_lines:
+                names = [brd.target for brd in line.brds]
+                board_str = ' '.join(names) if names else ''
+                if board_str:
+                    out = self._col.build(colour, line.char + '(')
+                    out += self._col.build(self._col.MAGENTA, board_str,
+                                          bright=False)
+                    out += self._col.build(colour, f') {line.errline}')
+                else:
+                    out = self._col.build(colour, line.char + line.errline)
+                out_list.append(out)
+            tprint('\n'.join(out_list))
+            return 1
+        return 0
+
+    def display_arch_results(self, board_selected, brd_status, better_err,
+                             worse_err, better_warn, worse_warn, show_unknown):
+        """Display results by architecture
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise
+            brd_status (BoardStatus): Named tuple with board classifications
+            better_err: List of ErrLine for fixed errors
+            worse_err: List of ErrLine for new errors
+            better_warn: List of ErrLine for fixed warnings
+            worse_warn: List of ErrLine for new warnings
+            show_unknown (bool): Whether to show unknown boards
+
+        Returns:
+            int: Number of error lines output
+        """
+        error_lines = 0
+        if not any((brd_status.ok, brd_status.warn, brd_status.err,
+                    brd_status.unknown, brd_status.new, worse_err, better_err,
+                    worse_warn, better_warn)):
+            return error_lines
+        arch_list = {}
+        self.add_outcome(board_selected, arch_list, brd_status.ok, '',
+                         self._col.GREEN)
+        self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
+                         self._col.YELLOW)
+        self.add_outcome(board_selected, arch_list, brd_status.err, '+',
+                         self._col.RED)
+        self.add_outcome(board_selected, arch_list, brd_status.new, '*',
+                         self._col.BLUE)
+        if show_unknown:
+            self.add_outcome(board_selected, arch_list, brd_status.unknown,
+                             '?', self._col.MAGENTA)
+        for arch, target_list in arch_list.items():
+            tprint(f'{arch:>10s}: {target_list}')
+            error_lines += 1
+        error_lines += self.output_err_lines(better_err, colour=self._col.GREEN)
+        error_lines += self.output_err_lines(worse_err, colour=self._col.RED)
+        error_lines += self.output_err_lines(better_warn, colour=self._col.CYAN)
+        error_lines += self.output_err_lines(worse_warn, colour=self._col.YELLOW)
+        return error_lines
+
+    @staticmethod
+    def print_ide_output(board_selected, board_dict):
+        """Print output for IDE mode
+
+        Args:
+            board_selected (dict): Dict of selected boards, keyed by target
+            board_dict (dict): Dict of boards that were built, keyed by target
+        """
+        for target in board_dict:
+            if target not in board_selected:
+                continue
+            outcome = board_dict[target]
+            for line in outcome.err_lines:
+                sys.stderr.write(line)
