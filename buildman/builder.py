@@ -21,7 +21,7 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
-from buildman.outcome import (BoardStatus, ErrLine, Outcome,
+from buildman.outcome import (BoardStatus, DisplayOptions, ErrLine, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
                               OUTCOME_UNKNOWN)
 from u_boot_pylib import command
@@ -202,7 +202,6 @@ class Builder:
         _complete_delay: Expected delay until completion (timedelta)
         _next_delay_update: Next time we plan to display a progress update
                 (datatime)
-        _show_unknown: Show unknown boards (those not built) in summary
         _start_time: Start time for the build
         _timestamps: List of timestamps for the completion of the last
             last _timestamp_count builds. Each is a datetime object.
@@ -217,7 +216,7 @@ class Builder:
     """
 
     def __init__(self, toolchains, base_dir, git_dir, num_threads, num_jobs,
-                 gnu_make='make', checkout=True, show_unknown=True, step=1,
+                 gnu_make='make', checkout=True, step=1,
                  no_subdirs=False, full_path=False, verbose_build=False,
                  mrproper=False, fallback_mrproper=False,
                  per_board_out_dir=False, config_only=False,
@@ -240,7 +239,6 @@ class Builder:
             gnu_make: the command name of GNU Make.
             checkout: True to check out source, False to skip that step.
                 This is used for testing.
-            show_unknown: Show unknown boards (those not built) in summary
             step: 1 to process every commit, n to process every nth commit
             no_subdirs: Don't create subdirectories when building current
                 source for a single board
@@ -298,7 +296,6 @@ class Builder:
         self.kconfig_reconfig = 0
         self.force_build = False
         self.git_dir = git_dir
-        self._show_unknown = show_unknown
         self._timestamp_count = 10
         self._build_period_us = None
         self._complete_delay = None
@@ -315,7 +312,6 @@ class Builder:
         self.work_in_output = work_in_output
         self.adjust_cfg = adjust_cfg
         self.allow_missing = allow_missing
-        self._ide = False
         self.no_lto = no_lto
         self.reproducible_builds = reproducible_builds
         self.force_build = force_build
@@ -345,13 +341,10 @@ class Builder:
         self.test_thread_exceptions = test_thread_exceptions
 
         # Attributes used by set_display_options()
-        self._show_errors = False
-        self._show_sizes = False
-        self._show_detail = False
-        self._show_bloat = False
-        self._list_error_boards = False
-        self._show_config = False
-        self._show_environment = False
+        self._opts = DisplayOptions(
+            show_errors=True, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=True, ide=False, list_error_boards=False)
         self._filter_dtb_warnings = False
         self._filter_migration_warnings = False
 
@@ -440,41 +433,24 @@ class Builder:
             env[b'DTC'] = tools.to_bytes(self.dtc)
         return env
 
-    def set_display_options(self, show_errors=False, show_sizes=False,
-                          show_detail=False, show_bloat=False,
-                          list_error_boards=False, show_config=False,
-                          show_environment=False, filter_dtb_warnings=False,
-                          filter_migration_warnings=False, ide=False):
+    def set_display_options(self, display_options,
+                            filter_dtb_warnings=False,
+                            filter_migration_warnings=False):
         """Setup display options for the builder.
 
         Args:
-            show_errors (bool): True to show summarised error/warning info
-            show_sizes (bool): Show size deltas
-            show_detail (bool): Show size delta detail for each board if
-                show_sizes
-            show_bloat (bool): Show detail for each function
-            list_error_boards (bool): Show the boards which caused each
-                error/warning
-            show_config (bool): Show config deltas
-            show_environment (bool): Show environment deltas
+            display_options (DisplayOptions): Named tuple containing display
+                settings (show_errors, show_sizes, show_detail, show_bloat,
+                show_config, show_environment, show_unknown, ide,
+                list_error_boards)
             filter_dtb_warnings (bool): Filter out any warnings from the
                 device-tree compiler
             filter_migration_warnings (bool): Filter out any warnings about
                 migrating a board to driver model
-            ide (bool): Create output that can be parsed by an IDE. There is
-                no '+' prefix on error lines and output on stderr stays on
-                stderr.
         """
-        self._show_errors = show_errors
-        self._show_sizes = show_sizes
-        self._show_detail = show_detail
-        self._show_bloat = show_bloat
-        self._list_error_boards = list_error_boards
-        self._show_config = show_config
-        self._show_environment = show_environment
+        self._opts = display_options
         self._filter_dtb_warnings = filter_dtb_warnings
         self._filter_migration_warnings = filter_migration_warnings
-        self._ide = ide
 
     def _add_timestamp(self):
         """Add a new timestamp to the list and record the build period.
@@ -594,7 +570,7 @@ class Builder:
                 self.already_done += 1
             if result.kconfig_reconfig:
                 self.kconfig_reconfig += 1
-            if self._ide:
+            if self._opts.ide:
                 if result.stderr:
                     sys.stderr.write(result.stderr)
             elif self._verbose:
@@ -625,7 +601,7 @@ class Builder:
             line += f'{self._complete_delay}  : '
 
         line += target
-        if not self._ide:
+        if not self._opts.ide:
             terminal.print_clear()
             tprint(line, newline=False, limit_to_line=True)
 
@@ -1662,7 +1638,7 @@ class Builder:
             better_warn: List of ErrLine for fixed warnings
             worse_warn: List of ErrLine for new warnings
         """
-        if self._ide:
+        if self._opts.ide:
             return
         if not any((brd_status.ok, brd_status.warn, brd_status.err,
                     brd_status.unknown, brd_status.new, worse_err, better_err,
@@ -1677,7 +1653,7 @@ class Builder:
                          self.col.RED)
         self.add_outcome(board_selected, arch_list, brd_status.new, '*',
                          self.col.BLUE)
-        if self._show_unknown:
+        if self._opts.show_unknown:
             self.add_outcome(board_selected, arch_list, brd_status.unknown,
                              '?', self.col.MAGENTA)
         for arch, target_list in arch_list.items():
@@ -1695,7 +1671,7 @@ class Builder:
             board_selected (dict): Dict of selected boards, keyed by target
             board_dict (dict): Dict of boards that were built, keyed by target
         """
-        if not self._ide:
+        if not self._opts.ide:
             return
         for target in board_dict:
             if target not in board_selected:
@@ -1753,7 +1729,7 @@ class Builder:
             """
             brds = []
             board_set = set()
-            if self._list_error_boards:
+            if self._opts.list_error_boards:
                 for brd in line_boards[line]:
                     if not brd in board_set:
                         brds.append(brd)
@@ -1873,17 +1849,17 @@ class Builder:
         (board_dict, err_lines, err_line_boards, warn_lines,
          warn_line_boards, config, environment) = self.get_result_summary(
                 board_selected, commit_upto,
-                read_func_sizes=self._show_bloat,
-                read_config=self._show_config,
-                read_environment=self._show_environment)
+                read_func_sizes=self._opts.show_bloat,
+                read_config=self._opts.show_config,
+                read_environment=self._opts.show_environment)
         if commits:
             msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self.col.BLUE)
         self.print_result_summary(board_selected, board_dict,
-                err_lines if self._show_errors else [], err_line_boards,
-                warn_lines if self._show_errors else [], warn_line_boards,
-                config, environment, self._show_sizes, self._show_detail,
-                self._show_bloat, self._show_config, self._show_environment)
+                err_lines if self._opts.show_errors else [], err_line_boards,
+                warn_lines if self._opts.show_errors else [], warn_line_boards,
+                config, environment, self._opts.show_sizes, self._opts.show_detail,
+                self._opts.show_bloat, self._opts.show_config, self._opts.show_environment)
 
     def show_summary(self, commits, board_selected):
         """Show a build summary for U-Boot for a given board list.
@@ -2077,7 +2053,7 @@ class Builder:
         self._prepare_working_space(min(self.num_threads, len(board_selected)),
                 commits is not None)
         self._prepare_output_space()
-        if not self._ide:
+        if not self._opts.ide:
             tprint('\rStarting build...', newline=False)
         self._start_time = datetime.now()
         self.setup_build(board_selected, commits)
@@ -2107,7 +2083,7 @@ class Builder:
 
             # Wait until we have processed all output
             self.out_queue.join()
-        if not self._ide:
+        if not self._opts.ide:
             self._print_build_summary()
 
         return (self.fail, self.warned, self.thread_exceptions)

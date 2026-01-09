@@ -20,6 +20,7 @@ from buildman import bsettings
 from buildman import cfgutil
 from buildman import toolchain
 from buildman.builder import Builder
+from buildman.outcome import DisplayOptions
 from patman import patchstream
 import qconfig
 from u_boot_pylib import command
@@ -559,10 +560,18 @@ def run_builder(builder, commits, board_selected, args):
         tprint(get_action_summary(args.summary, commit_count, board_selected,
                                   args.threads, args.jobs))
 
+    display_options = DisplayOptions(
+        show_errors=args.show_errors,
+        show_sizes=args.show_sizes,
+        show_detail=args.show_detail,
+        show_bloat=args.show_bloat,
+        show_config=args.show_config,
+        show_environment=args.show_environment,
+        show_unknown=args.show_unknown,
+        ide=args.ide,
+        list_error_boards=args.list_error_boards)
     builder.set_display_options(
-        args.show_errors, args.show_sizes, args.show_detail, args.show_bloat,
-        args.list_error_boards, args.show_config, args.show_environment,
-        args.filter_dtb_warnings, args.filter_migration_warnings, args.ide)
+        display_options, args.filter_dtb_warnings, args.filter_migration_warnings)
     if args.summary:
         builder.show_summary(commits, board_selected)
     else:
@@ -802,8 +811,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
 
     # Create a new builder with the selected args
     builder = Builder(toolchains, output_dir, git_dir,
-            args.threads, args.jobs, checkout=True,
-            show_unknown=args.show_unknown, step=args.step,
+            args.threads, args.jobs, checkout=True, step=args.step,
             no_subdirs=args.no_subdirs, full_path=args.full_path,
             verbose_build=args.verbose_build,
             mrproper=args.mrproper,

@@ -24,6 +24,7 @@ from buildman import builderthread
 from buildman import cfgutil
 from buildman import control
 from buildman import toolchain
+from buildman.outcome import DisplayOptions
 from patman import commit
 from u_boot_pylib import command
 from u_boot_pylib import terminal
@@ -245,20 +246,25 @@ class TestBuildOutput(TestBuildBase):
             expect += col.build(expected_colour, f' {brd}')
         self.assertEqual(text, expect)
 
-    def _setup_test(self, echo_lines=False, threads=1, **kwdisplay_args):
+    def _setup_test(self, echo_lines=False, threads=1,
+                    show_errors=False, list_error_boards=False,
+                    filter_dtb_warnings=False, filter_migration_warnings=False):
         """Set up the test by running a build and summary
 
         Args:
             echo_lines: True to echo lines to the terminal to aid test
                 development
-            kwdisplay_args: Dict of arguments to pass to
-                Builder.SetDisplayOptions()
+            threads: Number of threads to use
+            show_errors: Show errors in summary
+            list_error_boards: List boards with errors
+            filter_dtb_warnings: Filter device-tree warnings
+            filter_migration_warnings: Filter migration warnings
 
         Returns:
             Iterator containing the output lines, each a PrintLine() object
         """
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
-                                2, checkout=False, show_unknown=False)
+                                2, checkout=False)
         build.do_make = self.make
         board_selected = self.brds.get_selected_dict()
 
@@ -275,7 +281,12 @@ class TestBuildOutput(TestBuildBase):
         # We should get two starting messages, an update for every commit built
         # and a summary message
         self.assertEqual(count, len(COMMITS) * len(BOARDS) + 3)
-        build.set_display_options(**kwdisplay_args)
+        opts = DisplayOptions(
+            show_errors=show_errors, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=list_error_boards)
+        build.set_display_options(opts, filter_dtb_warnings,
+                                  filter_migration_warnings)
         build.show_summary(self.commits, board_selected)
         if echo_lines:
             terminal.echo_print_test_lines()
@@ -631,7 +642,7 @@ class TestBuild(TestBuildBase):
     def test_output_dir(self):
         """Test output-directory naming for a commit"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False)
+                                checkout=False)
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
@@ -641,7 +652,7 @@ class TestBuild(TestBuildBase):
     def test_output_dir_current(self):
         """Test output-directory naming for current source"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False)
+                                checkout=False)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '/current')
@@ -649,8 +660,7 @@ class TestBuild(TestBuildBase):
     def test_output_dir_no_subdirs(self):
         """Test output-directory naming without subdirectories"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False,
-                                no_subdirs=True)
+                                checkout=False, no_subdirs=True)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '')

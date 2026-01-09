@@ -16,6 +16,19 @@ OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
 #   unknown: List of boards that were not built
 BoardStatus = namedtuple('BoardStatus', 'ok warn err new unknown')
 
+# Display options for result output
+DisplayOptions = namedtuple('DisplayOptions', [
+    'show_errors',      # Show error/warning lines
+    'show_sizes',       # Show size deltas
+    'show_detail',      # Show size delta detail for each board
+    'show_bloat',       # Show detail for each function
+    'show_config',      # Show config changes
+    'show_environment', # Show environment changes
+    'show_unknown',     # Show unknown boards in summary
+    'ide',              # IDE mode - output to stderr
+    'list_error_boards', # Include board list with error lines
+])
+
 # Error line information for display
 #   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
 #       'w-' = fixed warning
