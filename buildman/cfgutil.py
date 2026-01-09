@@ -3,11 +3,39 @@
 # Written by Simon Glass <sjg@chromium.org>
 #
 
-"""Utility functions for dealing with Kconfig .confing files"""
+"""Utility functions for dealing with Kconfig .config files"""
 
 import re
 
 from u_boot_pylib import tools
+
+
+class Config:
+    """Holds information about configuration settings for a board."""
+    def __init__(self, config_filename, target):
+        self.target = target
+        self.config = {}
+        for fname in config_filename:
+            self.config[fname] = {}
+
+    def add(self, fname, key, value):
+        """Add a configuration value
+
+        Args:
+            fname (str): Filename to add to (e.g. '.config')
+            key (str): Config key (e.g. 'CONFIG_DM')
+            value (str): Config value (e.g. 'y')
+        """
+        self.config[fname][key] = value
+
+    def __hash__(self):
+        val = 0
+        for _, config in self.config.items():
+            for key, value in config.items():
+                print(key, value)
+                val = val ^ hash(key) & hash(value)
+        return val
+
 
 RE_LINE = re.compile(r'(# )?CONFIG_([A-Z0-9_]+)(=(.*)| is not set)')
 RE_CFG = re.compile(r'(~?)(CONFIG_)?([A-Z0-9_]+)(=.*)?')
