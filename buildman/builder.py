@@ -585,6 +585,35 @@ class Builder:
         if checkout and self.checkout:
             gitutil.checkout(commit.hash)
 
+    def _check_output_for_loop(self, data):
+        """Check output for config restart loops
+
+        This detects when Kconfig enters a restart loop due to missing
+        defaults. It looks for 'Restart config' followed by multiple
+        occurrences of the same Kconfig item with no default.
+
+        Args:
+            data (bytes): Output data to check
+
+        Returns:
+            bool: True to terminate the command, False to continue
+        """
+        if b'Restart config' in data:
+            self._restarting_config = True
+
+        # If we see 'Restart config' followed by multiple errors
+        if self._restarting_config:
+            matches = RE_NO_DEFAULT.findall(data)
+
+            # Number of occurrences of each Kconfig item
+            multiple = [matches.count(val) for val in set(matches)]
+
+            # If any of them occur more than once, we have a loop
+            if [val for val in multiple if val > 1]:
+                self._terminated = True
+                return True
+        return False
+
     def make(self, _commit, _brd, _stage, cwd, *args, **kwargs):
         """Run make
 
@@ -592,32 +621,18 @@ class Builder:
             cwd (str): Directory where make should be run
             args: Arguments to pass to make
             kwargs: Arguments to pass to command.run_one()
+
+        Returns:
+            CommandResult: Result of the make operation
         """
-
-        def check_output(_stream, data):
-            if b'Restart config' in data:
-                self._restarting_config = True
-
-            # If we see 'Restart config' following by multiple errors
-            if self._restarting_config:
-                m = RE_NO_DEFAULT.findall(data)
-
-                # Number of occurences of each Kconfig item
-                multiple = [m.count(val) for val in set(m)]
-
-                # If any of them occur more than once, we have a loop
-                if [val for val in multiple if val > 1]:
-                    self._terminated = True
-                    return True
-            return False
-
         self._restarting_config = False
         self._terminated = False
         cmd = [self.gnu_make] + list(args)
-        result = command.run_one(*cmd, capture=True, capture_stderr=True,
-                                 cwd=cwd, raise_on_error=False,
-                                 infile='/dev/null', output_func=check_output,
-                                 **kwargs)
+        result = command.run_one(
+            *cmd, capture=True, capture_stderr=True, cwd=cwd,
+            raise_on_error=False, infile='/dev/null',
+            output_func=lambda stream, data: self._check_output_for_loop(data),
+            **kwargs)
 
         if self._terminated:
             # Try to be helpful
@@ -690,6 +705,9 @@ class Builder:
 
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
+
+        Returns:
+            str: Path to the output directory
         """
         if self.work_in_output:
             return self._working_dir
@@ -729,6 +747,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the done file
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'done')
 
@@ -738,6 +759,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the sizes file
         """
         return os.path.join(self.get_build_dir(commit_upto, target), 'sizes')
 
@@ -748,6 +772,9 @@ class Builder:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
             elf_fname (str): Filename of elf image
+
+        Returns:
+            str: Path to the funcsizes file
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.sizes")
@@ -759,6 +786,9 @@ class Builder:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
             elf_fname (str): Filename of elf image
+
+        Returns:
+            str: Path to the objdump file
         """
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.objdump")
@@ -769,6 +799,9 @@ class Builder:
         Args:
             commit_upto (int): Commit number to use (0..self.count-1)
             target (str): Target name
+
+        Returns:
+            str: Path to the err file
         """
         output_dir = self.get_build_dir(commit_upto, target)
         return os.path.join(output_dir, 'err')
@@ -1595,7 +1628,7 @@ class Builder:
                     config_minus[key] = value
                     all_config_minus[key] = value
             for key, value in base.items():
-                new_value = tconfig.config.get(key)
+                new_value = tconfig.config[name].get(key)
                 if new_value and value != new_value:
                     desc = f'{value} -> {new_value}'
                     config_change[key] = desc
@@ -1909,14 +1942,28 @@ class Builder:
     def _show_not_built(board_selected, board_dict):
         """Show boards that were not built
 
+        This reports boards that couldn't be built due to toolchain issues.
+        These have OUTCOME_UNKNOWN (no result file) or OUTCOME_ERROR with
+        "Tool chain error" in the error lines.
+
         Args:
             board_selected (dict): Dict of selected boards, keyed by target
             board_dict (dict): Dict of boards that were built, keyed by target
         """
         not_built = []
-        for brd in board_selected:
-            if brd not in board_dict:
-                not_built.append(brd)
+        for target in board_selected:
+            if target not in board_dict:
+                not_built.append(target)
+            else:
+                outcome = board_dict[target]
+                if outcome.rc == OUTCOME_UNKNOWN:
+                    not_built.append(target)
+                elif outcome.rc == OUTCOME_ERROR:
+                    # Check for toolchain error in the error lines
+                    for line in outcome.err_lines:
+                        if 'Tool chain error' in line:
+                            not_built.append(target)
+                            break
         if not_built:
             tprint(f"Boards not built ({len(not_built)}): "
                    f"{', '.join(not_built)}")
@@ -1983,6 +2030,9 @@ class Builder:
         Args:
             thread_num (int): Number of thread to check (-1 for main process,
                 which is treated as 0)
+
+        Returns:
+            str: Path to the thread's working directory
         """
         if self.work_in_output:
             return self._working_dir
@@ -2164,29 +2214,37 @@ class Builder:
             # Wait until we have processed all output
             self.out_queue.join()
         if not self._ide:
-            tprint()
-
-            msg = f'Completed: {self.count} total built'
-            if self.already_done or self.kconfig_reconfig:
-                parts = []
-                if self.already_done:
-                    parts.append(f'{self.already_done} previously')
-                if self.already_done != self.count:
-                    parts.append(f'{self.count - self.already_done} newly')
-                if self.kconfig_reconfig:
-                    parts.append(f'{self.kconfig_reconfig} reconfig')
-                msg += ' (' + ', '.join(parts) + ')'
-            duration = datetime.now() - self._start_time
-            if duration > timedelta(microseconds=1000000):
-                if duration.microseconds >= 500000:
-                    duration = duration + timedelta(seconds=1)
-                duration -= timedelta(microseconds=duration.microseconds)
-                rate = float(self.count) / duration.total_seconds()
-                msg += f', duration {duration}, rate {rate:1.2f}'
-            tprint(msg)
-            if self.thread_exceptions:
-                tprint(
-                    f'Failed: {len(self.thread_exceptions)} thread exceptions',
-                    colour=self.col.RED)
+            self._print_build_summary()
 
         return (self.fail, self.warned, self.thread_exceptions)
+
+    def _print_build_summary(self):
+        """Print a summary of the build results
+
+        Show the number of boards built, how many were already done, duration
+        and build rate. Also show any thread exceptions that occurred.
+        """
+        tprint()
+
+        msg = f'Completed: {self.count} total built'
+        if self.already_done or self.kconfig_reconfig:
+            parts = []
+            if self.already_done:
+                parts.append(f'{self.already_done} previously')
+            if self.already_done != self.count:
+                parts.append(f'{self.count - self.already_done} newly')
+            if self.kconfig_reconfig:
+                parts.append(f'{self.kconfig_reconfig} reconfig')
+            msg += ' (' + ', '.join(parts) + ')'
+        duration = datetime.now() - self._start_time
+        if duration > timedelta(microseconds=1000000):
+            if duration.microseconds >= 500000:
+                duration = duration + timedelta(seconds=1)
+            duration -= timedelta(microseconds=duration.microseconds)
+            rate = float(self.count) / duration.total_seconds()
+            msg += f', duration {duration}, rate {rate:1.2f}'
+        tprint(msg)
+        if self.thread_exceptions:
+            tprint(
+                f'Failed: {len(self.thread_exceptions)} thread exceptions',
+                colour=self.col.RED)

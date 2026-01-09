@@ -367,16 +367,46 @@ class TestFunctional(unittest.TestCase):
         sys.exit(1)
 
     def _HandleCommandNm(self, args):
-        return command.CommandResult(return_code=0)
+        # Return nm --size-sort output with function sizes that vary between
+        # calls to simulate changes between commits
+        self._nm_calls = getattr(self, '_nm_calls', 0) + 1
+        base = self._nm_calls * 0x10
+        stdout = f'''{0x100 + base:08x} T main
+{0x80 + base:08x} T board_init
+{0x50 + base:08x} t local_func
+{0x30:08x} d data_var
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandObjdump(self, args):
-        return command.CommandResult(return_code=0)
+        # Return objdump -h output with .rodata section
+        stdout = '''
+u-boot:     file format elf32-littlearm
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .text         00010000  00000000  00000000  00001000  2**2
+  1 .rodata       00001000  00010000  00010000  00011000  2**2
+  2 .data         00000100  00011000  00011000  00012000  2**2
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandObjcopy(self, args):
         return command.CommandResult(return_code=0)
 
     def _HandleCommandSize(self, args):
-        return command.CommandResult(return_code=0)
+        # Return size output - vary the size based on call count to simulate
+        # changes between commits
+        self._size_calls = getattr(self, '_size_calls', 0) + 1
+        text = 10000 + self._size_calls * 100
+        data = 1000
+        bss = 500
+        total = text + data + bss
+        fname = args[-1] if args else 'u-boot'
+        stdout = f'''   text    data     bss     dec     hex filename
+  {text}    {data}     {bss}   {total}    {total:x} {fname}
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandCpp(self, args):
         # args ['-nostdinc', '-P', '-I', '/tmp/tmp7f17xk_o/src', '-undef',
@@ -452,6 +482,9 @@ class TestFunctional(unittest.TestCase):
             kwargs: Arguments to pass to command.run_one()
         """
         self._make_calls += 1
+        # Capture args for tests that need to inspect them
+        if hasattr(self, '_captured_make_args') and stage == 'build':
+            self._captured_make_args.append(args)
         out_dir = ''
         for arg in args:
             if arg.startswith('O='):
@@ -460,7 +493,18 @@ class TestFunctional(unittest.TestCase):
             return command.CommandResult(return_code=0)
         elif stage == 'config':
             fname = os.path.join(cwd or '', out_dir, '.config')
-            tools.write_file(fname, b'CONFIG_SOMETHING=1')
+            # Vary config based on commit to simulate config changes
+            seq = commit.sequence if hasattr(commit, 'sequence') else 0
+            config = f'CONFIG_SOMETHING={seq + 1}\n'
+            if seq > 0:
+                config += 'CONFIG_NEW_OPTION=y\n'
+            tools.write_file(fname, config.encode('utf-8'))
+            # Also create u-boot.cfg which buildman reads for -K flag
+            cfg_fname = os.path.join(cwd or '', out_dir, 'u-boot.cfg')
+            cfg_content = f'#define CONFIG_VALUE {seq + 100}\n'
+            if seq > 0:
+                cfg_content += '#define CONFIG_EXTRA 1\n'
+            tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
             return command.CommandResult(return_code=0,
                     combined='Test configuration complete')
         elif stage == 'oldconfig':
@@ -481,6 +525,9 @@ Some images are invalid'''
                     stderr = "binman: Filename 'fsp.bin' not found in input path"
             elif type(commit) is not str:
                 stderr = self._error.get((brd.target, commit.sequence))
+            else:
+                # For current source builds, commit is 'current'
+                stderr = self._error.get((brd.target, commit))
 
             if stderr:
                 return command.CommandResult(return_code=2, stderr=stderr)
@@ -543,11 +590,213 @@ Some images are invalid'''
                        f"No tool chain found for arch '{brd.arch}'"])
                   fd.close()
 
+    def testToolchainErrors(self):
+        """Test that toolchain errors are reported in the summary
+
+        When toolchains are missing, boards cannot be built. The summary
+        should report which boards were not built.
+        """
+        self.setupToolchains()
+        # Build with missing toolchains - only sandbox will succeed
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+
+        # Now show summary - should report boards not built
+        terminal.get_print_test_lines()  # Clear
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
+                         clean_dir=False)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+
+        # Check that boards with missing toolchains are reported as not built
+        self.assertIn('Boards not built', text)
+        self.assertIn('board0', text)
+        self.assertIn('board1', text)
+        self.assertIn('board2', text)
+
     def testBranch(self):
         """Test building a branch with all toolchains present"""
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
+
+    def testCurrentSourceIde(self):
+        """Test building current source with IDE mode enabled
+
+        This tests that:
+        - Build errors are written to stderr
+        - Progress output does not go to stdout in IDE mode
+        - Summary mode (-s) shows output again
+        """
+        # Set up a build error for sandbox board (board4) which has toolchain
+        # For current source builds, commit is 'current' string
+        error_msg = 'test_error_msg.c:123: error: test failure\n'
+        self._error['board4', 'current'] = error_msg
+
+        # Capture stderr during the build
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = captured_stderr
+            terminal.get_print_test_lines()  # Clear any previous output
+            self._RunControl('-o', self._output_dir, '-I')
+        finally:
+            sys.stderr = old_stderr
+
+        # Verify there is a build failure
+        self.assertEqual(self._builder.fail, 1)
+
+        # Check stderr has exactly the expected error
+        self.assertEqual(captured_stderr.getvalue(),
+                         'test_error_msg.c:123: error: test failure\n')
+
+        # In IDE mode, there should be no stdout output at all
+        self.assertEqual(terminal.get_print_test_lines(), [])
+
+        # Now run with -s to show summary - output should appear again
+        terminal.get_print_test_lines()  # Clear
+        self._RunControl('-o', self._output_dir, '-s', clean_dir=False)
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn('Summary of', lines[0].text)
+        self.assertIn('board4', lines[1].text)
+
+    def testBranchIde(self):
+        """Test building a branch with IDE mode and summary
+
+        This tests _print_ide_output() which outputs errors to stderr during
+        the summary phase for branch builds.
+        """
+        # Set up error for commit 1 on sandbox board
+        error_msg = 'branch_error.c:456: error: branch failure\n'
+        self._error['board4', 1] = error_msg
+
+        # Build branch normally first (writes results to disk)
+        terminal.get_print_test_lines()
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self.assertEqual(self._builder.fail, 1)
+
+        # Run summary with IDE mode - errors go to stderr via _print_ide_output
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = captured_stderr
+            terminal.get_print_test_lines()
+            self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-sI',
+                             clean_dir=False)
+        finally:
+            sys.stderr = old_stderr
+
+        # Check stderr has the error from _print_ide_output
+        self.assertEqual(captured_stderr.getvalue(),
+                         'branch_error.c:456: error: branch failure\n')
+
+    def testBranchSummary(self):
+        """Test building a branch and then showing a summary"""
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self.assertEqual(self._builder.count, self._total_builds)
+        self.assertEqual(self._builder.fail, 0)
+
+        # Now run with -s to show summary
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-s', '-o', self._output_dir,
+                         clean_dir=False)
+        # Summary should not trigger any builds
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -S to show sizes as well
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sS', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        # Check that size information is displayed (arch names with size deltas)
+        text = '\n'.join(line.text for line in lines)
+        self.assertIn('arm', text)
+        self.assertIn('sandbox', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -B to show bloat (function size changes)
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sSB', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check function names appear in the bloat output
+        self.assertIn('main', text)
+        self.assertIn('board_init', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -K to show config changes
+        # First, create config files in the output directory to simulate
+        # varying configs between commits. Use the builder to get correct paths.
+        for commit_num in range(self._commits):
+            for brd in BOARDS:
+                target = brd[6]  # target name is 7th element
+                board_dir = self._builder.get_build_dir(commit_num, target)
+                cfg_fname = os.path.join(board_dir, 'u-boot.cfg')
+                cfg_content = f'#define CONFIG_VALUE {commit_num + 100}\n'
+                if commit_num == 0:
+                    # Add a config that will be removed in later commits
+                    cfg_content += '#define CONFIG_OLD_OPTION 1\n'
+                if commit_num > 0:
+                    cfg_content += '#define CONFIG_NEW_OPTION 1\n'
+                tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
+
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sK', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check config options appear in the output - both additions and
+        # value changes should be detected
+        self.assertIn('CONFIG_NEW_OPTION', text)  # Addition
+        self.assertIn('CONFIG_VALUE', text)  # Value change
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -U to show environment changes
+        # Create uboot.env files with varying content between commits
+        for commit_num in range(self._commits):
+            for brd in BOARDS:
+                target = brd[6]  # target name is 7th element
+                board_dir = self._builder.get_build_dir(commit_num, target)
+                env_fname = os.path.join(board_dir, 'uboot.env')
+                # Environment uses null-terminated strings
+                env_content = f'bootdelay={commit_num + 1}\x00'
+                if commit_num == 0:
+                    # Add a variable that will be removed in later commits
+                    env_content += 'oldvar=removed\x00'
+                if commit_num > 0:
+                    env_content += 'newvar=value\x00'
+                tools.write_file(env_fname, env_content.encode('utf-8'))
+
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sU', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check environment variables appear in the output
+        self.assertIn('bootdelay', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+    def testWarningsAsErrors(self):
+        """Test the -E flag adds -Werror to make arguments"""
+        self._captured_make_args = []
+        self._RunControl('-o', self._output_dir, '-E')
+
+        # Check that at least one build had -Werror flags
+        found_werror = False
+        for args in self._captured_make_args:
+            args_str = ' '.join(args)
+            if 'KCFLAGS=-Werror' in args_str:
+                found_werror = True
+                self.assertIn('HOSTCFLAGS=-Werror', args_str)
+                break
+        self.assertTrue(found_werror, 'KCFLAGS=-Werror not found in make args')
 
     def testCount(self):
         """Test building a specific number of commitst"""
