@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (c) 2013 The Chromium OS Authors.
 
-"""Outcome class for buildman build results"""
+"""Outcome class and constants for buildman build results"""
+
+# Build-outcome codes
+OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
 
 
 class Outcome:

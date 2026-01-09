@@ -21,7 +21,8 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
-from buildman.outcome import Outcome
+from buildman.outcome import (Outcome, OUTCOME_OK, OUTCOME_WARNING,
+                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -134,9 +135,6 @@ ErrLine = collections.namedtuple('ErrLine', 'char,brds,errline')
 #   new: List of boards that didn't exist last time
 #   unknown: List of boards that were not built
 BoardStatus = collections.namedtuple('BoardStatus', 'ok,warn,err,new,unknown')
-
-# Possible build outcomes
-OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
 
 # Translate a commit subject into a valid filename (and handle unicode)
 trans_valid_chars = str.maketrans('/: ', '---')

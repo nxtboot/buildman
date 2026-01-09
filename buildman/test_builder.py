@@ -12,6 +12,8 @@ from unittest import mock
 
 from buildman import builder
 from buildman import builderthread
+from buildman.outcome import (OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
+                              OUTCOME_UNKNOWN)
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
@@ -358,12 +360,16 @@ class TestShowNotBuilt(unittest.TestCase):
         outcome.err_lines = err_lines if err_lines else []
         return outcome
 
+    def _show_not_built(self, board_selected, board_dict):
+        """Helper to call Builder._show_not_built"""
+        builder.Builder._show_not_built(board_selected, board_dict)
+
     def test_all_boards_built(self):
         """Test when all selected boards were built successfully"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_OK),
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_OK),
         }
 
         terminal.get_print_test_lines()  # Clear
@@ -377,9 +383,9 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test when some boards have OUTCOME_UNKNOWN (e.g. missing toolchain)"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
-            'board3': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_UNKNOWN),
+            'board3': self._make_outcome(OUTCOME_UNKNOWN),
         }
 
         terminal.get_print_test_lines()  # Clear
@@ -396,8 +402,8 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test when all boards have OUTCOME_UNKNOWN"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_UNKNOWN),
-            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board1': self._make_outcome(OUTCOME_UNKNOWN),
+            'board2': self._make_outcome(OUTCOME_UNKNOWN),
         }
 
         terminal.get_print_test_lines()  # Clear
@@ -413,8 +419,8 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that build errors (not toolchain) are not counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_ERROR,
                                          ['error: some build error']),
         }
 
@@ -429,10 +435,10 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that toolchain errors are counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_ERROR,
                                          ['Tool chain error for arm: not found']),
-            'board3': self._make_outcome(builder.OUTCOME_ERROR,
+            'board3': self._make_outcome(OUTCOME_ERROR,
                                          ['error: some build error']),
         }
 
@@ -451,7 +457,7 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that boards missing from board_dict are counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board1': self._make_outcome(OUTCOME_OK),
             # board2 and board3 are not in board_dict
         }
 
