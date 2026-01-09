@@ -482,6 +482,9 @@ Idx Name          Size      VMA       LMA       File off  Algn
             kwargs: Arguments to pass to command.run_one()
         """
         self._make_calls += 1
+        # Capture args for tests that need to inspect them
+        if hasattr(self, '_captured_make_args') and stage == 'build':
+            self._captured_make_args.append(args)
         out_dir = ''
         for arg in args:
             if arg.startswith('O='):
@@ -656,6 +659,21 @@ Some images are invalid'''
         self.assertIn('CONFIG_NEW_OPTION', text)  # Addition
         self.assertIn('CONFIG_VALUE', text)  # Value change
         self.assertIn('(no errors to report)', lines[-1].text)
+
+    def testWarningsAsErrors(self):
+        """Test the -E flag adds -Werror to make arguments"""
+        self._captured_make_args = []
+        self._RunControl('-o', self._output_dir, '-E')
+
+        # Check that at least one build had -Werror flags
+        found_werror = False
+        for args in self._captured_make_args:
+            args_str = ' '.join(args)
+            if 'KCFLAGS=-Werror' in args_str:
+                found_werror = True
+                self.assertIn('HOSTCFLAGS=-Werror', args_str)
+                break
+        self.assertTrue(found_werror, 'KCFLAGS=-Werror not found in make args')
 
     def testCount(self):
         """Test building a specific number of commitst"""
