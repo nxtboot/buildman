@@ -627,5 +627,97 @@ class TestCheckOutputForLoop(unittest.TestCase):
         self.assertTrue(self.builder._terminated)
 
 
+class TestMake(unittest.TestCase):
+    """Tests for Builder.make()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+
+    @mock.patch('buildman.builder.command.run_one')
+    def test_make_basic(self, mock_run_one):
+        """Test basic make execution"""
+        mock_result = mock.Mock()
+        mock_result.stdout = 'build output'
+        mock_result.stderr = ''
+        mock_result.combined = 'build output'
+        mock_run_one.return_value = mock_result
+
+        result = self.builder.make(None, None, None, '/tmp/build', 'all')
+
+        self.assertEqual(result, mock_result)
+        mock_run_one.assert_called_once()
+        # Check make was called with correct args
+        call_args = mock_run_one.call_args
+        self.assertEqual(call_args[0][0], 'make')
+        self.assertEqual(call_args[0][1], 'all')
+        self.assertEqual(call_args[1]['cwd'], '/tmp/build')
+
+    @mock.patch('buildman.builder.command.run_one')
+    def test_make_with_loop_detection(self, mock_run_one):
+        """Test make adds helpful message when loop is detected"""
+        mock_result = mock.Mock()
+        mock_result.stdout = ''
+        mock_result.stderr = 'config error'
+        mock_result.combined = 'config error'
+        mock_run_one.return_value = mock_result
+
+        # Simulate loop detection by setting _terminated during the call
+        def side_effect(*args, **kwargs):
+            # Simulate output_func being called with loop data
+            output_func = kwargs.get('output_func')
+            if output_func:
+                self.builder._restarting_config = True
+                output_func(None, b'(CONFIG_X) [] (NEW)\n(CONFIG_X) [] (NEW)')
+            return mock_result
+
+        mock_run_one.side_effect = side_effect
+
+        result = self.builder.make(None, None, None, '/tmp/build', 'defconfig')
+
+        # Check helpful message was appended
+        self.assertIn('did you define an int/hex Kconfig', result.stderr)
+
+    @mock.patch('buildman.builder.command.run_one')
+    def test_make_verbose_build(self, mock_run_one):
+        """Test make prepends command in verbose mode"""
+        mock_result = mock.Mock()
+        mock_result.stdout = 'output'
+        mock_result.stderr = ''
+        mock_result.combined = 'output'
+        mock_run_one.return_value = mock_result
+
+        self.builder.verbose_build = True
+
+        result = self.builder.make(None, None, None, '/tmp/build', 'all', '-j4')
+
+        # Check command was prepended to stdout and combined
+        self.assertIn('make all -j4', result.stdout)
+        self.assertIn('make all -j4', result.combined)
+
+    @mock.patch('buildman.builder.command.run_one')
+    def test_make_resets_state(self, mock_run_one):
+        """Test make resets _restarting_config and _terminated flags"""
+        mock_result = mock.Mock()
+        mock_result.stdout = ''
+        mock_result.stderr = ''
+        mock_result.combined = ''
+        mock_run_one.return_value = mock_result
+
+        # Set flags to non-default values
+        self.builder._restarting_config = True
+        self.builder._terminated = True
+
+        self.builder.make(None, None, None, '/tmp/build', 'all')
+
+        # Flags should be reset at the start of make()
+        # (they may be set again by output_func, but start fresh)
+        # Since mock doesn't call output_func, they stay False
+        self.assertFalse(self.builder._restarting_config)
+        self.assertFalse(self.builder._terminated)
+
+
 if __name__ == '__main__':
     unittest.main()
