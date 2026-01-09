@@ -39,6 +39,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
     from buildman import test
     from buildman import test_boards
     from buildman import test_bsettings
+    from buildman import test_builder
 
     test_name = args.terms and args.terms[0] or None
     if skip_net_tests:
@@ -52,6 +53,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test.TestBuildConfig, test.TestBuildMisc, test.TestBuilderFuncs,
          func_test.TestFunctional,
          test_boards.TestBoards, test_bsettings.TestBsettings,
+         test_builder.TestPrintFuncSizeDetail,
          'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)
