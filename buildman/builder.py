@@ -1251,37 +1251,8 @@ class Builder:
             # Wait until we have processed all output
             self.out_queue.join()
         if not self._opts.ide:
-            self._print_build_summary()
+            self._result_handler.print_build_summary(
+                self.count, self.already_done, self.kconfig_reconfig,
+                self._start_time, self.thread_exceptions)
 
         return (self.fail, self.warned, self.thread_exceptions)
-
-    def _print_build_summary(self):
-        """Print a summary of the build results
-
-        Show the number of boards built, how many were already done, duration
-        and build rate. Also show any thread exceptions that occurred.
-        """
-        tprint()
-
-        msg = f'Completed: {self.count} total built'
-        if self.already_done or self.kconfig_reconfig:
-            parts = []
-            if self.already_done:
-                parts.append(f'{self.already_done} previously')
-            if self.already_done != self.count:
-                parts.append(f'{self.count - self.already_done} newly')
-            if self.kconfig_reconfig:
-                parts.append(f'{self.kconfig_reconfig} reconfig')
-            msg += ' (' + ', '.join(parts) + ')'
-        duration = datetime.now() - self._start_time
-        if duration > timedelta(microseconds=1000000):
-            if duration.microseconds >= 500000:
-                duration = duration + timedelta(seconds=1)
-            duration -= timedelta(microseconds=duration.microseconds)
-            rate = float(self.count) / duration.total_seconds()
-            msg += f', duration {duration}, rate {rate:1.2f}'
-        tprint(msg)
-        if self.thread_exceptions:
-            tprint(
-                f'Failed: {len(self.thread_exceptions)} thread exceptions',
-                colour=self.col.RED)

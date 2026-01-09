@@ -6,6 +6,7 @@
 
 """Result writer for buildman build results"""
 
+from datetime import datetime, timedelta
 import sys
 
 from buildman.outcome import (BoardStatus, ErrLine, Outcome,
@@ -184,6 +185,45 @@ class ResultHandler:
             int: Number of error lines output
         """
         return self._error_lines
+
+    def print_build_summary(self, count, already_done, kconfig_reconfig,
+                            start_time, thread_exceptions):
+        """Print a summary of the build results
+
+        Show the number of boards built, how many were already done, duration
+        and build rate. Also show any thread exceptions that occurred.
+
+        Args:
+            count (int): Total number of builds
+            already_done (int): Number of builds already completed previously
+            kconfig_reconfig (int): Number of builds triggered by Kconfig changes
+            start_time (datetime): When the build started
+            thread_exceptions (list): List of thread exceptions that occurred
+        """
+        tprint()
+
+        msg = f'Completed: {count} total built'
+        if already_done or kconfig_reconfig:
+            parts = []
+            if already_done:
+                parts.append(f'{already_done} previously')
+            if already_done != count:
+                parts.append(f'{count - already_done} newly')
+            if kconfig_reconfig:
+                parts.append(f'{kconfig_reconfig} reconfig')
+            msg += ' (' + ', '.join(parts) + ')'
+        duration = datetime.now() - start_time
+        if duration > timedelta(microseconds=1000000):
+            if duration.microseconds >= 500000:
+                duration = duration + timedelta(seconds=1)
+            duration -= timedelta(microseconds=duration.microseconds)
+            rate = float(count) / duration.total_seconds()
+            msg += f', duration {duration}, rate {rate:1.2f}'
+        tprint(msg)
+        if thread_exceptions:
+            tprint(
+                f'Failed: {len(thread_exceptions)} thread exceptions',
+                colour=self._col.RED)
 
     def colour_num(self, num):
         """Format a number with colour depending on its value
