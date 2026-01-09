@@ -21,8 +21,9 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
-from buildman.outcome import (Outcome, OUTCOME_OK, OUTCOME_WARNING,
-                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.outcome import (BoardStatus, ErrLine, Outcome,
+                              OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
+                              OUTCOME_UNKNOWN)
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -120,21 +121,6 @@ us-net/             base directory
 u-boot/             source directory
     .git/           repository
 """
-
-# Holds information about a particular error line we are outputting
-#   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
-#       'w-' = fixed warning
-#   boards: List of Board objects which have line in the error/warning output
-#   errline: The text of the error line
-ErrLine = collections.namedtuple('ErrLine', 'char,brds,errline')
-
-# Holds the outcome of classifying the boards:
-#   ok: List of boards fixed since last commit
-#   warn: List of boards with warnings since last commit
-#   err: List of new broken boards since last commit
-#   new: List of boards that didn't exist last time
-#   unknown: List of boards that were not built
-BoardStatus = collections.namedtuple('BoardStatus', 'ok,warn,err,new,unknown')
 
 # Translate a commit subject into a valid filename (and handle unicode)
 trans_valid_chars = str.maketrans('/: ', '---')

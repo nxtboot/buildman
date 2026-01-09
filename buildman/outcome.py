@@ -3,8 +3,25 @@
 
 """Outcome class and constants for buildman build results"""
 
+from collections import namedtuple
+
 # Build-outcome codes
 OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN = list(range(4))
+
+# Board status for display purposes
+#   ok: List of boards fixed since last commit
+#   warn: List of boards with warnings since last commit
+#   err: List of new broken boards since last commit
+#   new: List of boards that didn't exist last time
+#   unknown: List of boards that were not built
+BoardStatus = namedtuple('BoardStatus', 'ok warn err new unknown')
+
+# Error line information for display
+#   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
+#       'w-' = fixed warning
+#   brds: List of Board objects which have line in the error/warning output
+#   errline: The text of the error line
+ErrLine = namedtuple('ErrLine', 'char brds errline')
 
 
 class Outcome:
