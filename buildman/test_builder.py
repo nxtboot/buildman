@@ -5,6 +5,7 @@
 """Unit tests for builder.py"""
 
 import os
+import shutil
 import unittest
 from unittest import mock
 
@@ -336,6 +337,89 @@ class TestPrepareWorkingSpace(unittest.TestCase):
         self.assertEqual(mock_prepare_thread.call_count, 2)
         mock_prepare_thread.assert_any_call(0, True)
         mock_prepare_thread.assert_any_call(1, True)
+
+
+class TestPrepareOutputSpace(unittest.TestCase):
+    """Tests for Builder._prepare_output_space() and _get_output_space_removals()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def test_get_removals_no_commits(self):
+        """Test _get_output_space_removals with no commits"""
+        self.builder.commits = None
+        result = self.builder._get_output_space_removals()
+        self.assertEqual(result, [])
+
+    @mock.patch.object(builder.Builder, 'get_output_dir')
+    @mock.patch('glob.glob')
+    def test_get_removals_no_old_dirs(self, mock_glob, mock_get_output_dir):
+        """Test _get_output_space_removals with no old directories"""
+        self.builder.commits = [mock.Mock()]  # Non-empty to trigger logic
+        self.builder.commit_count = 1
+        mock_get_output_dir.return_value = '/tmp/test/01_gabcdef1_test'
+        mock_glob.return_value = []
+
+        result = self.builder._get_output_space_removals()
+        self.assertEqual(result, [])
+
+    @mock.patch.object(builder.Builder, 'get_output_dir')
+    @mock.patch('glob.glob')
+    def test_get_removals_with_old_dirs(self, mock_glob, mock_get_output_dir):
+        """Test _get_output_space_removals identifies old directories"""
+        self.builder.commits = [mock.Mock()]  # Non-empty to trigger logic
+        self.builder.commit_count = 1
+        mock_get_output_dir.return_value = '/tmp/test/01_gabcdef1_current'
+        # Simulate old directories with buildman naming pattern
+        mock_glob.return_value = [
+            '/tmp/test/01_gabcdef1_current',  # Current - should not remove
+            '/tmp/test/02_g1234567_old',      # Old - should remove
+            '/tmp/test/random_dir',           # Not matching pattern - keep
+        ]
+
+        result = self.builder._get_output_space_removals()
+        self.assertEqual(result, ['/tmp/test/02_g1234567_old'])
+
+    @mock.patch.object(builder.Builder, '_get_output_space_removals')
+    def test_prepare_output_space_nothing_to_remove(self, mock_get_removals):
+        """Test _prepare_output_space with nothing to remove"""
+        mock_get_removals.return_value = []
+        terminal.get_print_test_lines()  # Clear
+
+        self.builder._prepare_output_space()
+
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 0)
+
+    @mock.patch.object(shutil, 'rmtree')
+    @mock.patch.object(builder.Builder, '_get_output_space_removals')
+    def test_prepare_output_space_removes_dirs(self, mock_get_removals,
+                                               mock_rmtree):
+        """Test _prepare_output_space removes old directories"""
+        mock_get_removals.return_value = ['/tmp/test/old1', '/tmp/test/old2']
+        terminal.get_print_test_lines()  # Clear
+
+        self.builder._prepare_output_space()
+
+        # Check rmtree was called for each directory
+        self.assertEqual(mock_rmtree.call_count, 2)
+        mock_rmtree.assert_any_call('/tmp/test/old1')
+        mock_rmtree.assert_any_call('/tmp/test/old2')
+
+        # Check 'Removing' message was printed
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Removing 2 old build directories', lines[0].text)
+        # Check newline=False was used (message should be overwritten)
+        self.assertFalse(lines[0].newline)
 
 
 if __name__ == '__main__':
