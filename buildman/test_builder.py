@@ -20,7 +20,7 @@ from u_boot_pylib import terminal
 
 
 class TestPrintFuncSizeDetail(unittest.TestCase):
-    """Tests for Builder.print_func_size_detail()"""
+    """Tests for ResultHandler.print_func_size_detail()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -46,7 +46,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100, 'func_b': 200}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         # No output when there are no changes
@@ -58,7 +58,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 150}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -76,7 +76,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 150}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -89,7 +89,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100, 'func_b': 200}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -105,7 +105,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -129,7 +129,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.result_handler.print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -148,7 +148,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
     def test_empty_dicts(self):
         """Test with empty dictionaries"""
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', {}, {})
+        self.result_handler.print_func_size_detail('u-boot', {}, {})
         lines = terminal.get_print_test_lines()
 
         # No output when both dicts are empty

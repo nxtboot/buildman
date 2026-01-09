@@ -79,6 +79,7 @@ def run_test_coverage():
                         'tools/buildman/builderthread.py',
                         'tools/buildman/cfgutil.py',
                         'tools/buildman/control.py',
+                        'tools/buildman/resulthandler.py',
                         'tools/buildman/toolchain.py'])
 
 
