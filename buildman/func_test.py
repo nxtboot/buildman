@@ -367,16 +367,46 @@ class TestFunctional(unittest.TestCase):
         sys.exit(1)
 
     def _HandleCommandNm(self, args):
-        return command.CommandResult(return_code=0)
+        # Return nm --size-sort output with function sizes that vary between
+        # calls to simulate changes between commits
+        self._nm_calls = getattr(self, '_nm_calls', 0) + 1
+        base = self._nm_calls * 0x10
+        stdout = f'''{0x100 + base:08x} T main
+{0x80 + base:08x} T board_init
+{0x50 + base:08x} t local_func
+{0x30:08x} d data_var
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandObjdump(self, args):
-        return command.CommandResult(return_code=0)
+        # Return objdump -h output with .rodata section
+        stdout = '''
+u-boot:     file format elf32-littlearm
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .text         00010000  00000000  00000000  00001000  2**2
+  1 .rodata       00001000  00010000  00010000  00011000  2**2
+  2 .data         00000100  00011000  00011000  00012000  2**2
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandObjcopy(self, args):
         return command.CommandResult(return_code=0)
 
     def _HandleCommandSize(self, args):
-        return command.CommandResult(return_code=0)
+        # Return size output - vary the size based on call count to simulate
+        # changes between commits
+        self._size_calls = getattr(self, '_size_calls', 0) + 1
+        text = 10000 + self._size_calls * 100
+        data = 1000
+        bss = 500
+        total = text + data + bss
+        fname = args[-1] if args else 'u-boot'
+        stdout = f'''   text    data     bss     dec     hex filename
+  {text}    {data}     {bss}   {total}    {total:x} {fname}
+'''
+        return command.CommandResult(return_code=0, stdout=stdout)
 
     def _HandleCommandCpp(self, args):
         # args ['-nostdinc', '-P', '-I', '/tmp/tmp7f17xk_o/src', '-undef',
@@ -548,6 +578,45 @@ Some images are invalid'''
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
+
+    def testBranchSummary(self):
+        """Test building a branch and then showing a summary"""
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self.assertEqual(self._builder.count, self._total_builds)
+        self.assertEqual(self._builder.fail, 0)
+
+        # Now run with -s to show summary
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-s', '-o', self._output_dir,
+                         clean_dir=False)
+        # Summary should not trigger any builds
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -S to show sizes as well
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sS', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        # Check that size information is displayed (arch names with size deltas)
+        text = '\n'.join(line.text for line in lines)
+        self.assertIn('arm', text)
+        self.assertIn('sandbox', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -B to show bloat (function size changes)
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sSB', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check function names appear in the bloat output
+        self.assertIn('main', text)
+        self.assertIn('board_init', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
 
     def testCount(self):
         """Test building a specific number of commitst"""
