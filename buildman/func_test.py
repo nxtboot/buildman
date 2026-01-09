@@ -490,7 +490,18 @@ Idx Name          Size      VMA       LMA       File off  Algn
             return command.CommandResult(return_code=0)
         elif stage == 'config':
             fname = os.path.join(cwd or '', out_dir, '.config')
-            tools.write_file(fname, b'CONFIG_SOMETHING=1')
+            # Vary config based on commit to simulate config changes
+            seq = commit.sequence if hasattr(commit, 'sequence') else 0
+            config = f'CONFIG_SOMETHING={seq + 1}\n'
+            if seq > 0:
+                config += 'CONFIG_NEW_OPTION=y\n'
+            tools.write_file(fname, config.encode('utf-8'))
+            # Also create u-boot.cfg which buildman reads for -K flag
+            cfg_fname = os.path.join(cwd or '', out_dir, 'u-boot.cfg')
+            cfg_content = f'#define CONFIG_VALUE {seq + 100}\n'
+            if seq > 0:
+                cfg_content += '#define CONFIG_EXTRA 1\n'
+            tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
             return command.CommandResult(return_code=0,
                     combined='Test configuration complete')
         elif stage == 'oldconfig':
@@ -616,6 +627,32 @@ Some images are invalid'''
         # Check function names appear in the bloat output
         self.assertIn('main', text)
         self.assertIn('board_init', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
+        # Now run with -K to show config changes
+        # First, create config files in the output directory to simulate
+        # varying configs between commits. Use the builder to get correct paths.
+        for commit_num in range(self._commits):
+            for brd in BOARDS:
+                target = brd[6]  # target name is 7th element
+                board_dir = self._builder.get_build_dir(commit_num, target)
+                cfg_fname = os.path.join(board_dir, 'u-boot.cfg')
+                cfg_content = f'#define CONFIG_VALUE {commit_num + 100}\n'
+                if commit_num == 0:
+                    # Add a config that will be removed in later commits
+                    cfg_content += '#define CONFIG_OLD_OPTION 1\n'
+                if commit_num > 0:
+                    cfg_content += '#define CONFIG_NEW_OPTION 1\n'
+                tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
+
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sK', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check config options appear in the output
+        self.assertIn('CONFIG_', text)
         self.assertIn('(no errors to report)', lines[-1].text)
 
     def testCount(self):
