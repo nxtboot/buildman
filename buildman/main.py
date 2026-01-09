@@ -60,6 +60,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_builder.TestPrepareOutputSpace,
          test_builder.TestCheckOutputForLoop,
          test_builder.TestMake,
+         test_builder.TestPrintBuildSummary,
          'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)

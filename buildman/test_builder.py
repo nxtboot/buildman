@@ -4,6 +4,7 @@
 
 """Unit tests for builder.py"""
 
+from datetime import datetime
 import os
 import shutil
 import unittest
@@ -717,6 +718,136 @@ class TestMake(unittest.TestCase):
         # Since mock doesn't call output_func, they stay False
         self.assertFalse(self.builder._restarting_config)
         self.assertFalse(self.builder._terminated)
+
+
+class TestPrintBuildSummary(unittest.TestCase):
+    """Tests for Builder._print_build_summary()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+        # Set a start time in the past (less than 1 second ago to avoid
+        # duration output)
+        self.builder._start_time = datetime.now()
+        self.builder.thread_exceptions = []
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def test_basic_count(self):
+        """Test basic completed message with just count"""
+        self.builder.count = 10
+        self.builder.already_done = 0
+        self.builder.kconfig_reconfig = 0
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        # First line is blank, second is the message
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0].text, '')
+        self.assertIn('Completed: 10 total built', lines[1].text)
+        self.assertNotIn('previously', lines[1].text)
+
+    def test_all_previously_done(self):
+        """Test message when all builds were already done"""
+        self.builder.count = 5
+        self.builder.already_done = 5
+        self.builder.kconfig_reconfig = 0
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('5 previously', lines[1].text)
+        self.assertNotIn('newly', lines[1].text)
+
+    def test_some_newly_built(self):
+        """Test message with some previously done and some new"""
+        self.builder.count = 10
+        self.builder.already_done = 6
+        self.builder.kconfig_reconfig = 0
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('6 previously', lines[1].text)
+        self.assertIn('4 newly', lines[1].text)
+
+    def test_with_kconfig_reconfig(self):
+        """Test message with kconfig reconfigurations"""
+        self.builder.count = 8
+        self.builder.already_done = 0
+        self.builder.kconfig_reconfig = 3
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('3 reconfig', lines[1].text)
+
+    def test_thread_exceptions(self):
+        """Test message with thread exceptions"""
+        self.builder.count = 5
+        self.builder.already_done = 0
+        self.builder.kconfig_reconfig = 0
+        self.builder.thread_exceptions = [Exception('err1'), Exception('err2')]
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(len(lines), 3)
+        self.assertIn('Failed: 2 thread exceptions', lines[2].text)
+
+    @mock.patch('buildman.builder.datetime')
+    def test_duration_and_rate(self, mock_datetime):
+        """Test message includes duration and rate for long builds"""
+        self.builder.count = 100
+        self.builder.already_done = 0
+        self.builder.kconfig_reconfig = 0
+
+        # Mock datetime to simulate a 10 second build
+        start_time = datetime(2024, 1, 1, 12, 0, 0)
+        end_time = datetime(2024, 1, 1, 12, 0, 10)
+        self.builder._start_time = start_time
+        mock_datetime.now.return_value = end_time
+        mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('duration', lines[1].text)
+        self.assertIn('rate', lines[1].text)
+        self.assertIn('10.00', lines[1].text)  # 100 boards / 10 seconds
+
+    @mock.patch('buildman.builder.datetime')
+    def test_duration_rounds_up(self, mock_datetime):
+        """Test duration rounds up when microseconds >= 500000"""
+        self.builder.count = 100
+        self.builder.already_done = 0
+        self.builder.kconfig_reconfig = 0
+
+        # Mock datetime to simulate a 10.6 second build (should round to 11)
+        start_time = datetime(2024, 1, 1, 12, 0, 0)
+        end_time = datetime(2024, 1, 1, 12, 0, 10, 600000)  # 10.6 seconds
+        self.builder._start_time = start_time
+        mock_datetime.now.return_value = end_time
+        mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+        terminal.get_print_test_lines()  # Clear
+        self.builder._print_build_summary()
+        lines = terminal.get_print_test_lines()
+
+        # Duration should be rounded up to 11 seconds
+        self.assertIn('0:00:11', lines[1].text)
 
 
 if __name__ == '__main__':
