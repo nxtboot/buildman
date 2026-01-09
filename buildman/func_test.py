@@ -525,6 +525,9 @@ Some images are invalid'''
                     stderr = "binman: Filename 'fsp.bin' not found in input path"
             elif type(commit) is not str:
                 stderr = self._error.get((brd.target, commit.sequence))
+            else:
+                # For current source builds, commit is 'current'
+                stderr = self._error.get((brd.target, commit))
 
             if stderr:
                 return command.CommandResult(return_code=2, stderr=stderr)
@@ -592,6 +595,77 @@ Some images are invalid'''
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
+
+    def testCurrentSourceIde(self):
+        """Test building current source with IDE mode enabled
+
+        This tests that:
+        - Build errors are written to stderr
+        - Progress output does not go to stdout in IDE mode
+        - Summary mode (-s) shows output again
+        """
+        # Set up a build error for sandbox board (board4) which has toolchain
+        # For current source builds, commit is 'current' string
+        error_msg = 'test_error_msg.c:123: error: test failure\n'
+        self._error['board4', 'current'] = error_msg
+
+        # Capture stderr during the build
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = captured_stderr
+            terminal.get_print_test_lines()  # Clear any previous output
+            self._RunControl('-o', self._output_dir, '-I')
+        finally:
+            sys.stderr = old_stderr
+
+        # Verify there is a build failure
+        self.assertEqual(self._builder.fail, 1)
+
+        # Check stderr has exactly the expected error
+        self.assertEqual(captured_stderr.getvalue(),
+                         'test_error_msg.c:123: error: test failure\n')
+
+        # In IDE mode, there should be no stdout output at all
+        self.assertEqual(terminal.get_print_test_lines(), [])
+
+        # Now run with -s to show summary - output should appear again
+        terminal.get_print_test_lines()  # Clear
+        self._RunControl('-o', self._output_dir, '-s', clean_dir=False)
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn('Summary of', lines[0].text)
+        self.assertIn('board4', lines[1].text)
+
+    def testBranchIde(self):
+        """Test building a branch with IDE mode and summary
+
+        This tests _print_ide_output() which outputs errors to stderr during
+        the summary phase for branch builds.
+        """
+        # Set up error for commit 1 on sandbox board
+        error_msg = 'branch_error.c:456: error: branch failure\n'
+        self._error['board4', 1] = error_msg
+
+        # Build branch normally first (writes results to disk)
+        terminal.get_print_test_lines()
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self.assertEqual(self._builder.fail, 1)
+
+        # Run summary with IDE mode - errors go to stderr via _print_ide_output
+        captured_stderr = io.StringIO()
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = captured_stderr
+            terminal.get_print_test_lines()
+            self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-sI',
+                             clean_dir=False)
+        finally:
+            sys.stderr = old_stderr
+
+        # Check stderr has the error from _print_ide_output
+        self.assertEqual(captured_stderr.getvalue(),
+                         'branch_error.c:456: error: branch failure\n')
 
     def testBranchSummary(self):
         """Test building a branch and then showing a summary"""
