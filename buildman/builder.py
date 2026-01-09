@@ -21,6 +21,7 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
+from buildman.outcome import Outcome
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -230,35 +231,6 @@ class Builder:
         _ide: Produce output suitable for an Integrated Development Environment
             i.e. don't emit progress information and put errors on stderr
     """
-    class Outcome:
-        """Records a build outcome for a single make invocation
-
-        Public Members:
-            rc: Outcome value (OUTCOME_...)
-            err_lines: List of error lines or [] if none
-            sizes: Dictionary of image size information, keyed by filename
-                - Each value is itself a dictionary containing
-                    values for 'text', 'data' and 'bss', being the integer
-                    size in bytes of each section.
-            func_sizes: Dictionary keyed by filename - e.g. 'u-boot'. Each
-                    value is itself a dictionary:
-                        key: function name
-                        value: Size of function in bytes
-            config: Dictionary keyed by filename - e.g. '.config'. Each
-                    value is itself a dictionary:
-                        key: config name
-                        value: config value
-            environment: Dictionary keyed by environment variable, Each
-                     value is the value of environment variable.
-        """
-        def __init__(self, rc, err_lines, sizes, func_sizes, config,
-                     environment):
-            self.rc = rc
-            self.err_lines = err_lines
-            self.sizes = sizes
-            self.func_sizes = func_sizes
-            self.config = config
-            self.environment = environment
 
     def __init__(self, toolchains, base_dir, git_dir, num_threads, num_jobs,
                  gnu_make='make', checkout=True, show_unknown=True, step=1,
@@ -951,10 +923,10 @@ class Builder:
                 fname = os.path.join(output_dir, 'uboot.env')
                 environment = self._process_environment(fname)
 
-            return Builder.Outcome(rc, err_lines, sizes, func_sizes, config,
+            return Outcome(rc, err_lines, sizes, func_sizes, config,
                                    environment)
 
-        return Builder.Outcome(OUTCOME_UNKNOWN, [], {}, {}, {}, {})
+        return Outcome(OUTCOME_UNKNOWN, [], {}, {}, {}, {})
 
     @staticmethod
     def _add_line(lines_summary, lines_boards, line, brd):
@@ -1027,7 +999,7 @@ class Builder:
             tuple: Tuple containing:
                 Dict containing boards which built this commit:
                     key: board.target
-                    value: Builder.Outcome object
+                    value: Outcome object
                 List containing a summary of error lines
                 Dict keyed by error line, containing a list of the Board
                     objects with that error
@@ -1135,7 +1107,7 @@ class Builder:
         """
         self._base_board_dict = {}
         for brd in board_selected:
-            self._base_board_dict[brd] = Builder.Outcome(0, [], [], {}, {}, {})
+            self._base_board_dict[brd] = Outcome(0, [], [], {}, {}, {})
         self._base_err_lines = []
         self._base_warn_lines = []
         self._base_err_line_boards = {}
