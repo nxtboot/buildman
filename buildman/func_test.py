@@ -660,6 +660,32 @@ Some images are invalid'''
         self.assertIn('CONFIG_VALUE', text)  # Value change
         self.assertIn('(no errors to report)', lines[-1].text)
 
+        # Now run with -U to show environment changes
+        # Create uboot.env files with varying content between commits
+        for commit_num in range(self._commits):
+            for brd in BOARDS:
+                target = brd[6]  # target name is 7th element
+                board_dir = self._builder.get_build_dir(commit_num, target)
+                env_fname = os.path.join(board_dir, 'uboot.env')
+                # Environment uses null-terminated strings
+                env_content = f'bootdelay={commit_num + 1}\x00'
+                if commit_num == 0:
+                    # Add a variable that will be removed in later commits
+                    env_content += 'oldvar=removed\x00'
+                if commit_num > 0:
+                    env_content += 'newvar=value\x00'
+                tools.write_file(env_fname, env_content.encode('utf-8'))
+
+        self._make_calls = 0
+        self._RunControl('-b', TEST_BRANCH, '-sU', '-o', self._output_dir,
+                         clean_dir=False)
+        self.assertEqual(self._make_calls, 0)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+        # Check environment variables appear in the output
+        self.assertIn('bootdelay', text)
+        self.assertIn('(no errors to report)', lines[-1].text)
+
     def testWarningsAsErrors(self):
         """Test the -E flag adds -Werror to make arguments"""
         self._captured_make_args = []
