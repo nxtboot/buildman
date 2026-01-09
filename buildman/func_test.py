@@ -651,8 +651,10 @@ Some images are invalid'''
         self.assertEqual(self._make_calls, 0)
         lines = terminal.get_print_test_lines()
         text = '\n'.join(line.text for line in lines)
-        # Check config options appear in the output
-        self.assertIn('CONFIG_', text)
+        # Check config options appear in the output - both additions and
+        # value changes should be detected
+        self.assertIn('CONFIG_NEW_OPTION', text)  # Addition
+        self.assertIn('CONFIG_VALUE', text)  # Value change
         self.assertIn('(no errors to report)', lines[-1].text)
 
     def testCount(self):

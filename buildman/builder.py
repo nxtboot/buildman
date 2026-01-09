@@ -1624,7 +1624,7 @@ class Builder:
                     config_minus[key] = value
                     all_config_minus[key] = value
             for key, value in base.items():
-                new_value = tconfig.config.get(key)
+                new_value = tconfig.config[name].get(key)
                 if new_value and value != new_value:
                     desc = f'{value} -> {new_value}'
                     config_change[key] = desc
