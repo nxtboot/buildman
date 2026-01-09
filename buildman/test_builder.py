@@ -4,9 +4,13 @@
 
 """Unit tests for builder.py"""
 
+import os
 import unittest
+from unittest import mock
 
 from buildman import builder
+from buildman import builderthread
+from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
 
@@ -138,6 +142,120 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
 
         # No output when both dicts are empty
         self.assertEqual(len(lines), 0)
+
+
+class TestPrepareThread(unittest.TestCase):
+    """Tests for Builder._prepare_thread()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_no_setup_git(self, mock_mkdir):
+        """Test with setup_git=None (no git setup needed)"""
+        self.builder._prepare_thread(0, None)
+        mock_mkdir.assert_called_once()
+
+    @mock.patch.object(gitutil, 'fetch')
+    @mock.patch.object(os.path, 'isdir', return_value=True)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_existing_clone(self, mock_mkdir, mock_isdir, mock_fetch):
+        """Test with existing git clone (fetches updates)"""
+        terminal.get_print_test_lines()  # Clear
+        self.builder._prepare_thread(0, 'clone')
+
+        mock_fetch.assert_called_once()
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Fetching repo', lines[0].text)
+
+    @mock.patch.object(os.path, 'isfile', return_value=True)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_existing_worktree(self, mock_mkdir, mock_isdir, mock_isfile):
+        """Test with existing worktree (no action needed)"""
+        terminal.get_print_test_lines()  # Clear
+        self.builder._prepare_thread(0, 'worktree')
+
+        # No git operations should be called
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 0)
+
+    @mock.patch.object(os.path, 'exists', return_value=True)
+    @mock.patch.object(os.path, 'isfile', return_value=False)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_invalid_git_dir(self, mock_mkdir, mock_isdir, mock_isfile,
+                             mock_exists):
+        """Test with git_dir that exists but is neither file nor directory"""
+        with self.assertRaises(ValueError) as ctx:
+            self.builder._prepare_thread(0, 'clone')
+        self.assertIn('exists, but is not a file or a directory',
+                      str(ctx.exception))
+
+    @mock.patch.object(gitutil, 'add_worktree')
+    @mock.patch.object(os.path, 'exists', return_value=False)
+    @mock.patch.object(os.path, 'isfile', return_value=False)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_create_worktree(self, mock_mkdir, mock_isdir, mock_isfile,
+                             mock_exists, mock_add_worktree):
+        """Test creating a new worktree"""
+        terminal.get_print_test_lines()  # Clear
+        self.builder._prepare_thread(0, 'worktree')
+
+        mock_add_worktree.assert_called_once()
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Checking out worktree', lines[0].text)
+
+    @mock.patch.object(gitutil, 'clone')
+    @mock.patch.object(os.path, 'exists', return_value=False)
+    @mock.patch.object(os.path, 'isfile', return_value=False)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_create_clone(self, mock_mkdir, mock_isdir, mock_isfile,
+                          mock_exists, mock_clone):
+        """Test creating a new clone"""
+        terminal.get_print_test_lines()  # Clear
+        self.builder._prepare_thread(0, 'clone')
+
+        mock_clone.assert_called_once()
+        lines = terminal.get_print_test_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Cloning repo', lines[0].text)
+
+    @mock.patch.object(gitutil, 'clone')
+    @mock.patch.object(os.path, 'exists', return_value=False)
+    @mock.patch.object(os.path, 'isfile', return_value=False)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_create_clone_with_true(self, mock_mkdir, mock_isdir, mock_isfile,
+                                    mock_exists, mock_clone):
+        """Test creating a clone when setup_git=True"""
+        terminal.get_print_test_lines()  # Clear
+        self.builder._prepare_thread(0, True)
+
+        mock_clone.assert_called_once()
+
+    @mock.patch.object(os.path, 'exists', return_value=False)
+    @mock.patch.object(os.path, 'isfile', return_value=False)
+    @mock.patch.object(os.path, 'isdir', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_invalid_setup_git(self, mock_mkdir, mock_isdir, mock_isfile,
+                               mock_exists):
+        """Test with invalid setup_git value"""
+        with self.assertRaises(ValueError) as ctx:
+            self.builder._prepare_thread(0, 'invalid')
+        self.assertIn("Can't setup git repo", str(ctx.exception))
 
 
 if __name__ == '__main__':
