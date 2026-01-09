@@ -258,5 +258,85 @@ class TestPrepareThread(unittest.TestCase):
         self.assertIn("Can't setup git repo", str(ctx.exception))
 
 
+class TestPrepareWorkingSpace(unittest.TestCase):
+    """Tests for Builder._prepare_working_space()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_no_setup_git(self, mock_mkdir, mock_prepare_thread):
+        """Test with setup_git=False"""
+        self.builder._prepare_working_space(2, False)
+
+        mock_mkdir.assert_called_once()
+        # Should prepare 2 threads with setup_git=False
+        self.assertEqual(mock_prepare_thread.call_count, 2)
+        mock_prepare_thread.assert_any_call(0, False)
+        mock_prepare_thread.assert_any_call(1, False)
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(gitutil, 'prune_worktrees')
+    @mock.patch.object(gitutil, 'check_worktree_is_available', return_value=True)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_worktree_available(self, mock_mkdir, mock_check_worktree,
+                                mock_prune, mock_prepare_thread):
+        """Test when worktree is available"""
+        self.builder._prepare_working_space(3, True)
+
+        mock_check_worktree.assert_called_once()
+        mock_prune.assert_called_once()
+        # Should prepare 3 threads with setup_git='worktree'
+        self.assertEqual(mock_prepare_thread.call_count, 3)
+        mock_prepare_thread.assert_any_call(0, 'worktree')
+        mock_prepare_thread.assert_any_call(1, 'worktree')
+        mock_prepare_thread.assert_any_call(2, 'worktree')
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(gitutil, 'check_worktree_is_available', return_value=False)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_worktree_not_available(self, mock_mkdir, mock_check_worktree,
+                                    mock_prepare_thread):
+        """Test when worktree is not available (falls back to clone)"""
+        self.builder._prepare_working_space(2, True)
+
+        mock_check_worktree.assert_called_once()
+        # Should prepare 2 threads with setup_git='clone'
+        self.assertEqual(mock_prepare_thread.call_count, 2)
+        mock_prepare_thread.assert_any_call(0, 'clone')
+        mock_prepare_thread.assert_any_call(1, 'clone')
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_zero_threads(self, mock_mkdir, mock_prepare_thread):
+        """Test with max_threads=0 (should still prepare 1 thread)"""
+        self.builder._prepare_working_space(0, False)
+
+        # Should prepare at least 1 thread
+        self.assertEqual(mock_prepare_thread.call_count, 1)
+        mock_prepare_thread.assert_called_with(0, False)
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_no_git_dir(self, mock_mkdir, mock_prepare_thread):
+        """Test with no git_dir set"""
+        self.builder.git_dir = None
+        self.builder._prepare_working_space(2, True)
+
+        # setup_git should remain True but git operations skipped
+        self.assertEqual(mock_prepare_thread.call_count, 2)
+        mock_prepare_thread.assert_any_call(0, True)
+        mock_prepare_thread.assert_any_call(1, True)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -55,6 +55,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_boards.TestBoards, test_bsettings.TestBsettings,
          test_builder.TestPrintFuncSizeDetail,
          test_builder.TestPrepareThread,
+         test_builder.TestPrepareWorkingSpace,
          'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)
