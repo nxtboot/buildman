@@ -8,8 +8,8 @@
 
 import sys
 
-from buildman.outcome import (BoardStatus, OUTCOME_OK, OUTCOME_WARNING,
-                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.outcome import (BoardStatus, ErrLine, OUTCOME_OK,
+                              OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN)
 from u_boot_pylib.terminal import tprint
 
 
@@ -745,3 +745,67 @@ class ResultHandler:
         if not_built:
             tprint(f"Boards not built ({len(not_built)}): "
                    f"{', '.join(not_built)}")
+
+    @staticmethod
+    def _board_list(line, line_boards, list_error_boards):
+        """Get a list of boards containing a particular error/warning line
+
+        Args:
+            line (str): Error line to search for
+            line_boards (dict): Dict keyed by line, containing list of Board
+                objects with that line
+            list_error_boards (bool): True to return the board list, False to
+                return empty list
+
+        Returns:
+            list: List of Board objects with that error line, or [] if
+                list_error_boards is False
+        """
+        brds = []
+        board_set = set()
+        if list_error_boards:
+            for brd in line_boards[line]:
+                if brd not in board_set:
+                    brds.append(brd)
+                    board_set.add(brd)
+        return brds
+
+    @classmethod
+    def calc_error_delta(cls, base_lines, base_line_boards, lines, line_boards,
+                         char, list_error_boards):
+        """Calculate the required output based on changes in errors
+
+        Args:
+            base_lines (list): List of errors/warnings for previous commit
+            base_line_boards (dict): Dict keyed by error line, containing a
+                list of the Board objects with that error in the previous
+                commit
+            lines (list): List of errors/warning for this commit, each a str
+            line_boards (dict): Dict keyed by error line, containing a list
+                of the Board objects with that error in this commit
+            char (str): Character representing error ('') or warning ('w'). The
+                broken ('+') or fixed ('-') characters are added in this
+                function
+            list_error_boards (bool): True to include board list in output
+
+        Returns:
+            tuple: (better_lines, worse_lines) where each is a list of
+                ErrLine objects
+        """
+        better_lines = []
+        worse_lines = []
+        for line in lines:
+            if line not in base_lines:
+                errline = ErrLine(
+                    char + '+',
+                    cls._board_list(line, line_boards, list_error_boards),
+                    line)
+                worse_lines.append(errline)
+        for line in base_lines:
+            if line not in lines:
+                errline = ErrLine(
+                    char + '-',
+                    cls._board_list(line, base_line_boards, list_error_boards),
+                    line)
+                better_lines.append(errline)
+        return better_lines, worse_lines

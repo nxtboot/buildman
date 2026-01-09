@@ -1071,67 +1071,16 @@ class Builder:
             show_config (bool): Show config changes
             show_environment (bool): Show environment changes
         """
-        def _board_list(line, line_boards):
-            """Helper function to get a line of boards containing a line
-
-            Args:
-                line: Error line to search for
-                line_boards: boards to search, each a Board
-            Return:
-                List of boards with that error line, or [] if the user has not
-                    requested such a list
-            """
-            brds = []
-            board_set = set()
-            if self._opts.list_error_boards:
-                for brd in line_boards[line]:
-                    if not brd in board_set:
-                        brds.append(brd)
-                        board_set.add(brd)
-            return brds
-
-        def _calc_error_delta(base_lines, base_line_boards, lines, line_boards,
-                            char):
-            """Calculate the required output based on changes in errors
-
-            Args:
-                base_lines: List of errors/warnings for previous commit
-                base_line_boards: Dict keyed by error line, containing a list
-                    of the Board objects with that error in the previous commit
-                lines: List of errors/warning for this commit, each a str
-                line_boards: Dict keyed by error line, containing a list
-                    of the Board objects with that error in this commit
-                char: Character representing error ('') or warning ('w'). The
-                    broken ('+') or fixed ('-') characters are added in this
-                    function
-
-            Returns:
-                Tuple
-                    List of ErrLine objects for 'better' lines
-                    List of ErrLine objects for 'worse' lines
-            """
-            better_lines = []
-            worse_lines = []
-            for line in lines:
-                if line not in base_lines:
-                    errline = ErrLine(
-                        char + '+', _board_list(line, line_boards), line)
-                    worse_lines.append(errline)
-            for line in base_lines:
-                if line not in lines:
-                    errline = ErrLine(char + '-',
-                                      _board_list(line, base_line_boards), line)
-                    better_lines.append(errline)
-            return better_lines, worse_lines
-
         brd_status = ResultHandler.classify_boards(
             board_selected, board_dict, self._base_board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
-        better_err, worse_err = _calc_error_delta(self._base_err_lines,
-                self._base_err_line_boards, err_lines, err_line_boards, '')
-        better_warn, worse_warn = _calc_error_delta(self._base_warn_lines,
-                self._base_warn_line_boards, warn_lines, warn_line_boards, 'w')
+        better_err, worse_err = ResultHandler.calc_error_delta(
+            self._base_err_lines, self._base_err_line_boards, err_lines,
+            err_line_boards, '', self._opts.list_error_boards)
+        better_warn, worse_warn = ResultHandler.calc_error_delta(
+            self._base_warn_lines, self._base_warn_line_boards, warn_lines,
+            warn_line_boards, 'w', self._opts.list_error_boards)
 
         # For the IDE mode, print out all the output
         if self._opts.ide:
