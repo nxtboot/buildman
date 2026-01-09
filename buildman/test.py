@@ -1269,5 +1269,190 @@ class TestBuildMisc(TestBuildBase):
                                                     'other_board'))
 
 
+class TestBuilderFuncs(TestBuildBase):
+    """Tests for individual Builder methods"""
+
+    def test_read_func_sizes(self):
+        """Test read_func_sizes() function"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        # Create test data simulating 'nm' output
+        # NM_SYMBOL_TYPES = 'tTdDbBr' - text, data, bss, rodata
+        nm_output = '''00000100 T func_one
+00000200 t func_two
+00000050 T func_three
+00000030 d data_var
+00000010 W weak_func
+'''
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write(nm_output)
+            tmp_name = tmp.name
+
+        try:
+            with open(tmp_name, 'r', encoding='utf-8') as fhandle:
+                sizes = build.read_func_sizes(tmp_name, fhandle)
+
+            # T, t, d are in NM_SYMBOL_TYPES, W is not
+            self.assertEqual(0x100, sizes['func_one'])
+            self.assertEqual(0x200, sizes['func_two'])
+            self.assertEqual(0x50, sizes['func_three'])
+            self.assertEqual(0x30, sizes['data_var'])
+            self.assertNotIn('weak_func', sizes)
+        finally:
+            os.unlink(tmp_name)
+
+    def test_read_func_sizes_static(self):
+        """Test read_func_sizes() with static function symbols"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        # Test static functions (have . in name after first char)
+        nm_output = '''00000100 t func.1234
+00000050 t func.5678
+'''
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write(nm_output)
+            tmp_name = tmp.name
+
+        try:
+            with open(tmp_name, 'r', encoding='utf-8') as fhandle:
+                sizes = build.read_func_sizes(tmp_name, fhandle)
+
+            # Static functions should be combined under 'static.func'
+            self.assertEqual(0x100 + 0x50, sizes['static.func'])
+        finally:
+            os.unlink(tmp_name)
+
+    def test_process_config_defconfig(self):
+        """Test _process_config() with .config style file"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        config_data = '''# This is a comment
+CONFIG_OPTION_A=y
+CONFIG_OPTION_B="string"
+CONFIG_OPTION_C=123
+# CONFIG_OPTION_D is not set
+'''
+        with tempfile.NamedTemporaryFile(mode='w', delete=False,
+                                         suffix='.config') as tmp:
+            tmp.write(config_data)
+            tmp_name = tmp.name
+
+        try:
+            config = build._process_config(tmp_name)
+
+            self.assertEqual('y', config['CONFIG_OPTION_A'])
+            self.assertEqual('"string"', config['CONFIG_OPTION_B'])
+            self.assertEqual('123', config['CONFIG_OPTION_C'])
+            # Comments should be ignored
+            self.assertNotIn('CONFIG_OPTION_D', config)
+        finally:
+            os.unlink(tmp_name)
+
+    def test_process_config_autoconf_h(self):
+        """Test _process_config() with autoconf.h style file"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        config_data = '''/* Auto-generated header */
+#define CONFIG_OPTION_A 1
+#define CONFIG_OPTION_B "value"
+#define CONFIG_OPTION_C
+#define NOT_CONFIG 1
+'''
+        with tempfile.NamedTemporaryFile(mode='w', delete=False,
+                                         suffix='.h') as tmp:
+            tmp.write(config_data)
+            tmp_name = tmp.name
+
+        try:
+            config = build._process_config(tmp_name)
+
+            self.assertEqual('1', config['CONFIG_OPTION_A'])
+            self.assertEqual('"value"', config['CONFIG_OPTION_B'])
+            # #define without value gets empty string (squash_config_y=False)
+            self.assertEqual('', config['CONFIG_OPTION_C'])
+            # Non-CONFIG_ defines should be ignored
+            self.assertNotIn('NOT_CONFIG', config)
+        finally:
+            os.unlink(tmp_name)
+
+    def test_process_config_nonexistent(self):
+        """Test _process_config() with non-existent file"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        config = build._process_config('/nonexistent/path/config')
+        self.assertEqual({}, config)
+
+    def test_process_config_squash_y(self):
+        """Test _process_config() with squash_config_y enabled"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build.squash_config_y = True
+
+        config_data = '''CONFIG_OPTION_A=y
+CONFIG_OPTION_B=n
+#define CONFIG_OPTION_C
+'''
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write(config_data)
+            tmp_name = tmp.name
+
+        try:
+            config = build._process_config(tmp_name)
+
+            # y should be squashed to 1
+            self.assertEqual('1', config['CONFIG_OPTION_A'])
+            # n should remain n
+            self.assertEqual('n', config['CONFIG_OPTION_B'])
+            # Empty #define should get '1' when squash_config_y is True
+            self.assertEqual('1', config['CONFIG_OPTION_C'])
+        finally:
+            os.unlink(tmp_name)
+
+    def test_process_environment(self):
+        """Test _process_environment() function"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        # Environment file uses null-terminated strings
+        env_data = 'bootcmd=run bootm\x00bootdelay=3\x00console=ttyS0\x00'
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write(env_data)
+            tmp_name = tmp.name
+
+        try:
+            env = build._process_environment(tmp_name)
+
+            self.assertEqual('run bootm', env['bootcmd'])
+            self.assertEqual('3', env['bootdelay'])
+            self.assertEqual('ttyS0', env['console'])
+        finally:
+            os.unlink(tmp_name)
+
+    def test_process_environment_nonexistent(self):
+        """Test _process_environment() with non-existent file"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        env = build._process_environment('/nonexistent/path/uboot.env')
+        self.assertEqual({}, env)
+
+    def test_process_environment_invalid_lines(self):
+        """Test _process_environment() handles invalid lines gracefully"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+
+        # Include lines without '=' which should be ignored
+        env_data = 'valid=value\x00invalid_no_equals\x00another=good\x00'
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write(env_data)
+            tmp_name = tmp.name
+
+        try:
+            env = build._process_environment(tmp_name)
+
+            self.assertEqual('value', env['valid'])
+            self.assertEqual('good', env['another'])
+            # Invalid line should be silently ignored
+            self.assertNotIn('invalid_no_equals', env)
+        finally:
+            os.unlink(tmp_name)
+
+
 if __name__ == "__main__":
     unittest.main()
