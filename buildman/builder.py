@@ -1938,19 +1938,28 @@ class Builder:
     def _show_not_built(board_selected, board_dict):
         """Show boards that were not built
 
-        This reports boards that are in board_selected but have no outcome in
-        board_dict. In practice this is unlikely to happen since
-        get_result_summary() creates an outcome for every board, even if just
-        OUTCOME_UNKNOWN.
+        This reports boards that couldn't be built due to toolchain issues.
+        These have OUTCOME_UNKNOWN (no result file) or OUTCOME_ERROR with
+        "Tool chain error" in the error lines.
 
         Args:
             board_selected (dict): Dict of selected boards, keyed by target
             board_dict (dict): Dict of boards that were built, keyed by target
         """
         not_built = []
-        for brd in board_selected:
-            if brd not in board_dict:
-                not_built.append(brd)
+        for target in board_selected:
+            if target not in board_dict:
+                not_built.append(target)
+            else:
+                outcome = board_dict[target]
+                if outcome.rc == OUTCOME_UNKNOWN:
+                    not_built.append(target)
+                elif outcome.rc == OUTCOME_ERROR:
+                    # Check for toolchain error in the error lines
+                    for line in outcome.err_lines:
+                        if 'Tool chain error' in line:
+                            not_built.append(target)
+                            break
         if not_built:
             tprint(f"Boards not built ({len(not_built)}): "
                    f"{', '.join(not_built)}")

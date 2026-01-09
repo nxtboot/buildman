@@ -593,26 +593,24 @@ Some images are invalid'''
     def testToolchainErrors(self):
         """Test that toolchain errors are reported in the summary
 
-        When toolchains are missing, boards fail to build. The summary
-        should report which boards had errors, grouped by architecture.
+        When toolchains are missing, boards cannot be built. The summary
+        should report which boards were not built.
         """
         self.setupToolchains()
         # Build with missing toolchains - only sandbox will succeed
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
 
-        # Now show summary - should report boards with errors
+        # Now show summary - should report boards not built
         terminal.get_print_test_lines()  # Clear
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
                          clean_dir=False)
         lines = terminal.get_print_test_lines()
         text = '\n'.join(line.text for line in lines)
 
-        # Check that boards with missing toolchains are shown with errors
-        # The '+' prefix indicates new errors for these boards
-        self.assertIn('arm:', text)
+        # Check that boards with missing toolchains are reported as not built
+        self.assertIn('Boards not built', text)
         self.assertIn('board0', text)
         self.assertIn('board1', text)
-        self.assertIn('powerpc:', text)
         self.assertIn('board2', text)
 
     def testBranch(self):

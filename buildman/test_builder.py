@@ -350,10 +350,20 @@ class TestShowNotBuilt(unittest.TestCase):
         """Clean up after tests"""
         terminal.set_print_test_mode(False)
 
+    def _make_outcome(self, rc, err_lines=None):
+        """Create a mock outcome with a given return code"""
+        outcome = mock.Mock()
+        outcome.rc = rc
+        outcome.err_lines = err_lines if err_lines else []
+        return outcome
+
     def test_all_boards_built(self):
-        """Test when all selected boards were built"""
+        """Test when all selected boards were built successfully"""
         board_selected = {'board1': None, 'board2': None}
-        board_dict = {'board1': None, 'board2': None}
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board2': self._make_outcome(builder.OUTCOME_OK),
+        }
 
         terminal.get_print_test_lines()  # Clear
         builder.Builder._show_not_built(board_selected, board_dict)
@@ -362,10 +372,14 @@ class TestShowNotBuilt(unittest.TestCase):
         # No output when all boards were built
         self.assertEqual(len(lines), 0)
 
-    def test_some_boards_not_built(self):
-        """Test when some boards were not built"""
+    def test_some_boards_unknown(self):
+        """Test when some boards have OUTCOME_UNKNOWN (e.g. missing toolchain)"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
-        board_dict = {'board1': None}  # Only board1 was built
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board3': self._make_outcome(builder.OUTCOME_UNKNOWN),
+        }
 
         terminal.get_print_test_lines()  # Clear
         builder.Builder._show_not_built(board_selected, board_dict)
@@ -377,10 +391,13 @@ class TestShowNotBuilt(unittest.TestCase):
         self.assertIn('board2', lines[0].text)
         self.assertIn('board3', lines[0].text)
 
-    def test_no_boards_built(self):
-        """Test when no boards were built"""
+    def test_all_boards_unknown(self):
+        """Test when all boards have OUTCOME_UNKNOWN"""
         board_selected = {'board1': None, 'board2': None}
-        board_dict = {}  # No boards built
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
+        }
 
         terminal.get_print_test_lines()  # Clear
         builder.Builder._show_not_built(board_selected, board_dict)
@@ -390,6 +407,62 @@ class TestShowNotBuilt(unittest.TestCase):
         self.assertIn('Boards not built', lines[0].text)
         self.assertIn('board1', lines[0].text)
         self.assertIn('board2', lines[0].text)
+
+    def test_build_error_not_counted(self):
+        """Test that build errors (not toolchain) are not counted as 'not built'"""
+        board_selected = {'board1': None, 'board2': None}
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+                                         ['error: some build error']),
+        }
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        # Build errors are still "built", just with errors
+        self.assertEqual(len(lines), 0)
+
+    def test_toolchain_error_counted(self):
+        """Test that toolchain errors are counted as 'not built'"""
+        board_selected = {'board1': None, 'board2': None, 'board3': None}
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+                                         ['Tool chain error for arm: not found']),
+            'board3': self._make_outcome(builder.OUTCOME_ERROR,
+                                         ['error: some build error']),
+        }
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        # Only toolchain errors count as "not built"
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Boards not built', lines[0].text)
+        self.assertIn('1', lines[0].text)
+        self.assertIn('board2', lines[0].text)
+        self.assertNotIn('board3', lines[0].text)
+
+    def test_board_not_in_dict(self):
+        """Test that boards missing from board_dict are counted as 'not built'"""
+        board_selected = {'board1': None, 'board2': None, 'board3': None}
+        board_dict = {
+            'board1': self._make_outcome(builder.OUTCOME_OK),
+            # board2 and board3 are not in board_dict
+        }
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Boards not built', lines[0].text)
+        self.assertIn('2', lines[0].text)
+        self.assertIn('board2', lines[0].text)
+        self.assertIn('board3', lines[0].text)
 
 
 class TestPrepareOutputSpace(unittest.TestCase):
