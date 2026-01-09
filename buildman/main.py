@@ -40,6 +40,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
     from buildman import test_boards
     from buildman import test_bsettings
     from buildman import test_builder
+    from buildman import test_cfgutil
 
     test_name = args.terms and args.terms[0] or None
     if skip_net_tests:
@@ -50,7 +51,8 @@ def run_tests(skip_net_tests, debug, verbose, args):
     result = test_util.run_test_suites(
         'buildman', debug, verbose, False, False, args.threads, test_name, [],
         [test.TestBuildOutput, test.TestBuildBoards, test.TestBuild,
-         test.TestBuildConfig, test.TestBuildMisc, test.TestBuilderFuncs,
+         test.TestBuildMisc, test.TestBuilderFuncs,
+         test_cfgutil.TestAdjustCfg, test_cfgutil.TestProcessConfig,
          func_test.TestFunctional,
          test_boards.TestBoards, test_bsettings.TestBsettings,
          test_builder.TestPrintFuncSizeDetail,
