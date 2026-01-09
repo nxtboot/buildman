@@ -1323,9 +1323,7 @@ class TestBuilderFuncs(TestBuildBase):
             os.unlink(tmp_name)
 
     def test_process_config_defconfig(self):
-        """Test _process_config() with .config style file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
+        """Test process_config() with .config style file"""
         config_data = '''# This is a comment
 CONFIG_OPTION_A=y
 CONFIG_OPTION_B="string"
@@ -1338,7 +1336,7 @@ CONFIG_OPTION_C=123
             tmp_name = tmp.name
 
         try:
-            config = build._process_config(tmp_name)
+            config = cfgutil.process_config(tmp_name, squash_config_y=False)
 
             self.assertEqual('y', config['CONFIG_OPTION_A'])
             self.assertEqual('"string"', config['CONFIG_OPTION_B'])
@@ -1349,9 +1347,7 @@ CONFIG_OPTION_C=123
             os.unlink(tmp_name)
 
     def test_process_config_autoconf_h(self):
-        """Test _process_config() with autoconf.h style file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
+        """Test process_config() with autoconf.h style file"""
         config_data = '''/* Auto-generated header */
 #define CONFIG_OPTION_A 1
 #define CONFIG_OPTION_B "value"
@@ -1364,7 +1360,7 @@ CONFIG_OPTION_C=123
             tmp_name = tmp.name
 
         try:
-            config = build._process_config(tmp_name)
+            config = cfgutil.process_config(tmp_name, squash_config_y=False)
 
             self.assertEqual('1', config['CONFIG_OPTION_A'])
             self.assertEqual('"value"', config['CONFIG_OPTION_B'])
@@ -1376,17 +1372,13 @@ CONFIG_OPTION_C=123
             os.unlink(tmp_name)
 
     def test_process_config_nonexistent(self):
-        """Test _process_config() with non-existent file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
-        config = build._process_config('/nonexistent/path/config')
+        """Test process_config() with non-existent file"""
+        config = cfgutil.process_config('/nonexistent/path/config',
+                                        squash_config_y=False)
         self.assertEqual({}, config)
 
     def test_process_config_squash_y(self):
-        """Test _process_config() with squash_config_y enabled"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-        build.squash_config_y = True
-
+        """Test process_config() with squash_config_y enabled"""
         config_data = '''CONFIG_OPTION_A=y
 CONFIG_OPTION_B=n
 #define CONFIG_OPTION_C
@@ -1396,7 +1388,7 @@ CONFIG_OPTION_B=n
             tmp_name = tmp.name
 
         try:
-            config = build._process_config(tmp_name)
+            config = cfgutil.process_config(tmp_name, squash_config_y=True)
 
             # y should be squashed to 1
             self.assertEqual('1', config['CONFIG_OPTION_A'])

@@ -20,7 +20,7 @@ import sys
 import threading
 
 from buildman import builderthread
-from buildman.cfgutil import Config
+from buildman.cfgutil import Config, process_config
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -828,43 +828,6 @@ class Builder:
                     sym[name] = sym.get(name, 0) + int(size, 16)
         return sym
 
-    def _process_config(self, fname):
-        """Read in a .config, autoconf.mk or autoconf.h file
-
-        This function handles all config file types. It ignores comments and
-        any #defines which don't start with CONFIG_.
-
-        Args:
-            fname: Filename to read
-
-        Returns:
-            Dictionary:
-                key: Config name (e.g. CONFIG_DM)
-                value: Config value (e.g. 1)
-        """
-        config = {}
-        if os.path.exists(fname):
-            with open(fname, encoding='utf-8') as fd:
-                for line in fd:
-                    line = line.strip()
-                    if line.startswith('#define'):
-                        values = line[8:].split(' ', 1)
-                        if len(values) > 1:
-                            key, value = values
-                        else:
-                            key = values[0]
-                            value = '1' if self.squash_config_y else ''
-                        if not key.startswith('CONFIG_'):
-                            continue
-                    elif not line or line[0] in ['#', '*', '/']:
-                        continue
-                    else:
-                        key, value = line.split('=', 1)
-                    if self.squash_config_y and value == 'y':
-                        value = '1'
-                    config[key] = value
-        return config
-
     def _process_environment(self, fname):
         """Read in a uboot.env file
 
@@ -981,7 +944,7 @@ class Builder:
                 output_dir = self.get_build_dir(commit_upto, target)
                 for name in self.config_filenames:
                     fname = os.path.join(output_dir, name)
-                    config[name] = self._process_config(fname)
+                    config[name] = process_config(fname, self.squash_config_y)
 
             if read_environment:
                 output_dir = self.get_build_dir(commit_upto, target)
