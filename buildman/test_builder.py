@@ -548,5 +548,84 @@ class TestPrepareOutputSpace(unittest.TestCase):
         self.assertFalse(lines[0].newline)
 
 
+class TestCheckOutputForLoop(unittest.TestCase):
+    """Tests for Builder._check_output_for_loop()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.builder = builder.Builder(
+            toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
+            num_threads=4, num_jobs=1)
+        # Reset state before each test
+        self.builder._restarting_config = False
+        self.builder._terminated = False
+
+    def test_no_restart_message(self):
+        """Test that normal output does not trigger termination"""
+        result = self.builder._check_output_for_loop(b'Building target...')
+
+        self.assertFalse(result)
+        self.assertFalse(self.builder._restarting_config)
+        self.assertFalse(self.builder._terminated)
+
+    def test_restart_message_sets_flag(self):
+        """Test that 'Restart config' sets the restarting flag"""
+        result = self.builder._check_output_for_loop(b'Restart config...')
+
+        self.assertFalse(result)  # No loop detected yet
+        self.assertTrue(self.builder._restarting_config)
+        self.assertFalse(self.builder._terminated)
+
+    def test_single_new_item_no_loop(self):
+        """Test that a single NEW item after restart is not a loop"""
+        self.builder._restarting_config = True
+
+        result = self.builder._check_output_for_loop(
+            b'(CONFIG_ITEM) [] (NEW)')
+
+        self.assertFalse(result)
+        self.assertFalse(self.builder._terminated)
+
+    def test_different_new_items_no_loop(self):
+        """Test that different NEW items do not trigger a loop"""
+        self.builder._restarting_config = True
+
+        result = self.builder._check_output_for_loop(
+            b'(CONFIG_A) [] (NEW)\n(CONFIG_B) [] (NEW)')
+
+        self.assertFalse(result)
+        self.assertFalse(self.builder._terminated)
+
+    def test_duplicate_items_triggers_loop(self):
+        """Test that duplicate NEW items trigger loop detection"""
+        self.builder._restarting_config = True
+
+        result = self.builder._check_output_for_loop(
+            b'(CONFIG_ITEM) [] (NEW)\n(CONFIG_ITEM) [] (NEW)')
+
+        self.assertTrue(result)
+        self.assertTrue(self.builder._terminated)
+
+    def test_no_loop_without_restart(self):
+        """Test that duplicates without restart flag do not trigger loop"""
+        # _restarting_config is False by default
+
+        result = self.builder._check_output_for_loop(
+            b'(CONFIG_ITEM) [] (NEW)\n(CONFIG_ITEM) [] (NEW)')
+
+        self.assertFalse(result)
+        self.assertFalse(self.builder._terminated)
+
+    def test_multiple_items_one_duplicate(self):
+        """Test loop detection with multiple items, one duplicated"""
+        self.builder._restarting_config = True
+
+        result = self.builder._check_output_for_loop(
+            b'(CONFIG_A) [] (NEW)\n(CONFIG_B) [] (NEW)\n(CONFIG_A) [] (NEW)')
+
+        self.assertTrue(result)
+        self.assertTrue(self.builder._terminated)
+
+
 if __name__ == '__main__':
     unittest.main()

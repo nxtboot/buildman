@@ -585,6 +585,35 @@ class Builder:
         if checkout and self.checkout:
             gitutil.checkout(commit.hash)
 
+    def _check_output_for_loop(self, data):
+        """Check output for config restart loops
+
+        This detects when Kconfig enters a restart loop due to missing
+        defaults. It looks for 'Restart config' followed by multiple
+        occurrences of the same Kconfig item with no default.
+
+        Args:
+            data (bytes): Output data to check
+
+        Returns:
+            bool: True to terminate the command, False to continue
+        """
+        if b'Restart config' in data:
+            self._restarting_config = True
+
+        # If we see 'Restart config' followed by multiple errors
+        if self._restarting_config:
+            matches = RE_NO_DEFAULT.findall(data)
+
+            # Number of occurrences of each Kconfig item
+            multiple = [matches.count(val) for val in set(matches)]
+
+            # If any of them occur more than once, we have a loop
+            if [val for val in multiple if val > 1]:
+                self._terminated = True
+                return True
+        return False
+
     def make(self, _commit, _brd, _stage, cwd, *args, **kwargs):
         """Run make
 
@@ -596,39 +625,14 @@ class Builder:
         Returns:
             CommandResult: Result of the make operation
         """
-
-        def check_output(_stream, data):
-            """Check output for config restart loops
-
-            Args:
-                data (bytes): Output data to check
-
-            Returns:
-                bool: True to terminate the command, False to continue
-            """
-            if b'Restart config' in data:
-                self._restarting_config = True
-
-            # If we see 'Restart config' following by multiple errors
-            if self._restarting_config:
-                m = RE_NO_DEFAULT.findall(data)
-
-                # Number of occurences of each Kconfig item
-                multiple = [m.count(val) for val in set(m)]
-
-                # If any of them occur more than once, we have a loop
-                if [val for val in multiple if val > 1]:
-                    self._terminated = True
-                    return True
-            return False
-
         self._restarting_config = False
         self._terminated = False
         cmd = [self.gnu_make] + list(args)
-        result = command.run_one(*cmd, capture=True, capture_stderr=True,
-                                 cwd=cwd, raise_on_error=False,
-                                 infile='/dev/null', output_func=check_output,
-                                 **kwargs)
+        result = command.run_one(
+            *cmd, capture=True, capture_stderr=True, cwd=cwd,
+            raise_on_error=False, infile='/dev/null',
+            output_func=lambda stream, data: self._check_output_for_loop(data),
+            **kwargs)
 
         if self._terminated:
             # Try to be helpful

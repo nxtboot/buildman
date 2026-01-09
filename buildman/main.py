@@ -58,6 +58,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_builder.TestPrepareWorkingSpace,
          test_builder.TestShowNotBuilt,
          test_builder.TestPrepareOutputSpace,
+         test_builder.TestCheckOutputForLoop,
          'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)
