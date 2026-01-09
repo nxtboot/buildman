@@ -8,8 +8,9 @@
 
 import sys
 
-from buildman.outcome import (BoardStatus, ErrLine, OUTCOME_OK,
-                              OUTCOME_WARNING, OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.outcome import (BoardStatus, ErrLine, Outcome,
+                              OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
+                              OUTCOME_UNKNOWN)
 from u_boot_pylib.terminal import tprint
 
 
@@ -18,10 +19,19 @@ class ResultHandler:
 
     This class is responsible for displaying size information from builds,
     including per-architecture summaries, per-board details, and per-function
-    bloat analysis.
+    bloat analysis. It also manages baseline state for comparing results
+    between commits.
 
     Attributes:
         col: terminal.Color object for coloured output
+        _base_board_dict: Last-summarised Dict of boards
+        _base_err_lines: Last-summarised list of errors
+        _base_warn_lines: Last-summarised list of warnings
+        _base_err_line_boards: Dict of error lines to boards
+        _base_warn_line_boards: Dict of warning lines to boards
+        _base_config: Last-summarised config
+        _base_environment: Last-summarised environment
+        _error_lines: Number of error lines output
     """
 
     def __init__(self, col, opts):
@@ -34,6 +44,16 @@ class ResultHandler:
         self._col = col
         self._opts = opts
         self._builder = None
+        self._error_lines = 0
+
+        # Baseline state for result comparisons
+        self._base_board_dict = {}
+        self._base_err_lines = []
+        self._base_warn_lines = []
+        self._base_err_line_boards = {}
+        self._base_warn_line_boards = {}
+        self._base_config = None
+        self._base_environment = None
 
     def set_builder(self, builder):
         """Set the builder for this result handler
@@ -42,6 +62,128 @@ class ResultHandler:
             builder (Builder): Builder object to use for getting results
         """
         self._builder = builder
+
+    def reset_result_summary(self, board_selected):
+        """Reset the results summary ready for use.
+
+        Set up the base board list to be all those selected, and set the
+        error lines to empty.
+
+        Following this, calls to print_result_summary() will use this
+        information to work out what has changed.
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+        """
+        outcome_init = Outcome(0, [], [], {}, {}, {})
+        self._base_board_dict = {}
+        for brd in board_selected:
+            self._base_board_dict[brd] = outcome_init
+        self._base_err_lines = []
+        self._base_warn_lines = []
+        self._base_err_line_boards = {}
+        self._base_warn_line_boards = {}
+        self._base_config = None
+        self._base_environment = None
+        self._error_lines = 0
+
+    def print_result_summary(self, board_selected, board_dict, err_lines,
+                             err_line_boards, warn_lines, warn_line_boards,
+                             config, environment, show_sizes, show_detail,
+                             show_bloat, show_config, show_environment,
+                             show_unknown, ide, list_error_boards,
+                             config_filenames):
+        """Compare results with the base results and display delta.
+
+        Only boards mentioned in board_selected will be considered. This
+        function is intended to be called repeatedly with the results of
+        each commit. It therefore shows a 'diff' between what it saw in
+        the last call and what it sees now.
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            err_lines (list): A list of errors for this commit, or [] if there
+                is none, or we don't want to print errors
+            err_line_boards (dict): Dict keyed by error line, containing a list
+                of the Board objects with that error
+            warn_lines (list): A list of warnings for this commit, or [] if
+                there is none, or we don't want to print errors
+            warn_line_boards (dict): Dict keyed by warning line, containing a
+                list of the Board objects with that warning
+            config (dict): Dictionary keyed by filename - e.g. '.config'. Each
+                    value is itself a dictionary:
+                        key: config name
+                        value: config value
+            environment (dict): Dictionary keyed by environment variable, Each
+                     value is the value of environment variable.
+            show_sizes (bool): Show image size deltas
+            show_detail (bool): Show size delta detail for each board if
+                show_sizes
+            show_bloat (bool): Show detail for each function
+            show_config (bool): Show config changes
+            show_environment (bool): Show environment changes
+            show_unknown (bool): Show unknown boards in summary
+            ide (bool): IDE mode - output to stderr
+            list_error_boards (bool): Include board list with error lines
+            config_filenames (list): List of config filenames
+        """
+        brd_status = self.classify_boards(
+            board_selected, board_dict, self._base_board_dict)
+
+        # Get a list of errors and warnings that have appeared, and disappeared
+        better_err, worse_err = self.calc_error_delta(
+            self._base_err_lines, self._base_err_line_boards, err_lines,
+            err_line_boards, '', list_error_boards)
+        better_warn, worse_warn = self.calc_error_delta(
+            self._base_warn_lines, self._base_warn_line_boards, warn_lines,
+            warn_line_boards, 'w', list_error_boards)
+
+        # For the IDE mode, print out all the output
+        if ide:
+            self.print_ide_output(board_selected, board_dict)
+
+        # Display results by arch
+        if not ide:
+            self._error_lines += self.display_arch_results(
+                board_selected, brd_status, better_err, worse_err, better_warn,
+                worse_warn, show_unknown)
+
+        if show_sizes:
+            self.print_size_summary(
+                board_selected, board_dict, self._base_board_dict,
+                show_detail, show_bloat)
+
+        if show_environment and self._base_environment:
+            self.show_environment_changes(
+                board_selected, board_dict, environment, self._base_environment)
+
+        if show_config and self._base_config:
+            self.show_config_changes(
+                board_selected, board_dict, config, self._base_config,
+                config_filenames)
+
+        # Save our updated information for the next call to this function
+        self._base_board_dict = board_dict
+        self._base_err_lines = err_lines
+        self._base_warn_lines = warn_lines
+        self._base_err_line_boards = err_line_boards
+        self._base_warn_line_boards = warn_line_boards
+        self._base_config = config
+        self._base_environment = environment
+
+        self.show_not_built(board_selected, board_dict)
+
+    def get_error_lines(self):
+        """Get the number of error lines output
+
+        Returns:
+            int: Number of error lines output
+        """
+        return self._error_lines
 
     def colour_num(self, num):
         """Format a number with colour depending on its value
@@ -476,11 +618,11 @@ class ResultHandler:
                 continue
             col = None
             if line[0] == '+':
-                col = self.col.GREEN
+                col = self._col.GREEN
             elif line[0] == '-':
-                col = self.col.RED
+                col = self._col.RED
             elif line[0] == 'c':
-                col = self.col.YELLOW
+                col = self._col.YELLOW
             tprint('   ' + line, newline=True, colour=col)
 
     def show_environment_changes(self, board_selected, board_dict,

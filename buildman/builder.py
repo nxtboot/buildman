@@ -305,7 +305,6 @@ class Builder:
         self._next_delay_update = datetime.now()
         self._start_time = None
         self._step = step
-        self._error_lines = 0
         self.no_subdirs = no_subdirs
         self.full_path = full_path
         self.verbose_build = verbose_build
@@ -364,14 +363,7 @@ class Builder:
         self._timestamps = None
         self._verbose = False
 
-        # Attributes for result summaries
-        self._base_board_dict = {}
-        self._base_err_lines = []
-        self._base_warn_lines = []
-        self._base_err_line_boards = {}
-        self._base_warn_line_boards = {}
-        self._base_config = None
-        self._base_environment = None
+        # Note: baseline state for result summaries is now in ResultHandler
 
         self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
 
@@ -580,7 +572,7 @@ class Builder:
             elif self._verbose:
                 terminal.print_clear()
                 boards_selected = {target : result.brd}
-                self.reset_result_summary(boards_selected)
+                self._result_handler.reset_result_summary(boards_selected)
                 self.produce_result_summary(result.commit_upto, self.commits,
                                           boards_selected)
         else:
@@ -1011,113 +1003,6 @@ class Builder:
         return (board_dict, err_lines_summary, err_lines_boards,
                 warn_lines_summary, warn_lines_boards, config, environment)
 
-    def reset_result_summary(self, board_selected):
-        """Reset the results summary ready for use.
-
-        Set up the base board list to be all those selected, and set the
-        error lines to empty.
-
-        Following this, calls to print_result_summary() will use this
-        information to work out what has changed.
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise, keyed
-                by board.target
-        """
-        self._base_board_dict = {}
-        for brd in board_selected:
-            self._base_board_dict[brd] = Outcome(0, [], [], {}, {}, {})
-        self._base_err_lines = []
-        self._base_warn_lines = []
-        self._base_err_line_boards = {}
-        self._base_warn_line_boards = {}
-        self._base_config = None
-        self._base_environment = None
-
-    def print_result_summary(self, board_selected, board_dict, err_lines,
-                           err_line_boards, warn_lines, warn_line_boards,
-                           config, environment, show_sizes, show_detail,
-                           show_bloat, show_config, show_environment):
-        """Compare results with the base results and display delta.
-
-        Only boards mentioned in board_selected will be considered. This
-        function is intended to be called repeatedly with the results of
-        each commit. It therefore shows a 'diff' between what it saw in
-        the last call and what it sees now.
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise, keyed
-                by board.target
-            board_dict (dict): Dict containing boards for which we built this
-                commit, keyed by board.target. The value is an Outcome object.
-            err_lines (list): A list of errors for this commit, or [] if there
-                is none, or we don't want to print errors
-            err_line_boards (dict): Dict keyed by error line, containing a list
-                of the Board objects with that error
-            warn_lines (list): A list of warnings for this commit, or [] if
-                there is none, or we don't want to print errors
-            warn_line_boards (dict): Dict keyed by warning line, containing a
-                list of the Board objects with that warning
-            config (dict): Dictionary keyed by filename - e.g. '.config'. Each
-                    value is itself a dictionary:
-                        key: config name
-                        value: config value
-            environment (dict): Dictionary keyed by environment variable, Each
-                     value is the value of environment variable.
-            show_sizes (bool): Show image size deltas
-            show_detail (bool): Show size delta detail for each board if
-                show_sizes
-            show_bloat (bool): Show detail for each function
-            show_config (bool): Show config changes
-            show_environment (bool): Show environment changes
-        """
-        brd_status = ResultHandler.classify_boards(
-            board_selected, board_dict, self._base_board_dict)
-
-        # Get a list of errors and warnings that have appeared, and disappeared
-        better_err, worse_err = ResultHandler.calc_error_delta(
-            self._base_err_lines, self._base_err_line_boards, err_lines,
-            err_line_boards, '', self._opts.list_error_boards)
-        better_warn, worse_warn = ResultHandler.calc_error_delta(
-            self._base_warn_lines, self._base_warn_line_boards, warn_lines,
-            warn_line_boards, 'w', self._opts.list_error_boards)
-
-        # For the IDE mode, print out all the output
-        if self._opts.ide:
-            self._result_handler.print_ide_output(board_selected, board_dict)
-
-        # Display results by arch
-        if not self._opts.ide:
-            self._error_lines += self._result_handler.display_arch_results(
-                board_selected, brd_status, better_err, worse_err, better_warn,
-                worse_warn, self._opts.show_unknown)
-
-        if show_sizes:
-            self._result_handler.print_size_summary(
-                board_selected, board_dict, self._base_board_dict,
-                show_detail, show_bloat)
-
-        if show_environment and self._base_environment:
-            self._result_handler.show_environment_changes(
-                board_selected, board_dict, environment, self._base_environment)
-
-        if show_config and self._base_config:
-            self._result_handler.show_config_changes(
-                board_selected, board_dict, config, self._base_config,
-                self.config_filenames)
-
-
-        # Save our updated information for the next call to this function
-        self._base_board_dict = board_dict
-        self._base_err_lines = err_lines
-        self._base_warn_lines = warn_lines
-        self._base_err_line_boards = err_line_boards
-        self._base_warn_line_boards = warn_line_boards
-        self._base_config = config
-        self._base_environment = environment
-
-        ResultHandler.show_not_built(board_selected, board_dict)
-
     def produce_result_summary(self, commit_upto, commits, board_selected):
         """Produce a summary of the results for a single commit
 
@@ -1135,11 +1020,14 @@ class Builder:
         if commits:
             msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self.col.BLUE)
-        self.print_result_summary(board_selected, board_dict,
-                err_lines if self._opts.show_errors else [], err_line_boards,
-                warn_lines if self._opts.show_errors else [], warn_line_boards,
-                config, environment, self._opts.show_sizes, self._opts.show_detail,
-                self._opts.show_bloat, self._opts.show_config, self._opts.show_environment)
+        self._result_handler.print_result_summary(
+            board_selected, board_dict,
+            err_lines if self._opts.show_errors else [], err_line_boards,
+            warn_lines if self._opts.show_errors else [], warn_line_boards,
+            config, environment, self._opts.show_sizes, self._opts.show_detail,
+            self._opts.show_bloat, self._opts.show_config, self._opts.show_environment,
+            self._opts.show_unknown, self._opts.ide, self._opts.list_error_boards,
+            self.config_filenames)
 
     def show_summary(self, commits, board_selected):
         """Show a build summary for U-Boot for a given board list.
@@ -1153,12 +1041,11 @@ class Builder:
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
-        self.reset_result_summary(board_selected)
-        self._error_lines = 0
+        self._result_handler.reset_result_summary(board_selected)
 
         for commit_upto in range(0, self.commit_count, self._step):
             self.produce_result_summary(commit_upto, commits, board_selected)
-        if not self._error_lines:
+        if not self._result_handler.get_error_lines():
             tprint('(no errors to report)', colour=self.col.GREEN)
 
 
@@ -1328,7 +1215,7 @@ class Builder:
         self.commits = commits
         self._verbose = verbose
 
-        self.reset_result_summary(board_selected)
+        self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
         self._prepare_working_space(min(self.num_threads, len(board_selected)),
                 commits is not None)
