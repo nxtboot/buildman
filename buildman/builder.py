@@ -448,6 +448,11 @@ class Builder:
         self._filter_dtb_warnings = filter_dtb_warnings
         self._filter_migration_warnings = filter_migration_warnings
 
+    @property
+    def result_handler(self):
+        """Get the result handler for this builder"""
+        return self._result_handler
+
     def _add_timestamp(self):
         """Add a new timestamp to the list and record the build period.
 
@@ -573,8 +578,8 @@ class Builder:
                 terminal.print_clear()
                 boards_selected = {target : result.brd}
                 self._result_handler.reset_result_summary(boards_selected)
-                self.produce_result_summary(result.commit_upto, self.commits,
-                                          boards_selected)
+                self._result_handler.produce_result_summary(
+                    result.commit_upto, self.commits, boards_selected)
         else:
             target = '(starting)'
 
@@ -1002,52 +1007,6 @@ class Builder:
 
         return (board_dict, err_lines_summary, err_lines_boards,
                 warn_lines_summary, warn_lines_boards, config, environment)
-
-    def produce_result_summary(self, commit_upto, commits, board_selected):
-        """Produce a summary of the results for a single commit
-
-        Args:
-            commit_upto (int): Commit number to summarise (0..self.count-1)
-            commits (list): List of commits being built
-            board_selected (dict): Dict containing boards to summarise
-        """
-        (board_dict, err_lines, err_line_boards, warn_lines,
-         warn_line_boards, config, environment) = self.get_result_summary(
-                board_selected, commit_upto,
-                read_func_sizes=self._opts.show_bloat,
-                read_config=self._opts.show_config,
-                read_environment=self._opts.show_environment)
-        if commits:
-            msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
-            tprint(msg, colour=self.col.BLUE)
-        self._result_handler.print_result_summary(
-            board_selected, board_dict,
-            err_lines if self._opts.show_errors else [], err_line_boards,
-            warn_lines if self._opts.show_errors else [], warn_line_boards,
-            config, environment, self._opts.show_sizes, self._opts.show_detail,
-            self._opts.show_bloat, self._opts.show_config, self._opts.show_environment,
-            self._opts.show_unknown, self._opts.ide, self._opts.list_error_boards,
-            self.config_filenames)
-
-    def show_summary(self, commits, board_selected):
-        """Show a build summary for U-Boot for a given board list.
-
-        Reset the result summary, then repeatedly call GetResultSummary on
-        each commit's results, then display the differences we see.
-
-        Args:
-            commits (list): Commit objects to summarise
-            board_selected (dict): Dict containing boards to summarise
-        """
-        self.commit_count = len(commits) if commits else 1
-        self.commits = commits
-        self._result_handler.reset_result_summary(board_selected)
-
-        for commit_upto in range(0, self.commit_count, self._step):
-            self.produce_result_summary(commit_upto, commits, board_selected)
-        if not self._result_handler.get_error_lines():
-            tprint('(no errors to report)', colour=self.col.GREEN)
-
 
     def setup_build(self, board_selected, _commits):
         """Set up ready to start a build.

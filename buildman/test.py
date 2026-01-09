@@ -294,7 +294,7 @@ class TestBuildOutput(TestBuildBase):
         self.assertEqual(count, len(COMMITS) * len(BOARDS) + 3)
         build.set_display_options(opts, filter_dtb_warnings,
                                   filter_migration_warnings)
-        build.show_summary(self.commits, board_selected)
+        build._result_handler.show_summary(self.commits, board_selected, 1)
         if echo_lines:
             terminal.echo_print_test_lines()
         return iter(terminal.get_print_test_lines())

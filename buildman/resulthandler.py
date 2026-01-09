@@ -45,6 +45,8 @@ class ResultHandler:
         self._col = col
         self._opts = opts
         self._builder = None
+        self._config_filenames = None
+        self._result_getter = None
         self._error_lines = 0
 
         # Baseline state for result comparisons
@@ -63,6 +65,8 @@ class ResultHandler:
             builder (Builder): Builder object to use for getting results
         """
         self._builder = builder
+        self._config_filenames = builder.config_filenames
+        self._result_getter = builder.get_result_summary
 
     def reset_result_summary(self, board_selected):
         """Reset the results summary ready for use.
@@ -91,10 +95,7 @@ class ResultHandler:
 
     def print_result_summary(self, board_selected, board_dict, err_lines,
                              err_line_boards, warn_lines, warn_line_boards,
-                             config, environment, show_sizes, show_detail,
-                             show_bloat, show_config, show_environment,
-                             show_unknown, ide, list_error_boards,
-                             config_filenames):
+                             config, environment):
         """Compare results with the base results and display delta.
 
         Only boards mentioned in board_selected will be considered. This
@@ -121,16 +122,6 @@ class ResultHandler:
                         value: config value
             environment (dict): Dictionary keyed by environment variable, Each
                      value is the value of environment variable.
-            show_sizes (bool): Show image size deltas
-            show_detail (bool): Show size delta detail for each board if
-                show_sizes
-            show_bloat (bool): Show detail for each function
-            show_config (bool): Show config changes
-            show_environment (bool): Show environment changes
-            show_unknown (bool): Show unknown boards in summary
-            ide (bool): IDE mode - output to stderr
-            list_error_boards (bool): Include board list with error lines
-            config_filenames (list): List of config filenames
         """
         brd_status = self.classify_boards(
             board_selected, board_dict, self._base_board_dict)
@@ -138,34 +129,33 @@ class ResultHandler:
         # Get a list of errors and warnings that have appeared, and disappeared
         better_err, worse_err = self.calc_error_delta(
             self._base_err_lines, self._base_err_line_boards, err_lines,
-            err_line_boards, '', list_error_boards)
+            err_line_boards, '', self._opts.list_error_boards)
         better_warn, worse_warn = self.calc_error_delta(
             self._base_warn_lines, self._base_warn_line_boards, warn_lines,
-            warn_line_boards, 'w', list_error_boards)
+            warn_line_boards, 'w', self._opts.list_error_boards)
 
         # For the IDE mode, print out all the output
-        if ide:
+        if self._opts.ide:
             self.print_ide_output(board_selected, board_dict)
 
         # Display results by arch
-        if not ide:
+        if not self._opts.ide:
             self._error_lines += self.display_arch_results(
                 board_selected, brd_status, better_err, worse_err, better_warn,
-                worse_warn, show_unknown)
+                worse_warn, self._opts.show_unknown)
 
-        if show_sizes:
+        if self._opts.show_sizes:
             self.print_size_summary(
                 board_selected, board_dict, self._base_board_dict,
-                show_detail, show_bloat)
+                self._opts.show_detail, self._opts.show_bloat)
 
-        if show_environment and self._base_environment:
+        if self._opts.show_environment and self._base_environment:
             self.show_environment_changes(
                 board_selected, board_dict, environment, self._base_environment)
 
-        if show_config and self._base_config:
+        if self._opts.show_config and self._base_config:
             self.show_config_changes(
-                board_selected, board_dict, config, self._base_config,
-                config_filenames)
+                board_selected, board_dict, config, self._base_config)
 
         # Save our updated information for the next call to this function
         self._base_board_dict = board_dict
@@ -185,6 +175,47 @@ class ResultHandler:
             int: Number of error lines output
         """
         return self._error_lines
+
+    def produce_result_summary(self, commit_upto, commits, board_selected):
+        """Produce a summary of the results for a single commit
+
+        Args:
+            commit_upto (int): Commit number to summarise (0..count-1)
+            commits (list): List of commits being built
+            board_selected (dict): Dict containing boards to summarise
+        """
+        (board_dict, err_lines, err_line_boards, warn_lines,
+         warn_line_boards, config, environment) = self._result_getter(
+                board_selected, commit_upto, self._opts.show_bloat,
+                self._opts.show_config, self._opts.show_environment)
+        if commits:
+            msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
+            tprint(msg, colour=self._col.BLUE)
+        self.print_result_summary(
+            board_selected, board_dict,
+            err_lines if self._opts.show_errors else [], err_line_boards,
+            warn_lines if self._opts.show_errors else [], warn_line_boards,
+            config, environment)
+
+    def show_summary(self, commits, board_selected, step):
+        """Show a build summary for U-Boot for a given board list.
+
+        Reset the result summary, then repeatedly call produce_result_summary
+        on each commit's results, then display the differences we see.
+
+        Args:
+            commits (list): Commit objects to summarise
+            board_selected (dict): Dict containing boards to summarise
+            step (int): Step size for iterating through commits
+        """
+        commit_count = len(commits) if commits else 1
+        self.reset_result_summary(board_selected)
+
+        for commit_upto in range(0, commit_count, step):
+            self.produce_result_summary(
+                commit_upto, commits, board_selected)
+        if not self.get_error_lines():
+            tprint('(no errors to report)', colour=self._col.GREEN)
 
     def print_build_summary(self, count, already_done, kconfig_reconfig,
                             start_time, thread_exceptions):
@@ -706,7 +737,7 @@ class ResultHandler:
                            environment_minus, environment_change)
         self.output_config_info(lines)
 
-    def calc_config_changes(self, target, config, base_config, config_filenames,
+    def calc_config_changes(self, target, config, base_config,
                             arch, arch_config_plus, arch_config_minus,
                             arch_config_change):
         """Calculate configuration changes for a single target
@@ -715,7 +746,6 @@ class ResultHandler:
             target (str): Target board name
             config (dict): Dict of config changes, keyed by board.target
             base_config (dict): Dict of base config, keyed by board.target
-            config_filenames (list): List of config filenames to check
             arch (str): Architecture name
             arch_config_plus (dict): Dict to update with added configs by arch
             arch_config_minus (dict): Dict to update with removed configs by
@@ -732,7 +762,7 @@ class ResultHandler:
         tbase = base_config[target]
         tconfig = config[target]
         lines = []
-        for name in config_filenames:
+        for name in self._config_filenames:
             if not tconfig.config[name]:
                 continue
             config_plus = {}
@@ -765,8 +795,7 @@ class ResultHandler:
         return '\n'.join(lines)
 
     def print_arch_config_summary(self, arch, arch_config_plus,
-                                  arch_config_minus, arch_config_change,
-                                  config_filenames):
+                                  arch_config_minus, arch_config_change):
         """Print configuration summary for a single architecture
 
         Args:
@@ -774,13 +803,12 @@ class ResultHandler:
             arch_config_plus (dict): Dict of added configs by arch/filename
             arch_config_minus (dict): Dict of removed configs by arch/filename
             arch_config_change (dict): Dict of changed configs by arch/filename
-            config_filenames (list): List of config filenames to check
         """
         lines = []
         all_plus = {}
         all_minus = {}
         all_change = {}
-        for name in config_filenames:
+        for name in self._config_filenames:
             all_plus.update(arch_config_plus[arch][name])
             all_minus.update(arch_config_minus[arch][name])
             all_change.update(arch_config_change[arch][name])
@@ -794,7 +822,7 @@ class ResultHandler:
             self.output_config_info(lines)
 
     def show_config_changes(self, board_selected, board_dict, config,
-                            base_config, config_filenames):
+                            base_config):
         """Show changes in configuration
 
         Args:
@@ -804,7 +832,6 @@ class ResultHandler:
                 commit, keyed by board.target. The value is an Outcome object.
             config (dict): Dict of config changes, keyed by board.target
             base_config (dict): Dict of base config, keyed by board.target
-            config_filenames (list): List of config filenames to check
         """
         summary = {}
         arch_config_plus = {}
@@ -823,7 +850,7 @@ class ResultHandler:
             arch_config_plus[arch] = {}
             arch_config_minus[arch] = {}
             arch_config_change[arch] = {}
-            for name in config_filenames:
+            for name in self._config_filenames:
                 arch_config_plus[arch][name] = {}
                 arch_config_minus[arch][name] = {}
                 arch_config_change[arch][name] = {}
@@ -833,7 +860,7 @@ class ResultHandler:
                 continue
             arch = board_selected[target].arch
             summary[target] = self.calc_config_changes(
-                target, config, base_config, config_filenames, arch,
+                target, config, base_config, arch,
                 arch_config_plus, arch_config_minus, arch_config_change)
 
         lines_by_target = {}
@@ -846,7 +873,7 @@ class ResultHandler:
         for arch in arch_list:
             self.print_arch_config_summary(arch, arch_config_plus,
                                           arch_config_minus,
-                                          arch_config_change, config_filenames)
+                                          arch_config_change)
 
         for lines, targets in lines_by_target.items():
             if not lines:
