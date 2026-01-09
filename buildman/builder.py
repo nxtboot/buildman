@@ -1938,6 +1938,11 @@ class Builder:
     def _show_not_built(board_selected, board_dict):
         """Show boards that were not built
 
+        This reports boards that are in board_selected but have no outcome in
+        board_dict. In practice this is unlikely to happen since
+        get_result_summary() creates an outcome for every board, even if just
+        OUTCOME_UNKNOWN.
+
         Args:
             board_selected (dict): Dict of selected boards, keyed by target
             board_dict (dict): Dict of boards that were built, keyed by target

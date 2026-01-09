@@ -590,6 +590,31 @@ Some images are invalid'''
                        f"No tool chain found for arch '{brd.arch}'"])
                   fd.close()
 
+    def testToolchainErrors(self):
+        """Test that toolchain errors are reported in the summary
+
+        When toolchains are missing, boards fail to build. The summary
+        should report which boards had errors, grouped by architecture.
+        """
+        self.setupToolchains()
+        # Build with missing toolchains - only sandbox will succeed
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+
+        # Now show summary - should report boards with errors
+        terminal.get_print_test_lines()  # Clear
+        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
+                         clean_dir=False)
+        lines = terminal.get_print_test_lines()
+        text = '\n'.join(line.text for line in lines)
+
+        # Check that boards with missing toolchains are shown with errors
+        # The '+' prefix indicates new errors for these boards
+        self.assertIn('arm:', text)
+        self.assertIn('board0', text)
+        self.assertIn('board1', text)
+        self.assertIn('powerpc:', text)
+        self.assertIn('board2', text)
+
     def testBranch(self):
         """Test building a branch with all toolchains present"""
         self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)

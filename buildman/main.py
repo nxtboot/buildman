@@ -56,6 +56,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_builder.TestPrintFuncSizeDetail,
          test_builder.TestPrepareThread,
          test_builder.TestPrepareWorkingSpace,
+         test_builder.TestShowNotBuilt,
          test_builder.TestPrepareOutputSpace,
          'buildman.toolchain'])
 

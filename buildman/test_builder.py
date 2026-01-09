@@ -339,6 +339,59 @@ class TestPrepareWorkingSpace(unittest.TestCase):
         mock_prepare_thread.assert_any_call(1, True)
 
 
+class TestShowNotBuilt(unittest.TestCase):
+    """Tests for Builder._show_not_built()"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def test_all_boards_built(self):
+        """Test when all selected boards were built"""
+        board_selected = {'board1': None, 'board2': None}
+        board_dict = {'board1': None, 'board2': None}
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        # No output when all boards were built
+        self.assertEqual(len(lines), 0)
+
+    def test_some_boards_not_built(self):
+        """Test when some boards were not built"""
+        board_selected = {'board1': None, 'board2': None, 'board3': None}
+        board_dict = {'board1': None}  # Only board1 was built
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Boards not built', lines[0].text)
+        self.assertIn('2', lines[0].text)  # Count of not-built boards
+        self.assertIn('board2', lines[0].text)
+        self.assertIn('board3', lines[0].text)
+
+    def test_no_boards_built(self):
+        """Test when no boards were built"""
+        board_selected = {'board1': None, 'board2': None}
+        board_dict = {}  # No boards built
+
+        terminal.get_print_test_lines()  # Clear
+        builder.Builder._show_not_built(board_selected, board_dict)
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn('Boards not built', lines[0].text)
+        self.assertIn('board1', lines[0].text)
+        self.assertIn('board2', lines[0].text)
+
+
 class TestPrepareOutputSpace(unittest.TestCase):
     """Tests for Builder._prepare_output_space() and _get_output_space_removals()"""
 
