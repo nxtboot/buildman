@@ -364,7 +364,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
 
 class TestShowNotBuilt(unittest.TestCase):
-    """Tests for Builder._show_not_built()"""
+    """Tests for ResultHandler.show_not_built()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -382,8 +382,8 @@ class TestShowNotBuilt(unittest.TestCase):
         return outcome
 
     def _show_not_built(self, board_selected, board_dict):
-        """Helper to call Builder._show_not_built"""
-        builder.Builder._show_not_built(board_selected, board_dict)
+        """Helper to call ResultHandler.show_not_built"""
+        ResultHandler.show_not_built(board_selected, board_dict)
 
     def test_all_boards_built(self):
         """Test when all selected boards were built successfully"""
@@ -394,7 +394,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # No output when all boards were built
@@ -410,7 +410,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)
@@ -428,7 +428,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)
@@ -446,7 +446,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # Build errors are still "built", just with errors
@@ -464,7 +464,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # Only toolchain errors count as "not built"
@@ -483,7 +483,7 @@ class TestShowNotBuilt(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)

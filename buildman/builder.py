@@ -1034,289 +1034,6 @@ class Builder:
         self._base_config = None
         self._base_environment = None
 
-    def _classify_boards(self, board_selected, board_dict):
-        """Classify boards into outcome categories
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise, keyed
-                by board.target
-            board_dict (dict): Dict containing boards for which we built this
-                commit, keyed by board.target. The value is an Outcome object.
-
-        Returns:
-            BoardStatus: Named tuple containing lists of board targets
-        """
-        ok = []      # List of boards fixed since last commit
-        warn = []    # List of boards with warnings since last commit
-        err = []     # List of new broken boards since last commit
-        new = []     # List of boards that didn't exist last time
-        unknown = [] # List of boards that were not built
-
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-
-            # If the board was built last time, add its outcome to a list
-            if target in self._base_board_dict:
-                base_outcome = self._base_board_dict[target].rc
-                outcome = board_dict[target]
-                if outcome.rc == OUTCOME_UNKNOWN:
-                    unknown.append(target)
-                elif outcome.rc < base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn.append(target)
-                    else:
-                        ok.append(target)
-                elif outcome.rc > base_outcome:
-                    if outcome.rc == OUTCOME_WARNING:
-                        warn.append(target)
-                    else:
-                        err.append(target)
-            else:
-                new.append(target)
-        return BoardStatus(ok, warn, err, new, unknown)
-
-    @staticmethod
-    def _calc_config(delta, name, config):
-        """Calculate configuration changes
-
-        Args:
-            delta: Type of the delta, e.g. '+'
-            name: name of the file which changed (e.g. .config)
-            config: configuration change dictionary
-                key: config name
-                value: config value
-        Returns:
-            String containing the configuration changes which can be
-                printed
-        """
-        out = ''
-        for key in sorted(config.keys()):
-            out += f'{key}={config[key]} '
-        return f'{delta} {name}: {out}'
-
-    @classmethod
-    def _add_config(cls, lines, name, config_plus, config_minus, config_change):
-        """Add changes in configuration to a list
-
-        Args:
-            lines: list to add to
-            name: config file name
-            config_plus: configurations added, dictionary
-                key: config name
-                value: config value
-            config_minus: configurations removed, dictionary
-                key: config name
-                value: config value
-            config_change: configurations changed, dictionary
-                key: config name
-                value: config value
-        """
-        if config_plus:
-            lines.append(cls._calc_config('+', name, config_plus))
-        if config_minus:
-            lines.append(cls._calc_config('-', name, config_minus))
-        if config_change:
-            lines.append(cls._calc_config('c', name, config_change))
-
-    def _output_config_info(self, lines):
-        """Output configuration change information
-
-        Args:
-            lines: List of configuration change strings
-        """
-        for line in lines:
-            if not line:
-                continue
-            col = None
-            if line[0] == '+':
-                col = self.col.GREEN
-            elif line[0] == '-':
-                col = self.col.RED
-            elif line[0] == 'c':
-                col = self.col.YELLOW
-            tprint('   ' + line, newline=True, colour=col)
-
-    def _show_environment_changes(self, board_selected, board_dict,
-                                  environment):
-        """Show changes in environment variables
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise, keyed
-                by board.target
-            board_dict (dict): Dict containing boards for which we built this
-                commit, keyed by board.target. The value is an Outcome object.
-            environment (dict): Dict of environment changes, keyed by
-                board.target
-        """
-        lines = []
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-
-            tbase = self._base_environment[target]
-            tenvironment = environment[target]
-            environment_plus = {}
-            environment_minus = {}
-            environment_change = {}
-            base = tbase.environment
-            for key, value in tenvironment.environment.items():
-                if key not in base:
-                    environment_plus[key] = value
-            for key, value in base.items():
-                if key not in tenvironment.environment:
-                    environment_minus[key] = value
-            for key, value in base.items():
-                new_value = tenvironment.environment.get(key)
-                if new_value and value != new_value:
-                    desc = f'{value} -> {new_value}'
-                    environment_change[key] = desc
-
-            self._add_config(lines, target, environment_plus,
-                             environment_minus, environment_change)
-        self._output_config_info(lines)
-
-    def _calc_config_changes(self, target, arch, config, arch_config_plus,
-                              arch_config_minus, arch_config_change):
-        """Calculate configuration changes for a single target
-
-        Args:
-            target (str): Target board name
-            arch (str): Architecture name
-            config (dict): Dict of config changes, keyed by board.target
-            arch_config_plus (dict): Dict to update with added configs by
-                arch
-            arch_config_minus (dict): Dict to update with removed configs by
-                arch
-            arch_config_change (dict): Dict to update with changed configs by
-                arch
-
-        Returns:
-            str: Summary of config changes for this target
-        """
-        all_config_plus = {}
-        all_config_minus = {}
-        all_config_change = {}
-        tbase = self._base_config[target]
-        tconfig = config[target]
-        lines = []
-        for name in self.config_filenames:
-            if not tconfig.config[name]:
-                continue
-            config_plus = {}
-            config_minus = {}
-            config_change = {}
-            base = tbase.config[name]
-            for key, value in tconfig.config[name].items():
-                if key not in base:
-                    config_plus[key] = value
-                    all_config_plus[key] = value
-            for key, value in base.items():
-                if key not in tconfig.config[name]:
-                    config_minus[key] = value
-                    all_config_minus[key] = value
-            for key, value in base.items():
-                new_value = tconfig.config[name].get(key)
-                if new_value and value != new_value:
-                    desc = f'{value} -> {new_value}'
-                    config_change[key] = desc
-                    all_config_change[key] = desc
-
-            arch_config_plus[arch][name].update(config_plus)
-            arch_config_minus[arch][name].update(config_minus)
-            arch_config_change[arch][name].update(config_change)
-
-            self._add_config(lines, name, config_plus, config_minus,
-                             config_change)
-        self._add_config(lines, 'all', all_config_plus,
-                         all_config_minus, all_config_change)
-        return '\n'.join(lines)
-
-    def _print_arch_config_summary(self, arch, arch_config_plus,
-                                    arch_config_minus, arch_config_change):
-        """Print configuration summary for a single architecture
-
-        Args:
-            arch (str): Architecture name
-            arch_config_plus (dict): Dict of added configs by arch/filename
-            arch_config_minus (dict): Dict of removed configs by arch/filename
-            arch_config_change (dict): Dict of changed configs by arch/filename
-        """
-        lines = []
-        all_plus = {}
-        all_minus = {}
-        all_change = {}
-        for name in self.config_filenames:
-            all_plus.update(arch_config_plus[arch][name])
-            all_minus.update(arch_config_minus[arch][name])
-            all_change.update(arch_config_change[arch][name])
-            self._add_config(lines, name,
-                             arch_config_plus[arch][name],
-                             arch_config_minus[arch][name],
-                             arch_config_change[arch][name])
-        self._add_config(lines, 'all', all_plus, all_minus, all_change)
-        if lines:
-            tprint(f'{arch}:')
-            self._output_config_info(lines)
-
-    def _show_config_changes(self, board_selected, board_dict, config):
-        """Show changes in configuration
-
-        Args:
-            board_selected (dict): Dict containing boards to summarise, keyed
-                by board.target
-            board_dict (dict): Dict containing boards for which we built this
-                commit, keyed by board.target. The value is an Outcome object.
-            config (dict): Dict of config changes, keyed by board.target
-        """
-        summary = {}
-        arch_config_plus = {}
-        arch_config_minus = {}
-        arch_config_change = {}
-        arch_list = []
-
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-            arch = board_selected[target].arch
-            if arch not in arch_list:
-                arch_list.append(arch)
-
-        for arch in arch_list:
-            arch_config_plus[arch] = {}
-            arch_config_minus[arch] = {}
-            arch_config_change[arch] = {}
-            for name in self.config_filenames:
-                arch_config_plus[arch][name] = {}
-                arch_config_minus[arch][name] = {}
-                arch_config_change[arch][name] = {}
-
-        for target in board_dict:
-            if target not in board_selected:
-                continue
-            arch = board_selected[target].arch
-            summary[target] = self._calc_config_changes(
-                target, arch, config, arch_config_plus, arch_config_minus,
-                arch_config_change)
-
-        lines_by_target = {}
-        for target, lines in summary.items():
-            if lines in lines_by_target:
-                lines_by_target[lines].append(target)
-            else:
-                lines_by_target[lines] = [target]
-
-        for arch in arch_list:
-            self._print_arch_config_summary(arch, arch_config_plus,
-                                            arch_config_minus,
-                                            arch_config_change)
-
-        for lines, targets in lines_by_target.items():
-            if not lines:
-                continue
-            tprint(f"{' '.join(sorted(targets))} :")
-            self._output_config_info(lines.split('\n'))
-
     def print_result_summary(self, board_selected, board_dict, err_lines,
                            err_line_boards, warn_lines, warn_line_boards,
                            config, environment, show_sizes, show_detail,
@@ -1407,7 +1124,8 @@ class Builder:
                     better_lines.append(errline)
             return better_lines, worse_lines
 
-        brd_status = self._classify_boards(board_selected, board_dict)
+        brd_status = ResultHandler.classify_boards(
+            board_selected, board_dict, self._base_board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
         better_err, worse_err = _calc_error_delta(self._base_err_lines,
@@ -1431,11 +1149,13 @@ class Builder:
                 show_detail, show_bloat)
 
         if show_environment and self._base_environment:
-            self._show_environment_changes(board_selected, board_dict,
-                                           environment)
+            self._result_handler.show_environment_changes(
+                board_selected, board_dict, environment, self._base_environment)
 
         if show_config and self._base_config:
-            self._show_config_changes(board_selected, board_dict, config)
+            self._result_handler.show_config_changes(
+                board_selected, board_dict, config, self._base_config,
+                self.config_filenames)
 
 
         # Save our updated information for the next call to this function
@@ -1447,37 +1167,7 @@ class Builder:
         self._base_config = config
         self._base_environment = environment
 
-        self._show_not_built(board_selected, board_dict)
-
-    @staticmethod
-    def _show_not_built(board_selected, board_dict):
-        """Show boards that were not built
-
-        This reports boards that couldn't be built due to toolchain issues.
-        These have OUTCOME_UNKNOWN (no result file) or OUTCOME_ERROR with
-        "Tool chain error" in the error lines.
-
-        Args:
-            board_selected (dict): Dict of selected boards, keyed by target
-            board_dict (dict): Dict of boards that were built, keyed by target
-        """
-        not_built = []
-        for target in board_selected:
-            if target not in board_dict:
-                not_built.append(target)
-            else:
-                outcome = board_dict[target]
-                if outcome.rc == OUTCOME_UNKNOWN:
-                    not_built.append(target)
-                elif outcome.rc == OUTCOME_ERROR:
-                    # Check for toolchain error in the error lines
-                    for line in outcome.err_lines:
-                        if 'Tool chain error' in line:
-                            not_built.append(target)
-                            break
-        if not_built:
-            tprint(f"Boards not built ({len(not_built)}): "
-                   f"{', '.join(not_built)}")
+        ResultHandler.show_not_built(board_selected, board_dict)
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
         """Produce a summary of the results for a single commit
