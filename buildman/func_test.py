@@ -309,9 +309,9 @@ class TestFunctional(unittest.TestCase):
             args = args[:-1]
         if '-n0' in args:
             return command.CommandResult(return_code=0)
-        elif args[-1] == f'upstream/master..{self._test_branch}':
+        if args[-1] == f'upstream/master..{self._test_branch}':
             return command.CommandResult(return_code=0, stdout=COMMIT_SHORTLOG)
-        elif args[:3] == ['--no-color', '--no-decorate', '--reverse']:
+        if args[:3] == ['--no-color', '--no-decorate', '--reverse']:
             if args[-1] == self._test_branch:
                 count = int(args[3][2:])
                 return command.CommandResult(return_code=0,
@@ -325,11 +325,11 @@ class TestFunctional(unittest.TestCase):
         config = args[0]
         if config == 'sendemail.aliasesfile':
             return command.CommandResult(return_code=0)
-        elif config.startswith('branch.badbranch'):
+        if config.startswith('branch.badbranch'):
             return command.CommandResult(return_code=1)
-        elif config == f'branch.{self._test_branch}.remote':
+        if config == f'branch.{self._test_branch}.remote':
             return command.CommandResult(return_code=0, stdout='upstream\n')
-        elif config == f'branch.{self._test_branch}.merge':
+        if config == f'branch.{self._test_branch}.merge':
             return command.CommandResult(return_code=0,
                                          stdout='refs/heads/master\n')
 
@@ -360,13 +360,13 @@ class TestFunctional(unittest.TestCase):
                     sub_cmd = arg
         if sub_cmd == 'config':
             return self._handle_command_git_config(args)
-        elif sub_cmd == 'log':
+        if sub_cmd == 'log':
             return self._handle_command_git_log(args)
-        elif sub_cmd == 'clone':
+        if sub_cmd == 'clone':
             return command.CommandResult(return_code=0)
-        elif sub_cmd == 'checkout':
+        if sub_cmd == 'checkout':
             return command.CommandResult(return_code=0)
-        elif sub_cmd == 'worktree':
+        if sub_cmd == 'worktree':
             return command.CommandResult(return_code=0)
 
         # Not handled, so abort
@@ -498,7 +498,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 out_dir = arg[2:]
         if stage == 'mrproper':
             return command.CommandResult(return_code=0)
-        elif stage == 'config':
+        if stage == 'config':
             fname = os.path.join(cwd or '', out_dir, '.config')
             # Vary config based on commit to simulate config changes
             seq = commit.sequence if hasattr(commit, 'sequence') else 0
@@ -514,9 +514,9 @@ Idx Name          Size      VMA       LMA       File off  Algn
             tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
             return command.CommandResult(return_code=0,
                     combined='Test configuration complete')
-        elif stage == 'oldconfig':
+        if stage == 'oldconfig':
             return command.CommandResult(return_code=0)
-        elif stage == 'build':
+        if stage == 'build':
             stderr = ''
             fname = os.path.join(cwd or '', out_dir, 'u-boot')
             tools.write_file(fname, b'U-Boot')
@@ -1271,13 +1271,13 @@ Active  aarch64     armv8 - armltd total_compute board2
         # Add another TARGET to the Kconfig
         tools.write_file(main, both_data, binary=False)
         orig_kc_data = tools.read_file(kc_file)
-        extra = (b'''
+        extra = b'''
 if TARGET_BOARD2
 config TARGET_OTHER
 \tbool "other"
 \tdefault y
 endif
-''')
+'''
         tools.write_file(kc_file, orig_kc_data + extra)
         params_list, warnings = self._boards.build_board_list(config_dir, src,
                                                               warn_targets=True)
@@ -1591,4 +1591,3 @@ something: me
 
         # No reconfigs should be triggered
         self.assertEqual(0, self._builder.kconfig_reconfig)
-
