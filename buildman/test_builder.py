@@ -24,9 +24,10 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         # Create a minimal Builder for testing
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp', git_dir=None, num_threads=0,
-            num_jobs=1)
+            num_jobs=1, col=self.col)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -153,9 +154,10 @@ class TestPrepareThread(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -267,9 +269,10 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -477,9 +480,10 @@ class TestPrepareOutputSpace(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -560,9 +564,10 @@ class TestCheckOutputForLoop(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
         # Reset state before each test
         self.builder._restarting_config = False
         self.builder._terminated = False
@@ -639,9 +644,10 @@ class TestMake(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
 
     @mock.patch('buildman.builder.command.run_one')
     def test_make_basic(self, mock_run_one):
@@ -731,9 +737,10 @@ class TestPrintBuildSummary(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col)
         # Set a start time in the past (less than 1 second ago to avoid
         # duration output)
         self.builder._start_time = datetime.now()

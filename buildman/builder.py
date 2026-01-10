@@ -216,7 +216,7 @@ class Builder:
     """
 
     def __init__(self, toolchains, base_dir, git_dir, num_threads, num_jobs,
-                 gnu_make='make', checkout=True, step=1,
+                 col, gnu_make='make', checkout=True, step=1,
                  no_subdirs=False, full_path=False, verbose_build=False,
                  mrproper=False, fallback_mrproper=False,
                  per_board_out_dir=False, config_only=False,
@@ -236,6 +236,7 @@ class Builder:
             git_dir: Git directory containing source repository
             num_threads: Number of builder threads to run
             num_jobs: Number of jobs to run at once (passed to make as -j)
+            col: terminal.Color object for coloured output
             gnu_make: the command name of GNU Make.
             checkout: True to check out source, False to skip that step.
                 This is used for testing.
@@ -335,7 +336,7 @@ class Builder:
         self._restarting_config = False
 
         self.warnings_as_errors = warnings_as_errors
-        self.col = terminal.Color()
+        self.col = col
 
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions

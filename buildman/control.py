@@ -809,9 +809,12 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     if args.config_only and args.target:
         raise ValueError('Cannot use --config-only with --target')
 
+    # Create colour object for output
+    col = terminal.Color()
+
     # Create a new builder with the selected args
     builder = Builder(toolchains, output_dir, git_dir,
-            args.threads, args.jobs, checkout=True, step=args.step,
+            args.threads, args.jobs, col=col, checkout=True, step=args.step,
             no_subdirs=args.no_subdirs, full_path=args.full_path,
             verbose_build=args.verbose_build,
             mrproper=args.mrproper,
