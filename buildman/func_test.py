@@ -552,7 +552,7 @@ Some images are invalid'''
 
     def test_current_source(self):
         """Very simple test to invoke buildman on the current source"""
-        self.setup_toolchains();
+        self.setup_toolchains()
         self._run_control('-o', self._output_dir)
         lines = terminal.get_print_test_lines()
         self.assertIn('Building current source for %d boards' % len(BOARDS),
@@ -565,7 +565,7 @@ Some images are invalid'''
 
     def test_bad_toolchain(self):
         """Test that missing toolchains are detected"""
-        self.setup_toolchains();
+        self.setup_toolchains()
         ret_code = self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         lines = terminal.get_print_test_lines()
 
