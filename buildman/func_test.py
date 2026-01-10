@@ -290,7 +290,6 @@ class TestFunctional(unittest.TestCase):
         """Test that -h shows help text"""
         command.TEST_RESULT = None
         result = self._run_buildman('-h')
-        help_file = os.path.join(self._buildman_dir, 'README.rst')
         self.assertTrue(len(result.stdout) > 1000)
         self.assertEqual(0, len(result.stderr))
         self.assertEqual(0, result.return_code)
@@ -374,7 +373,7 @@ class TestFunctional(unittest.TestCase):
         print('git', git_args, sub_cmd, args)
         sys.exit(1)
 
-    def _handle_command_nm(self, args):
+    def _handle_command_nm(self, _args):
         # Return nm --size-sort output with function sizes that vary between
         # calls to simulate changes between commits
         self._nm_calls = getattr(self, '_nm_calls', 0) + 1
@@ -386,7 +385,7 @@ class TestFunctional(unittest.TestCase):
 '''
         return command.CommandResult(return_code=0, stdout=stdout)
 
-    def _handle_command_objdump(self, args):
+    def _handle_command_objdump(self, _args):
         # Return objdump -h output with .rodata section
         stdout = '''
 u-boot:     file format elf32-littlearm
@@ -399,7 +398,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
 '''
         return command.CommandResult(return_code=0, stdout=stdout)
 
-    def _handle_command_objcopy(self, args):
+    def _handle_command_objcopy(self, _args):
         return command.CommandResult(return_code=0)
 
     def _handle_command_size(self, args):
@@ -478,7 +477,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
             result.stdout = len(result.stdout.splitlines())
         return result
 
-    def _handle_make(self, commit, brd, stage, cwd, *args, **kwargs):
+    def _handle_make(self, commit, brd, stage, cwd, *args, **_kwargs):
         """Handle execution of 'make'
 
         Args:
@@ -935,7 +934,7 @@ Some images are invalid'''
 
     def test_thread_exceptions(self):
         """Test that exceptions in threads are reported"""
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _stderr):
             self.assertEqual(102, self._run_control('-o', self._output_dir,
                                                    test_thread_exceptions=True))
         self.assertIn(
@@ -948,7 +947,6 @@ Some images are invalid'''
 
         board0_dir = os.path.join(self._output_dir, 'current', 'board0')
         errfile = os.path.join(board0_dir, 'err')
-        logfile = os.path.join(board0_dir, 'log')
 
         # We expect failure when there are missing blobs
         result = self._run_control('board0', '-o', self._output_dir)
@@ -1067,13 +1065,13 @@ Some images are invalid'''
         """Test passing of configuration fragments to the make command"""
         # Single fragment passed as argument
         extra_args = ['board0', '--fragments', 'f1.config']
-        lines, cfg_data = self.check_command(*extra_args)
+        lines, _cfg_data = self.check_command(*extra_args)
         self.assertRegex(lines[0].decode('utf-8'),
                          r'make O=/.*board0_defconfig\s+f1\.config',
                          'Test single fragment')
         # Multiple fragments passed as comma-separated list
         extra_args = ['board0', '--fragments', 'f1.config,f2.config']
-        lines, cfg_data = self.check_command(*extra_args)
+        lines, _cfg_data = self.check_command(*extra_args)
         self.assertRegex(lines[0].decode('utf-8'),
                          r'make O=/.*board0_defconfig\s+f1\.config\s+f2\.config',
                          'Test multiple fragments')
@@ -1088,7 +1086,7 @@ Some images are invalid'''
 # CONFIG_LOCALVERSION_AUTO is not set
 ''', cfg_data)
 
-        with terminal.capture() as (stdout, stderr):
+        with terminal.capture() as (stdout, _stderr):
             lines, cfg_data = self.check_command('-r', '-a', 'LOCALVERSION')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
 
@@ -1312,15 +1310,14 @@ endif
         outfile = os.path.join(self._output_dir, 'test-boards.cfg')
         if os.path.exists(outfile):
             os.remove(outfile)
-        with terminal.capture() as (stdout, stderr):
-            result = self._run_control('-R', outfile, brds=None,
-                                      get_builder=False)
+        with terminal.capture() as (_stdout, _stderr):
+            self._run_control('-R', outfile, brds=None, get_builder=False)
         self.assertTrue(os.path.exists(outfile))
 
     def test_print_prefix(self):
         """Test that we can print the toolchain prefix"""
         with terminal.capture() as (stdout, stderr):
-            result = self._run_control('-A', 'board0')
+            self._run_control('-A', 'board0')
         self.assertEqual('arm-\n', stdout.getvalue())
         self.assertEqual('', stderr.getvalue())
 
@@ -1364,7 +1361,7 @@ endif
     def test_print_arch(self):
         """Test that we can print the board architecture"""
         with terminal.capture() as (stdout, stderr):
-            result = self._run_control('--print-arch', 'board0')
+            self._run_control('--print-arch', 'board0')
         self.assertEqual('arm\n', stdout.getvalue())
         self.assertEqual('', stderr.getvalue())
 
