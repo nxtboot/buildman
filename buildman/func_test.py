@@ -52,8 +52,10 @@ chromeos_peach=VBOOT=${chroot}/build/peach_pit/usr ${vboot}
 BOARDS = [
     ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 0', 'board0',  ''],
     ['Active', 'arm', 'armv7', '', 'Tester', 'ARM Board 1', 'board1', ''],
-    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC board 1', 'board2', ''],
-    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board', 'board4', ''],
+    ['Active', 'powerpc', 'powerpc', '', 'Tester', 'PowerPC board 1', 'board2',
+     ''],
+    ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board', 'board4',
+     ''],
 ]
 
 COMMIT_SHORTLOG = """4aca821 patman: Avoid changing the order of tags
@@ -221,6 +223,16 @@ class TestFunctional(unittest.TestCase):
         # Set to True to report missing blobs
         self._missing = False
 
+        # Builder instance from control module (set by _run_control)
+        self._builder = None
+
+        # Counters for mock command handlers
+        self._nm_calls = 0
+        self._size_calls = 0
+
+        # Captured make arguments for testing
+        self._captured_make_args = []
+
         self._buildman_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
         self._test_dir = os.path.join(self._buildman_dir, 'test')
 
@@ -252,11 +264,11 @@ class TestFunctional(unittest.TestCase):
             args: List of arguments to pass
             brds: Boards object, or False to pass self._boards, or None to pass
                 None
-            clean_dir: Used for tests only, indicates that the existing output_dir
-                should be removed before starting the build
-            test_thread_exceptions: Uses for tests only, True to make the threads
-                raise an exception instead of reporting their result. This simulates
-                a failure in the code somewhere
+            clean_dir: Used for tests only, indicates that the existing
+                output_dir should be removed before starting the build
+            test_thread_exceptions: Uses for tests only, True to make the
+                threads raise an exception instead of reporting their result.
+                This simulates a failure in the code somewhere
             get_builder (bool): Set self._builder to the resulting builder
 
         Returns:
@@ -376,7 +388,7 @@ class TestFunctional(unittest.TestCase):
     def _handle_command_nm(self, _args):
         # Return nm --size-sort output with function sizes that vary between
         # calls to simulate changes between commits
-        self._nm_calls = getattr(self, '_nm_calls', 0) + 1
+        self._nm_calls += 1
         base = self._nm_calls * 0x10
         stdout = f'''{0x100 + base:08x} T main
 {0x80 + base:08x} T board_init
@@ -404,7 +416,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
     def _handle_command_size(self, args):
         # Return size output - vary the size based on call count to simulate
         # changes between commits
-        self._size_calls = getattr(self, '_size_calls', 0) + 1
+        self._size_calls += 1
         text = 10000 + self._size_calls * 100
         data = 1000
         bss = 500
@@ -524,12 +536,15 @@ Idx Name          Size      VMA       LMA       File off  Algn
             # Handle missing blobs
             if self._missing:
                 if 'BINMAN_ALLOW_MISSING=1' in args:
-                    stderr = '''+Image 'main-section' is missing external blobs and is non-functional: intel-descriptor intel-ifwi intel-fsp-m intel-fsp-s intel-vbt
-Image 'main-section' has faked external blobs and is non-functional: descriptor.bin fsp_m.bin fsp_s.bin vbt.bin
-
-Some images are invalid'''
+                    stderr = ("+Image 'main-section' is missing external "
+                              'blobs and is non-functional: intel-descriptor '
+                              'intel-ifwi intel-fsp-m intel-fsp-s intel-vbt\n'
+                              "Image 'main-section' has faked external blobs "
+                              'and is non-functional: descriptor.bin fsp_m.bin '
+                              'fsp_s.bin vbt.bin\n\nSome images are invalid')
                 else:
-                    stderr = "binman: Filename 'fsp.bin' not found in input path"
+                    stderr = ("binman: Filename 'fsp.bin' not found in "
+                              'input path')
             elif type(commit) is not str:
                 stderr = self._error.get((brd.target, commit.sequence))
             else:
@@ -581,8 +596,9 @@ Some images are invalid'''
         lines = terminal.get_print_test_lines()
 
         # Buildman always builds the upstream commit as well
-        self.assertIn(f'Building {self._commits} commits for {len(BOARDS)} boards',
-                      lines[0].text)
+        self.assertIn(
+            f'Building {self._commits} commits for {len(BOARDS)} boards',
+            lines[0].text)
         self.assertEqual(self._builder.count, self._total_builds)
 
         # Only sandbox should succeed, the others don't have toolchains
@@ -824,7 +840,8 @@ Some images are invalid'''
         # Each board has a mrproper, config, and then one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (self._commits + 1))
         self._make_calls = 0
-        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir,
+                          clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
@@ -833,7 +850,8 @@ Some images are invalid'''
         """The -f flag should force a rebuild"""
         self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self._make_calls = 0
-        self._run_control('-b', TEST_BRANCH, '-f', '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-f', '-o', self._output_dir,
+                          clean_dir=False)
         # Each board has a config and one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (self._commits + 1))
 
@@ -860,13 +878,15 @@ Some images are invalid'''
         # not be rebuilt
         del self._error['board2', 1]
         self._make_calls = 0
-        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir,
+                          clean_dir=False)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._make_calls, 0)
         self.assertEqual(self._builder.fail, 1)
 
         # Now use the -F flag to force rebuild of the bad commit
-        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-F', clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-F',
+                          clean_dir=False)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
         self.assertEqual(self._make_calls, 2)
@@ -1072,9 +1092,10 @@ Some images are invalid'''
         # Multiple fragments passed as comma-separated list
         extra_args = ['board0', '--fragments', 'f1.config,f2.config']
         lines, _cfg_data = self.check_command(*extra_args)
-        self.assertRegex(lines[0].decode('utf-8'),
-                         r'make O=/.*board0_defconfig\s+f1\.config\s+f2\.config',
-                         'Test multiple fragments')
+        self.assertRegex(
+            lines[0].decode('utf-8'),
+            r'make O=/.*board0_defconfig\s+f1\.config\s+f2\.config',
+            'Test multiple fragments')
 
     def test_reproducible(self):
         """Test that the -r flag works"""
@@ -1283,8 +1304,8 @@ endif
                                                               warn_targets=True)
         self.assertEqual(2, len(params_list))
         self.assertEqual(
-            ['WARNING: board2_defconfig: Duplicate TARGET_xxx: board2 and other'],
-             warnings)
+            ['WARNING: board2_defconfig: Duplicate TARGET_xxx: '
+             'board2 and other'], warnings)
 
         # Remove the TARGET_BOARD0 Kconfig option
         lines = [b'' if line == b'config TARGET_BOARD2\n' else line
