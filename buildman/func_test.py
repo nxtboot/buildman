@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (c) 2014 Google, Inc
 #
+# pylint: disable=too-many-lines
 
 """Functional tests for buildman
 
@@ -180,6 +181,8 @@ Date:   Fri Aug 22 15:57:39 2014 -0600
 
 TEST_BRANCH = '__testbranch'
 
+
+# pylint: disable=too-many-instance-attributes disable=too-many-public-methods
 class TestFunctional(unittest.TestCase):
     """Functional test for buildman.
 
@@ -443,7 +446,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 print(line, file=buf)
         return command.CommandResult(stdout=buf.getvalue(), return_code=0)
 
-    def _handle_command(self, **kwargs):
+    def _handle_command(self, **kwargs): # pylint: disable=too-many-branches
         """Handle a command execution.
 
         The command is in kwargs['pipe-list'], as a list of pipes, each a
@@ -488,7 +491,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
             result.stdout = len(result.stdout.splitlines())
         return result
 
-    def _handle_make(self, commit, brd, stage, cwd, *args, **_kwargs):
+    def _handle_make(self, commit, brd, stage, cwd, *args, **_kwargs): # pylint: disable=too-many-branches
         """Handle execution of 'make'
 
         Args:
@@ -715,7 +718,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
         self.assertEqual(captured_stderr.getvalue(),
                          'branch_error.c:456: error: branch failure\n')
 
-    def test_branch_summary(self):
+    def test_branch_summary(self): # pylint: disable=too-many-statements
         """Test building a branch and then showing a summary"""
         self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
@@ -1205,7 +1208,7 @@ Active  aarch64     armv8 - armltd total_compute board2
         Path(os.path.join(config_dir, 'board0_defconfig')).unlink()
         self.assertFalse(boards.output_is_new(boards_cfg, config_dir, src))
 
-    def test_maintainers(self):
+    def test_maintainers(self): # pylint: disable=too-many-statements
         """Test detecting boards without a MAINTAINERS entry"""
         src = self._git_dir
         main = os.path.join(src, 'boards', 'board0', 'MAINTAINERS')
