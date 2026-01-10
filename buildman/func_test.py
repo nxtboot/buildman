@@ -301,7 +301,7 @@ class TestFunctional(unittest.TestCase):
             args = args[:-1]
         if '-n0' in args:
             return command.CommandResult(return_code=0)
-        elif args[-1] == 'upstream/master..%s' % self._test_branch:
+        elif args[-1] == f'upstream/master..{self._test_branch}':
             return command.CommandResult(return_code=0, stdout=COMMIT_SHORTLOG)
         elif args[:3] == ['--no-color', '--no-decorate', '--reverse']:
             if args[-1] == self._test_branch:
@@ -319,9 +319,9 @@ class TestFunctional(unittest.TestCase):
             return command.CommandResult(return_code=0)
         elif config.startswith('branch.badbranch'):
             return command.CommandResult(return_code=1)
-        elif config == 'branch.%s.remote' % self._test_branch:
+        elif config == f'branch.{self._test_branch}.remote':
             return command.CommandResult(return_code=0, stdout='upstream\n')
-        elif config == 'branch.%s.merge' % self._test_branch:
+        elif config == f'branch.{self._test_branch}.merge':
             return command.CommandResult(return_code=0,
                                          stdout='refs/heads/master\n')
 
@@ -554,7 +554,7 @@ Some images are invalid'''
         self.setup_toolchains()
         self._run_control('-o', self._output_dir)
         lines = terminal.get_print_test_lines()
-        self.assertIn('Building current source for %d boards' % len(BOARDS),
+        self.assertIn(f'Building current source for {len(BOARDS)} boards',
                       lines[0].text)
 
     def test_bad_branch(self):
@@ -569,8 +569,8 @@ Some images are invalid'''
         lines = terminal.get_print_test_lines()
 
         # Buildman always builds the upstream commit as well
-        self.assertIn('Building %d commits for %d boards' %
-                (self._commits, len(BOARDS)), lines[0].text)
+        self.assertIn(f'Building {self._commits} commits for {len(BOARDS)} boards',
+                      lines[0].text)
         self.assertEqual(self._builder.count, self._total_builds)
 
         # Only sandbox should succeed, the others don't have toolchains
