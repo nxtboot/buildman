@@ -545,7 +545,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 else:
                     stderr = ("binman: Filename 'fsp.bin' not found in "
                               'input path')
-            elif type(commit) is not str:
+            elif not isinstance(commit, str):
                 stderr = self._error.get((brd.target, commit.sequence))
             else:
                 # For current source builds, commit is 'current'
@@ -610,12 +610,11 @@ Idx Name          Size      VMA       LMA       File off  Algn
             for brd in self._boards.get_list():
                 if brd.arch != 'sandbox':
                     errfile = self._builder.get_err_file(commit, brd.target)
-                    fd = open(errfile)
+                    data = tools.read_file(errfile, binary=False)
                     self.assertEqual(
-                        fd.readlines(),
+                        data.splitlines(),
                         [f'Tool chain error for {brd.arch}: '
                          f"No tool chain found for arch '{brd.arch}'"])
-                    fd.close()
 
     def test_toolchain_errors(self):
         """Test that toolchain errors are reported in the summary
@@ -1362,7 +1361,8 @@ endif
 
     def test_exclude_list(self):
         """Test excluding a list of things"""
-        self._run_control('-x', 'board2', '-x' 'board4', '-o', self._output_dir)
+        self._run_control('-x', 'board2', '-x', 'board4', '-o',
+                          self._output_dir)
         self.assertEqual(['board0', 'board1'],
                          [b.target for b in self._boards.get_selected()])
 
