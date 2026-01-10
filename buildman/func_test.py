@@ -24,7 +24,6 @@ from buildman import toolchain
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
-from u_boot_pylib import test_util
 from u_boot_pylib import tools
 
 SETTINGS_DATA = '''
