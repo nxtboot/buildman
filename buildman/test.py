@@ -276,6 +276,7 @@ class TestBuildOutput(TestBuildBase):
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
                                 2, self._col, ResultHandler(self._col, opts),
                                 checkout=False)
+        build._result_handler.set_builder(build)
         build.do_make = self.make
         board_selected = self.brds.get_selected_dict()
 

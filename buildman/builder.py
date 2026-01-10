@@ -154,13 +154,12 @@ class Environment:
 class Builder:
     """Class for building U-Boot for a particular commit.
 
-    Public members: (many should ->private)
-        already_done: Number of builds already completed
-        kconfig_reconfig: Number of builds triggered by Kconfig changes
+    Public members:
         base_dir: Base directory to use for builder
         checkout: True to check out source, False to skip that step.
             This is used for testing.
-        col: terminal.Color() object
+        commit_count: Number of commits being built
+        commits: List of commits being built
         count: Total number of commits to build, which is the number of commits
             multiplied by the number of boards
         do_make: Method to call to invoke Make
@@ -172,48 +171,52 @@ class Builder:
         force_build_failures: If a previously-built build (i.e. built on
             a previous run of buildman) is marked as failed, rebuild it.
         git_dir: Git directory containing source repository
+        gnu_make: Command name for GNU Make
+        in_tree: Build U-Boot in-tree instead of specifying an output
+            directory separate from the source code. This option is really
+            only useful for testing in-tree builds.
+        kconfig_reconfig: Number of builds triggered by Kconfig changes
         num_jobs: Number of jobs to run at once (passed to make as -j)
-        num_threads: Number of builder threads to run
         out_queue: Queue of results to process
         queue: Queue of jobs to run
-        threads: List of active threads
-        toolchains: Toolchains object to use for building
-        upto: Current commit number we are building (0.count-1)
-        warned: Number of builds that produced at least one warning
         force_reconfig: Reconfigure U-Boot on each comiit. This disables
             incremental building, where buildman reconfigures on the first
             commit for a baord, and then just does an incremental build for
             the following commits. In fact buildman will reconfigure and
             retry for any failing commits, so generally the only effect of
             this option is to slow things down.
-        in_tree: Build U-Boot in-tree instead of specifying an output
-            directory separate from the source code. This option is really
-            only useful for testing in-tree builds.
+        thread_exceptions: List of exceptions raised by thread jobs
+        toolchains: Toolchains object to use for building
         work_in_output: Use the output directory as the work directory and
             don't write to a separate output directory.
-        thread_exceptions: List of exceptions raised by thread jobs
         no_lto (bool): True to set the NO_LTO flag when building
         reproducible_builds (bool): True to set SOURCE_DATE_EPOCH=0 for builds
 
     Private members:
-        _base_board_dict: Last-summarised Dict of boards
-        _base_err_lines: Last-summarised list of errors
-        _base_warn_lines: Last-summarised list of warnings
+        _already_done: Number of builds already completed
         _build_period_us: Time taken for a single build (float object).
+        _col: terminal.Color() object
+        _commit: Current commit being built
         _complete_delay: Expected delay until completion (timedelta)
         _next_delay_update: Next time we plan to display a progress update
                 (datatime)
+        _num_threads: Number of builder threads to run
+        _opts: DisplayOptions for result output
+        _re_make_err: Compiled regex for make error detection
+        _restarting_config: True if 'Restart config' is detected in output
+        _result_handler: ResultHandler for displaying results
+        _single_builder: BuilderThread object for the singer builder, if
+            threading is not being used
         _start_time: Start time for the build
+        _step: Step value for processing commits (1=all, 2=every other, etc.)
+        _terminated: Thread was terminated due to an error
+        _threads: List of active threads
         _timestamps: List of timestamps for the completion of the last
             last _timestamp_count builds. Each is a datetime object.
         _timestamp_count: Number of timestamps to keep in our list.
+        _upto: Current commit number we are building (0.count-1)
+        _warned: Number of builds that produced at least one warning
         _working_dir: Base working directory containing all threads
-        _single_builder: BuilderThread object for the singer builder, if
-            threading is not being used
-        _terminated: Thread was terminated due to an error
-        _restarting_config: True if 'Restart config' is detected in output
-        _ide: Produce output suitable for an Integrated Development Environment
-            i.e. don't emit progress information and put errors on stderr
     """
 
     def __init__(self, toolchains, base_dir, git_dir, num_threads, num_jobs,
@@ -289,13 +292,13 @@ class Builder:
             self._working_dir = base_dir
         else:
             self._working_dir = os.path.join(base_dir, '.bm-work')
-        self.threads = []
+        self._threads = []
         self.do_make = make_func or self.make
         self.gnu_make = gnu_make
         self.checkout = checkout
-        self.num_threads = num_threads
+        self._num_threads = num_threads
         self.num_jobs = num_jobs
-        self.already_done = 0
+        self._already_done = 0
         self.kconfig_reconfig = 0
         self.force_build = False
         self.git_dir = git_dir
@@ -353,9 +356,9 @@ class Builder:
 
         # Attributes set by other methods
         self._build_period = None
-        self.commit = None
-        self.upto = 0
-        self.warned = 0
+        self._commit = None
+        self._upto = 0
+        self._warned = 0
         self.fail = 0
         self.commit_count = 0
         self.commits = None
@@ -369,7 +372,7 @@ class Builder:
 
         ignore_lines = ['(make.*Waiting for unfinished)',
                         '(Segmentation fault)']
-        self.re_make_err = re.compile('|'.join(ignore_lines))
+        self._re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -385,29 +388,29 @@ class Builder:
             test_thread_exceptions (bool): True to make threads raise an
                 exception instead of reporting their result (for tests)
         """
-        if self.num_threads:
+        if self._num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
             self.out_queue = queue.Queue()
-            for i in range(self.num_threads):
+            for i in range(self._num_threads):
                 t = builderthread.BuilderThread(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
                 t.daemon = True
                 t.start()
-                self.threads.append(t)
+                self._threads.append(t)
 
             t = builderthread.ResultThread(self)
             t.daemon = True
             t.start()
-            self.threads.append(t)
+            self._threads.append(t)
         else:
             self._single_builder = builderthread.BuilderThread(
                 self, -1, mrproper, per_board_out_dir)
 
     def __del__(self):
         """Get rid of all threads created by the builder"""
-        self.threads.clear()
+        self._threads.clear()
 
     def _signal_handler(self, _signum, _frame):
         """Handle a signal by exiting"""
@@ -471,7 +474,7 @@ class Builder:
             self._next_delay_update = now + timedelta(seconds=2)
             if seconds > 0:
                 self._build_period = float(seconds) / count
-                todo = self.count - self.upto
+                todo = self.count - self._upto
                 self._complete_delay = timedelta(microseconds=
                         self._build_period * todo * 1000000)
                 # Round it
@@ -489,7 +492,7 @@ class Builder:
             commit (Commit): Commit object that is being built
             checkout (bool): True to checkout the commit
         """
-        self.commit = commit
+        self._commit = commit
         if checkout and self.checkout:
             gitutil.checkout(commit.hash)
 
@@ -562,13 +565,13 @@ class Builder:
         if result:
             target = result.brd.target
 
-            self.upto += 1
+            self._upto += 1
             if result.return_code != 0:
                 self.fail += 1
             elif result.stderr:
-                self.warned += 1
+                self._warned += 1
             if result.already_done:
-                self.already_done += 1
+                self._already_done += 1
             if result.kconfig_reconfig:
                 self.kconfig_reconfig += 1
             if self._opts.ide:
@@ -584,13 +587,13 @@ class Builder:
             target = '(starting)'
 
         # Display separate counts for ok, warned and fail
-        ok = self.upto - self.warned - self.fail
+        ok = self._upto - self._warned - self.fail
         line = '\r' + self.col.build(self.col.GREEN, f'{ok:5d}')
-        line += self.col.build(self.col.YELLOW, f'{self.warned:5d}')
+        line += self.col.build(self.col.YELLOW, f'{self._warned:5d}')
         line += self.col.build(self.col.RED, f'{self.fail:5d}')
 
         line += f' /{self.count:<5d}  '
-        remaining = self.count - self.upto
+        remaining = self.count - self._upto
         if remaining:
             line += self.col.build(self.col.MAGENTA, f' -{remaining:<5d}  ')
         else:
@@ -1017,7 +1020,7 @@ class Builder:
         # First work out how many commits we will build
         count = (self.commit_count + self._step - 1) // self._step
         self.count = len(board_selected) * count
-        self.upto = self.warned = self.fail = 0
+        self._upto = self._warned = self.fail = 0
         self._timestamps = collections.deque()
 
     def get_thread_dir(self, thread_num):
@@ -1176,7 +1179,7 @@ class Builder:
 
         self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
-        self._prepare_working_space(min(self.num_threads, len(board_selected)),
+        self._prepare_working_space(min(self._num_threads, len(board_selected)),
                 commits is not None)
         self._prepare_output_space()
         if not self._opts.ide:
@@ -1195,12 +1198,12 @@ class Builder:
             job.adjust_cfg = self.adjust_cfg
             job.fragments = fragments
             job.step = self._step
-            if self.num_threads:
+            if self._num_threads:
                 self.queue.put(job)
             else:
                 self._single_builder.run_job(job)
 
-        if self.num_threads:
+        if self._num_threads:
             term = threading.Thread(target=self.queue.join)
             term.daemon = True
             term.start()
@@ -1211,7 +1214,7 @@ class Builder:
             self.out_queue.join()
         if not self._opts.ide:
             self._result_handler.print_build_summary(
-                self.count, self.already_done, self.kconfig_reconfig,
+                self.count, self._already_done, self.kconfig_reconfig,
                 self._start_time, self.thread_exceptions)
 
-        return (self.fail, self.warned, self.thread_exceptions)
+        return (self.fail, self._warned, self.thread_exceptions)

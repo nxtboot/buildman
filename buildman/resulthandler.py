@@ -23,16 +23,19 @@ class ResultHandler:
     bloat analysis. It also manages baseline state for comparing results
     between commits.
 
-    Attributes:
-        col: terminal.Color object for coloured output
+    Private members:
         _base_board_dict: Last-summarised Dict of boards
-        _base_err_lines: Last-summarised list of errors
-        _base_warn_lines: Last-summarised list of warnings
-        _base_err_line_boards: Dict of error lines to boards
-        _base_warn_line_boards: Dict of warning lines to boards
         _base_config: Last-summarised config
         _base_environment: Last-summarised environment
+        _base_err_line_boards: Dict of error lines to boards
+        _base_err_lines: Last-summarised list of errors
+        _base_warn_line_boards: Dict of warning lines to boards
+        _base_warn_lines: Last-summarised list of warnings
+        _col: terminal.Color object for coloured output
+        _config_filenames: List of config filenames to track
         _error_lines: Number of error lines output
+        _opts: DisplayOptions for result output
+        _result_getter: Callback to get result summary data
     """
 
     def __init__(self, col, opts):
@@ -57,6 +60,11 @@ class ResultHandler:
         self._base_warn_line_boards = {}
         self._base_config = None
         self._base_environment = None
+
+    @property
+    def opts(self):
+        """Get the display options"""
+        return self._opts
 
     def set_builder(self, builder):
         """Set the builder for this result handler
