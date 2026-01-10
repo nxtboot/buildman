@@ -190,10 +190,10 @@ class TestFunctional(unittest.TestCase):
         self._git_dir = os.path.join(self._base_dir, 'src')
         self._buildman_pathname = sys.argv[0]
         self._buildman_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
-        command.TEST_RESULT = self._HandleCommand
+        command.TEST_RESULT = self._handle_command
         bsettings.setup(None)
         bsettings.add_file(SETTINGS_DATA)
-        self.setupToolchains()
+        self.setup_toolchains()
         self._toolchains.add('arm-gcc', test=False)
         self._toolchains.add('powerpc-gcc', test=False)
         self._boards = boards.Boards()
@@ -230,15 +230,15 @@ class TestFunctional(unittest.TestCase):
         shutil.rmtree(self._base_dir)
         shutil.rmtree(self._output_dir)
 
-    def setupToolchains(self):
+    def setup_toolchains(self):
         self._toolchains = toolchain.Toolchains()
         self._toolchains.add('gcc', test=False)
 
-    def _RunBuildman(self, *args):
+    def _run_buildman(self, *args):
         all_args = [self._buildman_pathname] + list(args)
         return command.run_one(*all_args, capture=True, capture_stderr=True)
 
-    def _RunControl(self, *args, brds=False, clean_dir=False,
+    def _run_control(self, *args, brds=False, clean_dir=False,
                     test_thread_exceptions=False, get_builder=True):
         """Run buildman
 
@@ -261,16 +261,16 @@ class TestFunctional(unittest.TestCase):
         if brds == False:
             brds = self._boards
         result = control.do_buildman(
-            args, toolchains=self._toolchains, make_func=self._HandleMake,
+            args, toolchains=self._toolchains, make_func=self._handle_make,
             brds=brds, clean_dir=clean_dir,
             test_thread_exceptions=test_thread_exceptions)
         if get_builder:
             self._builder = control.TEST_BUILDER
         return result
 
-    def testFullHelp(self):
+    def test_full_help(self):
         command.TEST_RESULT = None
-        result = self._RunBuildman('-H')
+        result = self._run_buildman('-H')
         help_file = os.path.join(self._buildman_dir, 'README.rst')
         # Remove possible extraneous strings
         extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
@@ -279,15 +279,15 @@ class TestFunctional(unittest.TestCase):
         self.assertEqual(0, len(result.stderr))
         self.assertEqual(0, result.return_code)
 
-    def testHelp(self):
+    def test_help(self):
         command.TEST_RESULT = None
-        result = self._RunBuildman('-h')
+        result = self._run_buildman('-h')
         help_file = os.path.join(self._buildman_dir, 'README.rst')
         self.assertTrue(len(result.stdout) > 1000)
         self.assertEqual(0, len(result.stderr))
         self.assertEqual(0, result.return_code)
 
-    def testGitSetup(self):
+    def test_git_setup(self):
         """Test gitutils.Setup(), from outside the module itself"""
         command.TEST_RESULT = command.CommandResult(return_code=1)
         gitutil.setup()
@@ -297,7 +297,7 @@ class TestFunctional(unittest.TestCase):
         gitutil.setup()
         self.assertEqual(gitutil.USE_NO_DECORATE, True)
 
-    def _HandleCommandGitLog(self, args):
+    def _handle_command_git_log(self, args):
         if args[-1] == '--':
             args = args[:-1]
         if '-n0' in args:
@@ -314,7 +314,7 @@ class TestFunctional(unittest.TestCase):
         print('git log', args)
         sys.exit(1)
 
-    def _HandleCommandGitConfig(self, args):
+    def _handle_command_git_config(self, args):
         config = args[0]
         if config == 'sendemail.aliasesfile':
             return command.CommandResult(return_code=0)
@@ -330,7 +330,7 @@ class TestFunctional(unittest.TestCase):
         print('git config', args)
         sys.exit(1)
 
-    def _HandleCommandGit(self, in_args):
+    def _handle_command_git(self, in_args):
         """Handle execution of a git command
 
         This uses a hacked-up parser.
@@ -352,9 +352,9 @@ class TestFunctional(unittest.TestCase):
                 else:
                     sub_cmd = arg
         if sub_cmd == 'config':
-            return self._HandleCommandGitConfig(args)
+            return self._handle_command_git_config(args)
         elif sub_cmd == 'log':
-            return self._HandleCommandGitLog(args)
+            return self._handle_command_git_log(args)
         elif sub_cmd == 'clone':
             return command.CommandResult(return_code=0)
         elif sub_cmd == 'checkout':
@@ -366,7 +366,7 @@ class TestFunctional(unittest.TestCase):
         print('git', git_args, sub_cmd, args)
         sys.exit(1)
 
-    def _HandleCommandNm(self, args):
+    def _handle_command_nm(self, args):
         # Return nm --size-sort output with function sizes that vary between
         # calls to simulate changes between commits
         self._nm_calls = getattr(self, '_nm_calls', 0) + 1
@@ -378,7 +378,7 @@ class TestFunctional(unittest.TestCase):
 '''
         return command.CommandResult(return_code=0, stdout=stdout)
 
-    def _HandleCommandObjdump(self, args):
+    def _handle_command_objdump(self, args):
         # Return objdump -h output with .rodata section
         stdout = '''
 u-boot:     file format elf32-littlearm
@@ -391,10 +391,10 @@ Idx Name          Size      VMA       LMA       File off  Algn
 '''
         return command.CommandResult(return_code=0, stdout=stdout)
 
-    def _HandleCommandObjcopy(self, args):
+    def _handle_command_objcopy(self, args):
         return command.CommandResult(return_code=0)
 
-    def _HandleCommandSize(self, args):
+    def _handle_command_size(self, args):
         # Return size output - vary the size based on call count to simulate
         # changes between commits
         self._size_calls = getattr(self, '_size_calls', 0) + 1
@@ -408,7 +408,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
 '''
         return command.CommandResult(return_code=0, stdout=stdout)
 
-    def _HandleCommandCpp(self, args):
+    def _handle_command_cpp(self, args):
         # args ['-nostdinc', '-P', '-I', '/tmp/tmp7f17xk_o/src', '-undef',
         # '-x', 'assembler-with-cpp', fname]
         fname = args[7]
@@ -424,7 +424,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 print(line, file=buf)
         return command.CommandResult(stdout=buf.getvalue(), return_code=0)
 
-    def _HandleCommand(self, **kwargs):
+    def _handle_command(self, **kwargs):
         """Handle a command execution.
 
         The command is in kwargs['pipe-list'], as a list of pipes, each a
@@ -446,21 +446,21 @@ Idx Name          Size      VMA       LMA       File off  Algn
         args = pipe_list[0][1:]
         result = None
         if cmd == 'git':
-            result = self._HandleCommandGit(args)
+            result = self._handle_command_git(args)
         elif cmd == './scripts/show-gnu-make':
             return command.CommandResult(return_code=0, stdout='make')
         elif cmd.endswith('nm'):
-            return self._HandleCommandNm(args)
+            return self._handle_command_nm(args)
         elif cmd.endswith('objdump'):
-            return self._HandleCommandObjdump(args)
+            return self._handle_command_objdump(args)
         elif cmd.endswith('objcopy'):
-            return self._HandleCommandObjcopy(args)
+            return self._handle_command_objcopy(args)
         elif cmd.endswith( 'size'):
-            return self._HandleCommandSize(args)
+            return self._handle_command_size(args)
         elif cmd.endswith( 'cpp'):
-            return self._HandleCommandCpp(args)
+            return self._handle_command_cpp(args)
         elif cmd == 'gcc' and args[0] == '-E':
-            return self._HandleCommandCpp(args[1:])
+            return self._handle_command_cpp(args[1:])
         if not result:
             # Not handled, so abort
             print('unknown command', kwargs)
@@ -470,7 +470,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
             result.stdout = len(result.stdout.splitlines())
         return result
 
-    def _HandleMake(self, commit, brd, stage, cwd, *args, **kwargs):
+    def _handle_make(self, commit, brd, stage, cwd, *args, **kwargs):
         """Handle execution of 'make'
 
         Args:
@@ -534,7 +534,7 @@ Some images are invalid'''
             return command.CommandResult(return_code=0)
 
         # Not handled, so abort
-        print('_HandleMake failure: make', stage)
+        print('_handle_make failure: make', stage)
         sys.exit(1)
 
     # Example function to print output lines
@@ -544,29 +544,29 @@ Some images are invalid'''
             print(line)
         #self.print_lines(terminal.get_print_test_lines())
 
-    def testNoBoards(self):
+    def test_no_boards(self):
         """Test that buildman aborts when there are no boards"""
         self._boards = boards.Boards()
         with self.assertRaises(SystemExit):
-            self._RunControl()
+            self._run_control()
 
-    def testCurrentSource(self):
+    def test_current_source(self):
         """Very simple test to invoke buildman on the current source"""
-        self.setupToolchains();
-        self._RunControl('-o', self._output_dir)
+        self.setup_toolchains();
+        self._run_control('-o', self._output_dir)
         lines = terminal.get_print_test_lines()
         self.assertIn('Building current source for %d boards' % len(BOARDS),
                       lines[0].text)
 
-    def testBadBranch(self):
+    def test_bad_branch(self):
         """Test that we can detect an invalid branch"""
         with self.assertRaises(ValueError):
-            self._RunControl('-b', 'badbranch')
+            self._run_control('-b', 'badbranch')
 
-    def testBadToolchain(self):
+    def test_bad_toolchain(self):
         """Test that missing toolchains are detected"""
-        self.setupToolchains();
-        ret_code = self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self.setup_toolchains();
+        ret_code = self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         lines = terminal.get_print_test_lines()
 
         # Buildman always builds the upstream commit as well
@@ -590,19 +590,19 @@ Some images are invalid'''
                        f"No tool chain found for arch '{brd.arch}'"])
                   fd.close()
 
-    def testToolchainErrors(self):
+    def test_toolchain_errors(self):
         """Test that toolchain errors are reported in the summary
 
         When toolchains are missing, boards cannot be built. The summary
         should report which boards were not built.
         """
-        self.setupToolchains()
+        self.setup_toolchains()
         # Build with missing toolchains - only sandbox will succeed
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
 
         # Now show summary - should report boards not built
         terminal.get_print_test_lines()  # Clear
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
                          clean_dir=False)
         lines = terminal.get_print_test_lines()
         text = '\n'.join(line.text for line in lines)
@@ -613,13 +613,13 @@ Some images are invalid'''
         self.assertIn('board1', text)
         self.assertIn('board2', text)
 
-    def testBranch(self):
+    def test_branch(self):
         """Test building a branch with all toolchains present"""
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
 
-    def testCurrentSourceIde(self):
+    def test_current_source_ide(self):
         """Test building current source with IDE mode enabled
 
         This tests that:
@@ -638,7 +638,7 @@ Some images are invalid'''
         try:
             sys.stderr = captured_stderr
             terminal.get_print_test_lines()  # Clear any previous output
-            self._RunControl('-o', self._output_dir, '-I')
+            self._run_control('-o', self._output_dir, '-I')
         finally:
             sys.stderr = old_stderr
 
@@ -654,13 +654,13 @@ Some images are invalid'''
 
         # Now run with -s to show summary - output should appear again
         terminal.get_print_test_lines()  # Clear
-        self._RunControl('-o', self._output_dir, '-s', clean_dir=False)
+        self._run_control('-o', self._output_dir, '-s', clean_dir=False)
         lines = terminal.get_print_test_lines()
         self.assertEqual(len(lines), 2)
         self.assertIn('Summary of', lines[0].text)
         self.assertIn('board4', lines[1].text)
 
-    def testBranchIde(self):
+    def test_branch_ide(self):
         """Test building a branch with IDE mode and summary
 
         This tests _print_ide_output() which outputs errors to stderr during
@@ -672,7 +672,7 @@ Some images are invalid'''
 
         # Build branch normally first (writes results to disk)
         terminal.get_print_test_lines()
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.fail, 1)
 
         # Run summary with IDE mode - errors go to stderr via _print_ide_output
@@ -681,7 +681,7 @@ Some images are invalid'''
         try:
             sys.stderr = captured_stderr
             terminal.get_print_test_lines()
-            self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-sI',
+            self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-sI',
                              clean_dir=False)
         finally:
             sys.stderr = old_stderr
@@ -690,15 +690,15 @@ Some images are invalid'''
         self.assertEqual(captured_stderr.getvalue(),
                          'branch_error.c:456: error: branch failure\n')
 
-    def testBranchSummary(self):
+    def test_branch_summary(self):
         """Test building a branch and then showing a summary"""
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
 
         # Now run with -s to show summary
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-s', '-o', self._output_dir,
+        self._run_control('-b', TEST_BRANCH, '-s', '-o', self._output_dir,
                          clean_dir=False)
         # Summary should not trigger any builds
         self.assertEqual(self._make_calls, 0)
@@ -707,7 +707,7 @@ Some images are invalid'''
 
         # Now run with -S to show sizes as well
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-sS', '-o', self._output_dir,
+        self._run_control('-b', TEST_BRANCH, '-sS', '-o', self._output_dir,
                          clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         lines = terminal.get_print_test_lines()
@@ -719,7 +719,7 @@ Some images are invalid'''
 
         # Now run with -B to show bloat (function size changes)
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-sSB', '-o', self._output_dir,
+        self._run_control('-b', TEST_BRANCH, '-sSB', '-o', self._output_dir,
                          clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         lines = terminal.get_print_test_lines()
@@ -746,7 +746,7 @@ Some images are invalid'''
                 tools.write_file(cfg_fname, cfg_content.encode('utf-8'))
 
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-sK', '-o', self._output_dir,
+        self._run_control('-b', TEST_BRANCH, '-sK', '-o', self._output_dir,
                          clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         lines = terminal.get_print_test_lines()
@@ -774,7 +774,7 @@ Some images are invalid'''
                 tools.write_file(env_fname, env_content.encode('utf-8'))
 
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-sU', '-o', self._output_dir,
+        self._run_control('-b', TEST_BRANCH, '-sU', '-o', self._output_dir,
                          clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         lines = terminal.get_print_test_lines()
@@ -783,10 +783,10 @@ Some images are invalid'''
         self.assertIn('bootdelay', text)
         self.assertIn('(no errors to report)', lines[-1].text)
 
-    def testWarningsAsErrors(self):
+    def test_warnings_as_errors(self):
         """Test the -E flag adds -Werror to make arguments"""
         self._captured_make_args = []
-        self._RunControl('-o', self._output_dir, '-E')
+        self._run_control('-o', self._output_dir, '-E')
 
         # Check that at least one build had -Werror flags
         found_werror = False
@@ -798,50 +798,50 @@ Some images are invalid'''
                 break
         self.assertTrue(found_werror, 'KCFLAGS=-Werror not found in make args')
 
-    def testCount(self):
+    def test_count(self):
         """Test building a specific number of commitst"""
-        self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-c2', '-o', self._output_dir)
         self.assertEqual(self._builder.count, 2 * len(BOARDS))
         self.assertEqual(self._builder.fail, 0)
         # Each board has a config, and then one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (1 + 2))
 
-    def testIncremental(self):
+    def test_incremental(self):
         """Test building a branch twice - the second time should do nothing"""
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
 
         # Each board has a mrproper, config, and then one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (self._commits + 1))
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
         self.assertEqual(self._make_calls, 0)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
 
-    def testForceBuild(self):
+    def test_force_build(self):
         """The -f flag should force a rebuild"""
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-f', '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-f', '-o', self._output_dir, clean_dir=False)
         # Each board has a config and one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (self._commits + 1))
 
-    def testForceReconfigure(self):
+    def test_force_reconfigure(self):
         """The -f flag should force a rebuild"""
-        self._RunControl('-b', TEST_BRANCH, '-C', '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-C', '-o', self._output_dir)
         # Each commit has a config and make
         self.assertEqual(self._make_calls, len(BOARDS) * self._commits * 2)
 
-    def testMrproper(self):
+    def test_mrproper(self):
         """The -f flag should force a rebuild"""
-        self._RunControl('-b', TEST_BRANCH, '-m', '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-m', '-o', self._output_dir)
         # Each board has a mkproper, config and then one make per commit
         self.assertEqual(self._make_calls, len(BOARDS) * (self._commits + 2))
 
-    def testErrors(self):
+    def test_errors(self):
         """Test handling of build errors"""
         self._error['board2', 1] = 'fred\n'
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 1)
 
@@ -849,49 +849,49 @@ Some images are invalid'''
         # not be rebuilt
         del self._error['board2', 1]
         self._make_calls = 0
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, clean_dir=False)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._make_calls, 0)
         self.assertEqual(self._builder.fail, 1)
 
         # Now use the -F flag to force rebuild of the bad commit
-        self._RunControl('-b', TEST_BRANCH, '-o', self._output_dir, '-F', clean_dir=False)
+        self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-F', clean_dir=False)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
         self.assertEqual(self._make_calls, 2)
 
-    def testBranchWithSlash(self):
+    def test_branch_with_slash(self):
         """Test building a branch with a '/' in the name"""
         self._test_branch = '/__dev/__testbranch'
-        self._RunControl('-b', self._test_branch, '-o', self._output_dir,
+        self._run_control('-b', self._test_branch, '-o', self._output_dir,
                          clean_dir=False)
         self.assertEqual(self._builder.count, self._total_builds)
         self.assertEqual(self._builder.fail, 0)
 
-    def testEnvironment(self):
+    def test_environment(self):
         """Test that the done and environment files are written to out-env"""
-        self._RunControl('-o', self._output_dir)
+        self._run_control('-o', self._output_dir)
         board0_dir = os.path.join(self._output_dir, 'current', 'board0')
         self.assertTrue(os.path.exists(os.path.join(board0_dir, 'done')))
         self.assertTrue(os.path.exists(os.path.join(board0_dir, 'out-env')))
 
-    def testEnvironmentUnicode(self):
+    def test_environment_unicode(self):
         """Test there are no unicode errors when the env has non-ASCII chars"""
         try:
             varname = b'buildman_test_var'
             os.environb[varname] = b'strange\x80chars'
-            self.assertEqual(0, self._RunControl('-o', self._output_dir))
+            self.assertEqual(0, self._run_control('-o', self._output_dir))
             board0_dir = os.path.join(self._output_dir, 'current', 'board0')
             self.assertTrue(os.path.exists(os.path.join(board0_dir, 'done')))
             self.assertTrue(os.path.exists(os.path.join(board0_dir, 'out-env')))
         finally:
             del os.environb[varname]
 
-    def testWorkInOutput(self):
+    def test_work_in_output(self):
         """Test the -w option which should write directly to the output dir"""
         board_list = boards.Boards()
         board_list.add_board(board.Board(*BOARDS[0]))
-        self._RunControl('-o', self._output_dir, '-w', clean_dir=False,
+        self._run_control('-o', self._output_dir, '-w', clean_dir=False,
                          brds=board_list)
         self.assertTrue(
             os.path.exists(os.path.join(self._output_dir, 'u-boot')))
@@ -900,10 +900,10 @@ Some images are invalid'''
         self.assertTrue(
             os.path.exists(os.path.join(self._output_dir, 'out-env')))
 
-    def testWorkInOutputFail(self):
+    def test_work_in_output_fail(self):
         """Test the -w option failures"""
         with self.assertRaises(SystemExit) as e:
-            self._RunControl('-o', self._output_dir, '-w', clean_dir=False)
+            self._run_control('-o', self._output_dir, '-w', clean_dir=False)
         self.assertIn("single board", str(e.exception))
         self.assertFalse(
             os.path.exists(os.path.join(self._output_dir, 'u-boot')))
@@ -911,26 +911,26 @@ Some images are invalid'''
         board_list = boards.Boards()
         board_list.add_board(board.Board(*BOARDS[0]))
         with self.assertRaises(SystemExit) as e:
-            self._RunControl('-b', self._test_branch, '-o', self._output_dir,
+            self._run_control('-b', self._test_branch, '-o', self._output_dir,
                              '-w', clean_dir=False, brds=board_list)
         self.assertIn("single commit", str(e.exception))
 
         board_list = boards.Boards()
         board_list.add_board(board.Board(*BOARDS[0]))
         with self.assertRaises(SystemExit) as e:
-            self._RunControl('-w', clean_dir=False)
+            self._run_control('-w', clean_dir=False)
         self.assertIn("specify -o", str(e.exception))
 
-    def testThreadExceptions(self):
+    def test_thread_exceptions(self):
         """Test that exceptions in threads are reported"""
         with terminal.capture() as (stdout, stderr):
-            self.assertEqual(102, self._RunControl('-o', self._output_dir,
+            self.assertEqual(102, self._run_control('-o', self._output_dir,
                                                    test_thread_exceptions=True))
         self.assertIn(
             'Thread exception (use -T0 to run without threads): test exception',
             stdout.getvalue())
 
-    def testBlobs(self):
+    def test_blobs(self):
         """Test handling of missing blobs"""
         self._missing = True
 
@@ -939,17 +939,17 @@ Some images are invalid'''
         logfile = os.path.join(board0_dir, 'log')
 
         # We expect failure when there are missing blobs
-        result = self._RunControl('board0', '-o', self._output_dir)
+        result = self._run_control('board0', '-o', self._output_dir)
         self.assertEqual(100, result)
         self.assertTrue(os.path.exists(os.path.join(board0_dir, 'done')))
         self.assertTrue(os.path.exists(errfile))
         self.assertIn(b"Filename 'fsp.bin' not found in input path",
                       tools.read_file(errfile))
 
-    def testBlobsAllowMissing(self):
+    def test_blobs_allow_missing(self):
         """Allow missing blobs - still failure but a different exit code"""
         self._missing = True
-        result = self._RunControl('board0', '-o', self._output_dir, '-M',
+        result = self._run_control('board0', '-o', self._output_dir, '-M',
                                   clean_dir=True)
         self.assertEqual(101, result)
         board0_dir = os.path.join(self._output_dir, 'current', 'board0')
@@ -957,16 +957,16 @@ Some images are invalid'''
         self.assertTrue(os.path.exists(errfile))
         self.assertIn(b'Some images are invalid', tools.read_file(errfile))
 
-    def testBlobsWarning(self):
+    def test_blobs_warning(self):
         """Allow missing blobs and ignore warnings"""
         self._missing = True
-        result = self._RunControl('board0', '-o', self._output_dir, '-MW')
+        result = self._run_control('board0', '-o', self._output_dir, '-MW')
         self.assertEqual(0, result)
         board0_dir = os.path.join(self._output_dir, 'current', 'board0')
         errfile = os.path.join(board0_dir, 'err')
         self.assertIn(b'Some images are invalid', tools.read_file(errfile))
 
-    def testBlobSettings(self):
+    def test_blob_settings(self):
         """Test with no settings"""
         self.assertEqual(False,
                          control.get_allow_missing(False, False, 1, False))
@@ -975,7 +975,7 @@ Some images are invalid'''
         self.assertEqual(False,
                          control.get_allow_missing(True, True, 1, False))
 
-    def testBlobSettingsAlways(self):
+    def test_blob_settings_always(self):
         """Test the 'always' policy"""
         bsettings.set_item('global', 'allow-missing', 'always')
         self.assertEqual(True,
@@ -983,7 +983,7 @@ Some images are invalid'''
         self.assertEqual(False,
                          control.get_allow_missing(False, True, 1, False))
 
-    def testBlobSettingsBranch(self):
+    def test_blob_settings_branch(self):
         """Test the 'branch' policy"""
         bsettings.set_item('global', 'allow-missing', 'branch')
         self.assertEqual(False,
@@ -993,7 +993,7 @@ Some images are invalid'''
         self.assertEqual(False,
                          control.get_allow_missing(False, True, 1, True))
 
-    def testBlobSettingsMultiple(self):
+    def test_blob_settings_multiple(self):
         """Test the 'multiple' policy"""
         bsettings.set_item('global', 'allow-missing', 'multiple')
         self.assertEqual(False,
@@ -1003,7 +1003,7 @@ Some images are invalid'''
         self.assertEqual(False,
                          control.get_allow_missing(False, True, 2, False))
 
-    def testBlobSettingsBranchMultiple(self):
+    def test_blob_settings_branch_multiple(self):
         """Test the 'branch multiple' policy"""
         bsettings.set_item('global', 'allow-missing', 'branch multiple')
         self.assertEqual(False,
@@ -1026,7 +1026,7 @@ Some images are invalid'''
         Returns:
             list of str: Lines returned in the out-cmd file
         """
-        self._RunControl('-o', self._output_dir, *extra_args)
+        self._run_control('-o', self._output_dir, *extra_args)
         board0_dir = os.path.join(self._output_dir, 'current', 'board0')
         self.assertTrue(os.path.exists(os.path.join(board0_dir, 'done')))
         cmd_fname = os.path.join(board0_dir, 'out-cmd')
@@ -1039,19 +1039,19 @@ Some images are invalid'''
 
         return data.splitlines(), cfg_data
 
-    def testCmdFile(self):
+    def test_cmd_file(self):
         """Test that the -cmd-out file is produced"""
         lines = self.check_command()[0]
         self.assertEqual(2, len(lines))
         self.assertRegex(lines[0], b'make O=/.*board0_defconfig')
         self.assertRegex(lines[0], b'make O=/.*-s.*')
 
-    def testNoLto(self):
+    def test_no_lto(self):
         """Test that the --no-lto flag works"""
         lines = self.check_command('-L')[0]
         self.assertIn(b'NO_LTO=1', lines[0])
 
-    def testFragments(self):
+    def test_fragments(self):
         """Test passing of configuration fragments to the make command"""
         # Single fragment passed as argument
         extra_args = ['board0', '--fragments', 'f1.config']
@@ -1066,7 +1066,7 @@ Some images are invalid'''
                          r'make O=/.*board0_defconfig\s+f1\.config\s+f2\.config',
                          'Test multiple fragments')
 
-    def testReproducible(self):
+    def test_reproducible(self):
         """Test that the -r flag works"""
         lines, cfg_data = self.check_command('-r')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
@@ -1295,64 +1295,64 @@ endif
         self.assertEqual(2, len(params_list))
         self.assertFalse(warnings)
 
-    def testRegenBoards(self):
+    def test_regen_boards(self):
         """Test that we can regenerate the boards.cfg file"""
         outfile = os.path.join(self._output_dir, 'test-boards.cfg')
         if os.path.exists(outfile):
             os.remove(outfile)
         with terminal.capture() as (stdout, stderr):
-            result = self._RunControl('-R', outfile, brds=None,
+            result = self._run_control('-R', outfile, brds=None,
                                       get_builder=False)
         self.assertTrue(os.path.exists(outfile))
 
     def test_print_prefix(self):
         """Test that we can print the toolchain prefix"""
         with terminal.capture() as (stdout, stderr):
-            result = self._RunControl('-A', 'board0')
+            result = self._run_control('-A', 'board0')
         self.assertEqual('arm-\n', stdout.getvalue())
         self.assertEqual('', stderr.getvalue())
 
     def test_exclude_one(self):
         """Test excluding a single board from an arch"""
-        self._RunControl('arm', '-x', 'board1', '-o', self._output_dir)
+        self._run_control('arm', '-x', 'board1', '-o', self._output_dir)
         self.assertEqual(['board0'],
                          [b.target for b in self._boards.get_selected()])
 
     def test_exclude_arch(self):
         """Test excluding an arch"""
-        self._RunControl('-x', 'arm', '-o', self._output_dir)
+        self._run_control('-x', 'arm', '-o', self._output_dir)
         self.assertEqual(['board2', 'board4'],
                          [b.target for b in self._boards.get_selected()])
 
     def test_exclude_comma(self):
         """Test excluding a comma-separated list of things"""
-        self._RunControl('-x', 'arm,powerpc', '-o', self._output_dir)
+        self._run_control('-x', 'arm,powerpc', '-o', self._output_dir)
         self.assertEqual(['board4'],
                          [b.target for b in self._boards.get_selected()])
 
     def test_exclude_list(self):
         """Test excluding a list of things"""
-        self._RunControl('-x', 'board2', '-x' 'board4', '-o', self._output_dir)
+        self._run_control('-x', 'board2', '-x' 'board4', '-o', self._output_dir)
         self.assertEqual(['board0', 'board1'],
                          [b.target for b in self._boards.get_selected()])
 
     def test_single_boards(self):
         """Test building single boards"""
-        self._RunControl('--boards', 'board1', '-o', self._output_dir)
+        self._run_control('--boards', 'board1', '-o', self._output_dir)
         self.assertEqual(1, self._builder.count)
 
-        self._RunControl('--boards', 'board1', '--boards', 'board2',
+        self._run_control('--boards', 'board1', '--boards', 'board2',
                          '-o', self._output_dir)
         self.assertEqual(2, self._builder.count)
 
-        self._RunControl('--boards', 'board1,board2', '--boards', 'board4',
+        self._run_control('--boards', 'board1,board2', '--boards', 'board4',
                          '-o', self._output_dir)
         self.assertEqual(3, self._builder.count)
 
     def test_print_arch(self):
         """Test that we can print the board architecture"""
         with terminal.capture() as (stdout, stderr):
-            result = self._RunControl('--print-arch', 'board0')
+            result = self._run_control('--print-arch', 'board0')
         self.assertEqual('arm\n', stdout.getvalue())
         self.assertEqual('', stderr.getvalue())
 
@@ -1407,7 +1407,7 @@ CONFIG_SOC="fred"
             'target': 'board0'},
             ['WARNING: board0_defconfig: No TARGET_BOARD0 enabled']), res)
 
-        # check handling of #include files; see _HandleCommandCpp()
+        # check handling of #include files; see _handle_command_cpp()
         inc = os.path.join(src, 'common')
         tools.write_file(inc, b'CONFIG_TARGET_BOARD0=y\n')
         tools.write_file(norm, f'#include <{inc}>', False)
@@ -1421,7 +1421,7 @@ CONFIG_SOC="fred"
             'config': 'config0',
             'target': 'board0'}, []), res)
 
-    def testTarget(self):
+    def test_target(self):
         """Test that the --target flag works"""
         lines = self.check_command('--target', 'u-boot.dtb')[0]
 
@@ -1450,7 +1450,7 @@ targets:
         fname = os.path.join(self._base_dir, 'try.buildman')
         tools.write_file(fname, data.encode('utf-8'))
         result = boards.ExtendedParser.parse_file(fname)
-        self.maxDiff = None
+        self.maxDiff = None  # pylint: disable=C0103
         self.assertEqual([
             Extended(name='acpi_boards',
                      desc='Build RISC-V QEMU builds with ACPI',
@@ -1539,7 +1539,7 @@ something: me
         # between boards when a thread processes multiple boards sequentially.
         with mock.patch.object(builderthread, 'kconfig_changed_since',
                                mock_kconfig_changed):
-            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
+            self._run_control('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
                              '-P')
 
         # Verify kconfig_changed_since was called
@@ -1561,7 +1561,7 @@ something: me
         # Run buildman with kconfig checking disabled (-Z)
         with mock.patch.object(builderthread, 'kconfig_changed_since',
                                mock_kconfig_changed):
-            self._RunControl('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
+            self._run_control('-b', TEST_BRANCH, '-c2', '-o', self._output_dir,
                              '-Z')
 
         # Verify kconfig_changed_since was NOT called (feature disabled)
