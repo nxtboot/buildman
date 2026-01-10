@@ -463,24 +463,23 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 sys.exit(1)
         cmd = pipe_list[0][0]
         args = pipe_list[0][1:]
-        result = None
         if cmd == 'git':
             result = self._handle_command_git(args)
         elif cmd == './scripts/show-gnu-make':
-            return command.CommandResult(return_code=0, stdout='make')
+            result = command.CommandResult(return_code=0, stdout='make')
         elif cmd.endswith('nm'):
-            return self._handle_command_nm(args)
+            result = self._handle_command_nm(args)
         elif cmd.endswith('objdump'):
-            return self._handle_command_objdump(args)
+            result = self._handle_command_objdump(args)
         elif cmd.endswith('objcopy'):
-            return self._handle_command_objcopy(args)
-        elif cmd.endswith( 'size'):
-            return self._handle_command_size(args)
-        elif cmd.endswith( 'cpp'):
-            return self._handle_command_cpp(args)
+            result = self._handle_command_objcopy(args)
+        elif cmd.endswith('size'):
+            result = self._handle_command_size(args)
+        elif cmd.endswith('cpp'):
+            result = self._handle_command_cpp(args)
         elif cmd == 'gcc' and args[0] == '-E':
-            return self._handle_command_cpp(args[1:])
-        if not result:
+            result = self._handle_command_cpp(args[1:])
+        else:
             # Not handled, so abort
             print('unknown command', kwargs)
             sys.exit(1)
