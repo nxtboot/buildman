@@ -581,13 +581,13 @@ Some images are invalid'''
         for commit in range(self._commits):
             for brd in self._boards.get_list():
                 if brd.arch != 'sandbox':
-                  errfile = self._builder.get_err_file(commit, brd.target)
-                  fd = open(errfile)
-                  self.assertEqual(
-                      fd.readlines(),
-                      [f'Tool chain error for {brd.arch}: '
-                       f"No tool chain found for arch '{brd.arch}'"])
-                  fd.close()
+                    errfile = self._builder.get_err_file(commit, brd.target)
+                    fd = open(errfile)
+                    self.assertEqual(
+                        fd.readlines(),
+                        [f'Tool chain error for {brd.arch}: '
+                         f"No tool chain found for arch '{brd.arch}'"])
+                    fd.close()
 
     def test_toolchain_errors(self):
         """Test that toolchain errors are reported in the summary
