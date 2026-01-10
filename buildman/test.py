@@ -24,6 +24,8 @@ from buildman import builderthread
 from buildman import cfgutil
 from buildman import control
 from buildman import toolchain
+from buildman.outcome import DisplayOptions
+from buildman.resulthandler import ResultHandler
 from patman import commit
 from u_boot_pylib import command
 from u_boot_pylib import terminal
@@ -195,6 +197,11 @@ class TestBuildBase(unittest.TestCase):
         # Avoid sending any output
         terminal.set_print_test_mode()
         self._col = terminal.Color()
+        self._opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self._result_handler = ResultHandler(self._col, self._opts)
 
         self.base_dir = tempfile.mkdtemp()
         if not os.path.isdir(self.base_dir):
@@ -245,20 +252,31 @@ class TestBuildOutput(TestBuildBase):
             expect += col.build(expected_colour, f' {brd}')
         self.assertEqual(text, expect)
 
-    def _setup_test(self, echo_lines=False, threads=1, **kwdisplay_args):
+    def _setup_test(self, echo_lines=False, threads=1,
+                    show_errors=False, list_error_boards=False,
+                    filter_dtb_warnings=False, filter_migration_warnings=False):
         """Set up the test by running a build and summary
 
         Args:
             echo_lines: True to echo lines to the terminal to aid test
                 development
-            kwdisplay_args: Dict of arguments to pass to
-                Builder.SetDisplayOptions()
+            threads: Number of threads to use
+            show_errors: Show errors in summary
+            list_error_boards: List boards with errors
+            filter_dtb_warnings: Filter device-tree warnings
+            filter_migration_warnings: Filter migration warnings
 
         Returns:
             Iterator containing the output lines, each a PrintLine() object
         """
+        opts = DisplayOptions(
+            show_errors=show_errors, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=list_error_boards)
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
-                                2, checkout=False, show_unknown=False)
+                                2, self._col, ResultHandler(self._col, opts),
+                                checkout=False)
+        build._result_handler.set_builder(build)
         build.do_make = self.make
         board_selected = self.brds.get_selected_dict()
 
@@ -275,8 +293,9 @@ class TestBuildOutput(TestBuildBase):
         # We should get two starting messages, an update for every commit built
         # and a summary message
         self.assertEqual(count, len(COMMITS) * len(BOARDS) + 3)
-        build.set_display_options(**kwdisplay_args)
-        build.show_summary(self.commits, board_selected)
+        build.set_display_options(opts, filter_dtb_warnings,
+                                  filter_migration_warnings)
+        build._result_handler.show_summary(self.commits, board_selected, 1)
         if echo_lines:
             terminal.echo_print_test_lines()
         return iter(terminal.get_print_test_lines())
@@ -321,7 +340,7 @@ class TestBuildOutput(TestBuildBase):
             filter_dtb_warnings: Adjust the check for output produced with the
                --filter-dtb-warnings flag
         """
-        col = terminal.Color()
+        col = self._col
         boards01234 = ('board0 board1 board2 board3 board4'
                        if list_error_boards else '')
         boards1234 = 'board1 board2 board3 board4' if list_error_boards else ''
@@ -631,7 +650,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir(self):
         """Test output-directory naming for a commit"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False)
+                                self._col, self._result_handler,
+                                checkout=False)
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
@@ -641,7 +661,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir_current(self):
         """Test output-directory naming for current source"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False)
+                                self._col, self._result_handler,
+                                checkout=False)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '/current')
@@ -649,8 +670,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir_no_subdirs(self):
         """Test output-directory naming without subdirectories"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                checkout=False, show_unknown=False,
-                                no_subdirs=True)
+                                self._col, self._result_handler,
+                                checkout=False, no_subdirs=True)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '')
@@ -749,151 +770,14 @@ class TestBuild(TestBuildBase):
         for name in to_remove + to_leave:
             _touch(name)
 
-        build = builder.Builder(self.toolchains, base_dir, None, 1, 2)
+        build = builder.Builder(self.toolchains, base_dir, None, 1, 2,
+                                self._col, self._result_handler)
         build.commits = self.commits
         build.commit_count = len(COMMITS)
         # pylint: disable=protected-access
         result = set(build._get_output_space_removals())
         expected = {os.path.join(base_dir, f) for f in to_remove}
         self.assertEqual(expected, result)
-
-
-class TestBuildConfig(TestBuildBase):
-    """Tests for config adjustment functionality"""
-
-    def test_adjust_cfg_nop(self):
-        """check various adjustments of config that are nops"""
-        # enable an enabled CONFIG
-        self.assertEqual(
-            'CONFIG_FRED=y',
-            cfgutil.adjust_cfg_line('CONFIG_FRED=y', {'FRED':'FRED'})[0])
-
-        # disable a disabled CONFIG
-        self.assertEqual(
-            '# CONFIG_FRED is not set',
-            cfgutil.adjust_cfg_line(
-                '# CONFIG_FRED is not set', {'FRED':'~FRED'})[0])
-
-        # use the adjust_cfg_lines() function
-        self.assertEqual(
-            ['CONFIG_FRED=y'],
-            cfgutil.adjust_cfg_lines(['CONFIG_FRED=y'], {'FRED':'FRED'}))
-        self.assertEqual(
-            ['# CONFIG_FRED is not set'],
-            cfgutil.adjust_cfg_lines(['CONFIG_FRED=y'], {'FRED':'~FRED'}))
-
-        # handling an empty line
-        self.assertEqual('#', cfgutil.adjust_cfg_line('#', {'FRED':'~FRED'})[0])
-
-    def test_adjust_cfg(self):
-        """check various adjustments of config"""
-        # disable a CONFIG
-        self.assertEqual(
-            '# CONFIG_FRED is not set',
-            cfgutil.adjust_cfg_line('CONFIG_FRED=1' , {'FRED':'~FRED'})[0])
-
-        # enable a disabled CONFIG
-        self.assertEqual(
-            'CONFIG_FRED=y',
-            cfgutil.adjust_cfg_line(
-                '# CONFIG_FRED is not set', {'FRED':'FRED'})[0])
-
-        # enable a CONFIG that doesn't exist
-        self.assertEqual(
-            ['CONFIG_FRED=y'],
-            cfgutil.adjust_cfg_lines([], {'FRED':'FRED'}))
-
-        # disable a CONFIG that doesn't exist
-        self.assertEqual(
-            ['# CONFIG_FRED is not set'],
-            cfgutil.adjust_cfg_lines([], {'FRED':'~FRED'}))
-
-        # disable a value CONFIG
-        self.assertEqual(
-            '# CONFIG_FRED is not set',
-            cfgutil.adjust_cfg_line('CONFIG_FRED="fred"' , {'FRED':'~FRED'})[0])
-
-        # setting a value CONFIG
-        self.assertEqual(
-            'CONFIG_FRED="fred"',
-            cfgutil.adjust_cfg_line('# CONFIG_FRED is not set' ,
-                                    {'FRED':'FRED="fred"'})[0])
-
-        # changing a value CONFIG
-        self.assertEqual(
-            'CONFIG_FRED="fred"',
-            cfgutil.adjust_cfg_line('CONFIG_FRED="ernie"' ,
-                                    {'FRED':'FRED="fred"'})[0])
-
-        # setting a value for a CONFIG that doesn't exist
-        self.assertEqual(
-            ['CONFIG_FRED="fred"'],
-            cfgutil.adjust_cfg_lines([], {'FRED':'FRED="fred"'}))
-
-    def test_convert_adjust_cfg_list(self):
-        """Check conversion of the list of changes into a dict"""
-        self.assertEqual({}, cfgutil.convert_list_to_dict(None))
-
-        expect = {
-            'FRED':'FRED',
-            'MARY':'~MARY',
-            'JOHN':'JOHN=0x123',
-            'ALICE':'ALICE="alice"',
-            'AMY':'AMY',
-            'ABE':'~ABE',
-            'MARK':'MARK=0x456',
-            'ANNA':'ANNA="anna"',
-            }
-        actual = cfgutil.convert_list_to_dict(
-            ['FRED', '~MARY', 'JOHN=0x123', 'ALICE="alice"',
-             'CONFIG_AMY', '~CONFIG_ABE', 'CONFIG_MARK=0x456',
-             'CONFIG_ANNA="anna"'])
-        self.assertEqual(expect, actual)
-
-        # Test comma-separated values
-        actual = cfgutil.convert_list_to_dict(
-            ['FRED,~MARY,JOHN=0x123', 'ALICE="alice"',
-             'CONFIG_AMY,~CONFIG_ABE', 'CONFIG_MARK=0x456,CONFIG_ANNA="anna"'])
-        self.assertEqual(expect, actual)
-
-        # Test mixed comma-separated and individual values
-        actual = cfgutil.convert_list_to_dict(
-            ['FRED,~MARY', 'JOHN=0x123', 'ALICE="alice",CONFIG_AMY',
-             '~CONFIG_ABE,CONFIG_MARK=0x456', 'CONFIG_ANNA="anna"'])
-        self.assertEqual(expect, actual)
-
-    def test_check_cfg_file(self):
-        """Test check_cfg_file detects conflicts as expected"""
-        # Check failure to disable CONFIG
-        result = cfgutil.check_cfg_lines(['CONFIG_FRED=1'], {'FRED':'~FRED'})
-        self.assertEqual([['~FRED', 'CONFIG_FRED=1']], result)
-
-        result = cfgutil.check_cfg_lines(
-            ['CONFIG_FRED=1', 'CONFIG_MARY="mary"'], {'FRED':'~FRED'})
-        self.assertEqual([['~FRED', 'CONFIG_FRED=1']], result)
-
-        result = cfgutil.check_cfg_lines(
-            ['CONFIG_FRED=1', 'CONFIG_MARY="mary"'], {'MARY':'~MARY'})
-        self.assertEqual([['~MARY', 'CONFIG_MARY="mary"']], result)
-
-        # Check failure to enable CONFIG
-        result = cfgutil.check_cfg_lines(
-            ['# CONFIG_FRED is not set'], {'FRED':'FRED'})
-        self.assertEqual([['FRED', '# CONFIG_FRED is not set']], result)
-
-        # Check failure to set CONFIG value
-        result = cfgutil.check_cfg_lines(
-            ['# CONFIG_FRED is not set', 'CONFIG_MARY="not"'],
-            {'MARY':'MARY="mary"', 'FRED':'FRED'})
-        self.assertEqual([
-            ['FRED', '# CONFIG_FRED is not set'],
-            ['MARY="mary"', 'CONFIG_MARY="not"']], result)
-
-        # Check failure to add CONFIG value
-        result = cfgutil.check_cfg_lines([], {'MARY':'MARY="mary"'})
-        self.assertEqual([
-            ['MARY="mary"', 'Missing expected line: CONFIG_MARY="mary"']],
-            result)
 
 
 class TestBuildMisc(TestBuildBase):
@@ -1131,7 +1015,7 @@ class TestBuildMisc(TestBuildBase):
             # Check a missing tool
             with self.assertRaises(ValueError) as exc:
                 builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                dtc_skip=True)
+                                self._col, self._result_handler, dtc_skip=True)
             self.assertIn('Cannot find dtc', str(exc.exception))
 
             # Create a fake tool to use
@@ -1140,13 +1024,15 @@ class TestBuildMisc(TestBuildBase):
             os.chmod(dtc, 0o777)
 
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                    self._col, self._result_handler,
                                     dtc_skip=True)
             tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertIn(b'DTC', env)
 
             # Try the normal case, i.e. not skipping the dtc build
-            build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+            build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                    self._col, self._result_handler)
             tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertNotIn(b'DTC', env)
@@ -1274,7 +1160,8 @@ class TestBuilderFuncs(TestBuildBase):
 
     def test_read_func_sizes(self):
         """Test read_func_sizes() function"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler)
 
         # Create test data simulating 'nm' output
         # NM_SYMBOL_TYPES = 'tTdDbBr' - text, data, bss, rodata
@@ -1303,7 +1190,8 @@ class TestBuilderFuncs(TestBuildBase):
 
     def test_read_func_sizes_static(self):
         """Test read_func_sizes() with static function symbols"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler)
 
         # Test static functions (have . in name after first char)
         nm_output = '''00000100 t func.1234
@@ -1322,94 +1210,10 @@ class TestBuilderFuncs(TestBuildBase):
         finally:
             os.unlink(tmp_name)
 
-    def test_process_config_defconfig(self):
-        """Test _process_config() with .config style file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
-        config_data = '''# This is a comment
-CONFIG_OPTION_A=y
-CONFIG_OPTION_B="string"
-CONFIG_OPTION_C=123
-# CONFIG_OPTION_D is not set
-'''
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.config') as tmp:
-            tmp.write(config_data)
-            tmp_name = tmp.name
-
-        try:
-            config = build._process_config(tmp_name)
-
-            self.assertEqual('y', config['CONFIG_OPTION_A'])
-            self.assertEqual('"string"', config['CONFIG_OPTION_B'])
-            self.assertEqual('123', config['CONFIG_OPTION_C'])
-            # Comments should be ignored
-            self.assertNotIn('CONFIG_OPTION_D', config)
-        finally:
-            os.unlink(tmp_name)
-
-    def test_process_config_autoconf_h(self):
-        """Test _process_config() with autoconf.h style file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
-        config_data = '''/* Auto-generated header */
-#define CONFIG_OPTION_A 1
-#define CONFIG_OPTION_B "value"
-#define CONFIG_OPTION_C
-#define NOT_CONFIG 1
-'''
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.h') as tmp:
-            tmp.write(config_data)
-            tmp_name = tmp.name
-
-        try:
-            config = build._process_config(tmp_name)
-
-            self.assertEqual('1', config['CONFIG_OPTION_A'])
-            self.assertEqual('"value"', config['CONFIG_OPTION_B'])
-            # #define without value gets empty string (squash_config_y=False)
-            self.assertEqual('', config['CONFIG_OPTION_C'])
-            # Non-CONFIG_ defines should be ignored
-            self.assertNotIn('NOT_CONFIG', config)
-        finally:
-            os.unlink(tmp_name)
-
-    def test_process_config_nonexistent(self):
-        """Test _process_config() with non-existent file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-
-        config = build._process_config('/nonexistent/path/config')
-        self.assertEqual({}, config)
-
-    def test_process_config_squash_y(self):
-        """Test _process_config() with squash_config_y enabled"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
-        build.squash_config_y = True
-
-        config_data = '''CONFIG_OPTION_A=y
-CONFIG_OPTION_B=n
-#define CONFIG_OPTION_C
-'''
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
-            tmp.write(config_data)
-            tmp_name = tmp.name
-
-        try:
-            config = build._process_config(tmp_name)
-
-            # y should be squashed to 1
-            self.assertEqual('1', config['CONFIG_OPTION_A'])
-            # n should remain n
-            self.assertEqual('n', config['CONFIG_OPTION_B'])
-            # Empty #define should get '1' when squash_config_y is True
-            self.assertEqual('1', config['CONFIG_OPTION_C'])
-        finally:
-            os.unlink(tmp_name)
-
     def test_process_environment(self):
         """Test _process_environment() function"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler)
 
         # Environment file uses null-terminated strings
         env_data = 'bootcmd=run bootm\x00bootdelay=3\x00console=ttyS0\x00'
@@ -1428,14 +1232,16 @@ CONFIG_OPTION_B=n
 
     def test_process_environment_nonexistent(self):
         """Test _process_environment() with non-existent file"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler)
 
         env = build._process_environment('/nonexistent/path/uboot.env')
         self.assertEqual({}, env)
 
     def test_process_environment_invalid_lines(self):
         """Test _process_environment() handles invalid lines gracefully"""
-        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler)
 
         # Include lines without '=' which should be ignored
         env_data = 'valid=value\x00invalid_no_equals\x00another=good\x00'

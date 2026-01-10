@@ -12,19 +12,31 @@ from unittest import mock
 
 from buildman import builder
 from buildman import builderthread
+from buildman.outcome import (DisplayOptions, OUTCOME_OK, OUTCOME_WARNING,
+                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.resulthandler import ResultHandler
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
+# Default display options for tests
+DEFAULT_OPTS = DisplayOptions(
+    show_errors=False, show_sizes=False, show_detail=False,
+    show_bloat=False, show_config=False, show_environment=False,
+    show_unknown=False, ide=False, list_error_boards=False)
+
 
 class TestPrintFuncSizeDetail(unittest.TestCase):
-    """Tests for Builder.print_func_size_detail()"""
+    """Tests for ResultHandler._print_func_size_detail()"""
 
     def setUp(self):
         """Set up test fixtures"""
-        # Create a minimal Builder for testing
+        # Create a minimal Builder for testing (provides _result_handler)
+        self.col = terminal.Color()
+        self.result_handler = ResultHandler(self.col, DEFAULT_OPTS)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp', git_dir=None, num_threads=0,
-            num_jobs=1)
+            num_jobs=1, col=self.col, result_handler=self.result_handler)
+        self.writer = self.builder._result_handler
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -37,7 +49,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100, 'func_b': 200}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         # No output when there are no changes
@@ -49,7 +61,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 150}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -67,7 +79,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 150}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -80,7 +92,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100, 'func_b': 200}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -96,7 +108,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         new = {'func_a': 100}
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -120,7 +132,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         }
 
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', old, new)
+        self.writer._print_func_size_detail('u-boot', old, new)
         lines = terminal.get_print_test_lines()
 
         text = '\n'.join(line.text for line in lines)
@@ -139,7 +151,7 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
     def test_empty_dicts(self):
         """Test with empty dictionaries"""
         terminal.get_print_test_lines()  # Clear
-        self.builder.print_func_size_detail('u-boot', {}, {})
+        self.writer._print_func_size_detail('u-boot', {}, {})
         lines = terminal.get_print_test_lines()
 
         # No output when both dicts are empty
@@ -151,9 +163,11 @@ class TestPrepareThread(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -265,9 +279,11 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -341,7 +357,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
 
 class TestShowNotBuilt(unittest.TestCase):
-    """Tests for Builder._show_not_built()"""
+    """Tests for ResultHandler._show_not_built()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -358,16 +374,20 @@ class TestShowNotBuilt(unittest.TestCase):
         outcome.err_lines = err_lines if err_lines else []
         return outcome
 
+    def __show_not_built(self, board_selected, board_dict):
+        """Helper to call ResultHandler._show_not_built"""
+        ResultHandler._show_not_built(board_selected, board_dict)
+
     def test_all_boards_built(self):
         """Test when all selected boards were built successfully"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_OK),
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_OK),
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # No output when all boards were built
@@ -377,13 +397,13 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test when some boards have OUTCOME_UNKNOWN (e.g. missing toolchain)"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
-            'board3': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_UNKNOWN),
+            'board3': self._make_outcome(OUTCOME_UNKNOWN),
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)
@@ -396,12 +416,12 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test when all boards have OUTCOME_UNKNOWN"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_UNKNOWN),
-            'board2': self._make_outcome(builder.OUTCOME_UNKNOWN),
+            'board1': self._make_outcome(OUTCOME_UNKNOWN),
+            'board2': self._make_outcome(OUTCOME_UNKNOWN),
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)
@@ -413,13 +433,13 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that build errors (not toolchain) are not counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_ERROR,
                                          ['error: some build error']),
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # Build errors are still "built", just with errors
@@ -429,15 +449,15 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that toolchain errors are counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
-            'board2': self._make_outcome(builder.OUTCOME_ERROR,
+            'board1': self._make_outcome(OUTCOME_OK),
+            'board2': self._make_outcome(OUTCOME_ERROR,
                                          ['Tool chain error for arm: not found']),
-            'board3': self._make_outcome(builder.OUTCOME_ERROR,
+            'board3': self._make_outcome(OUTCOME_ERROR,
                                          ['error: some build error']),
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         # Only toolchain errors count as "not built"
@@ -451,12 +471,12 @@ class TestShowNotBuilt(unittest.TestCase):
         """Test that boards missing from board_dict are counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
-            'board1': self._make_outcome(builder.OUTCOME_OK),
+            'board1': self._make_outcome(OUTCOME_OK),
             # board2 and board3 are not in board_dict
         }
 
         terminal.get_print_test_lines()  # Clear
-        builder.Builder._show_not_built(board_selected, board_dict)
+        self.__show_not_built(board_selected, board_dict)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 1)
@@ -471,9 +491,11 @@ class TestPrepareOutputSpace(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -554,9 +576,11 @@ class TestCheckOutputForLoop(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
         # Reset state before each test
         self.builder._restarting_config = False
         self.builder._terminated = False
@@ -633,9 +657,11 @@ class TestMake(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
 
     @mock.patch('buildman.builder.command.run_one')
     def test_make_basic(self, mock_run_one):
@@ -721,17 +747,19 @@ class TestMake(unittest.TestCase):
 
 
 class TestPrintBuildSummary(unittest.TestCase):
-    """Tests for Builder._print_build_summary()"""
+    """Tests for ResultHandler.print_build_summary()"""
 
     def setUp(self):
         """Set up test fixtures"""
+        self.col = terminal.Color()
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=ResultHandler(self.col, DEFAULT_OPTS))
+        self.handler = self.builder._result_handler
         # Set a start time in the past (less than 1 second ago to avoid
         # duration output)
-        self.builder._start_time = datetime.now()
-        self.builder.thread_exceptions = []
+        self.start_time = datetime.now()
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -740,12 +768,8 @@ class TestPrintBuildSummary(unittest.TestCase):
 
     def test_basic_count(self):
         """Test basic completed message with just count"""
-        self.builder.count = 10
-        self.builder.already_done = 0
-        self.builder.kconfig_reconfig = 0
-
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(10, 0, 0, self.start_time, [])
         lines = terminal.get_print_test_lines()
 
         # First line is blank, second is the message
@@ -756,12 +780,8 @@ class TestPrintBuildSummary(unittest.TestCase):
 
     def test_all_previously_done(self):
         """Test message when all builds were already done"""
-        self.builder.count = 5
-        self.builder.already_done = 5
-        self.builder.kconfig_reconfig = 0
-
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(5, 5, 0, self.start_time, [])
         lines = terminal.get_print_test_lines()
 
         self.assertIn('5 previously', lines[1].text)
@@ -769,12 +789,8 @@ class TestPrintBuildSummary(unittest.TestCase):
 
     def test_some_newly_built(self):
         """Test message with some previously done and some new"""
-        self.builder.count = 10
-        self.builder.already_done = 6
-        self.builder.kconfig_reconfig = 0
-
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(10, 6, 0, self.start_time, [])
         lines = terminal.get_print_test_lines()
 
         self.assertIn('6 previously', lines[1].text)
@@ -782,68 +798,51 @@ class TestPrintBuildSummary(unittest.TestCase):
 
     def test_with_kconfig_reconfig(self):
         """Test message with kconfig reconfigurations"""
-        self.builder.count = 8
-        self.builder.already_done = 0
-        self.builder.kconfig_reconfig = 3
-
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(8, 0, 3, self.start_time, [])
         lines = terminal.get_print_test_lines()
 
         self.assertIn('3 reconfig', lines[1].text)
 
     def test_thread_exceptions(self):
         """Test message with thread exceptions"""
-        self.builder.count = 5
-        self.builder.already_done = 0
-        self.builder.kconfig_reconfig = 0
-        self.builder.thread_exceptions = [Exception('err1'), Exception('err2')]
+        exceptions = [Exception('err1'), Exception('err2')]
 
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(5, 0, 0, self.start_time, exceptions)
         lines = terminal.get_print_test_lines()
 
         self.assertEqual(len(lines), 3)
         self.assertIn('Failed: 2 thread exceptions', lines[2].text)
 
-    @mock.patch('buildman.builder.datetime')
+    @mock.patch('buildman.resulthandler.datetime')
     def test_duration_and_rate(self, mock_datetime):
         """Test message includes duration and rate for long builds"""
-        self.builder.count = 100
-        self.builder.already_done = 0
-        self.builder.kconfig_reconfig = 0
-
         # Mock datetime to simulate a 10 second build
         start_time = datetime(2024, 1, 1, 12, 0, 0)
         end_time = datetime(2024, 1, 1, 12, 0, 10)
-        self.builder._start_time = start_time
         mock_datetime.now.return_value = end_time
         mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(100, 0, 0, start_time, [])
         lines = terminal.get_print_test_lines()
 
         self.assertIn('duration', lines[1].text)
         self.assertIn('rate', lines[1].text)
         self.assertIn('10.00', lines[1].text)  # 100 boards / 10 seconds
 
-    @mock.patch('buildman.builder.datetime')
+    @mock.patch('buildman.resulthandler.datetime')
     def test_duration_rounds_up(self, mock_datetime):
         """Test duration rounds up when microseconds >= 500000"""
-        self.builder.count = 100
-        self.builder.already_done = 0
-        self.builder.kconfig_reconfig = 0
-
         # Mock datetime to simulate a 10.6 second build (should round to 11)
         start_time = datetime(2024, 1, 1, 12, 0, 0)
         end_time = datetime(2024, 1, 1, 12, 0, 10, 600000)  # 10.6 seconds
-        self.builder._start_time = start_time
         mock_datetime.now.return_value = end_time
         mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
 
         terminal.get_print_test_lines()  # Clear
-        self.builder._print_build_summary()
+        self.handler.print_build_summary(100, 0, 0, start_time, [])
         lines = terminal.get_print_test_lines()
 
         # Duration should be rounded up to 11 seconds

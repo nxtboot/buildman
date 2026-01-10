@@ -3,11 +3,40 @@
 # Written by Simon Glass <sjg@chromium.org>
 #
 
-"""Utility functions for dealing with Kconfig .confing files"""
+"""Utility functions for dealing with Kconfig .config files"""
 
+import os
 import re
 
 from u_boot_pylib import tools
+
+
+class Config:
+    """Holds information about configuration settings for a board."""
+    def __init__(self, config_filename, target):
+        self.target = target
+        self.config = {}
+        for fname in config_filename:
+            self.config[fname] = {}
+
+    def add(self, fname, key, value):
+        """Add a configuration value
+
+        Args:
+            fname (str): Filename to add to (e.g. '.config')
+            key (str): Config key (e.g. 'CONFIG_DM')
+            value (str): Config value (e.g. 'y')
+        """
+        self.config[fname][key] = value
+
+    def __hash__(self):
+        val = 0
+        for _, config in self.config.items():
+            for key, value in config.items():
+                print(key, value)
+                val = val ^ hash(key) & hash(value)
+        return val
+
 
 RE_LINE = re.compile(r'(# )?CONFIG_([A-Z0-9_]+)(=(.*)| is not set)')
 RE_CFG = re.compile(r'(~?)(CONFIG_)?([A-Z0-9_]+)(=.*)?')
@@ -238,3 +267,42 @@ Failed adjustments:
 {content}
 '''
     return None
+
+
+def process_config(fname, squash_config_y):
+    """Read in a .config, autoconf.mk or autoconf.h file
+
+    This function handles all config file types. It ignores comments and
+    any #defines which don't start with CONFIG_.
+
+    Args:
+        fname (str): Filename to read
+        squash_config_y (bool): If True, replace 'y' values with '1'
+
+    Returns:
+        dict: Dictionary with:
+            key: Config name (e.g. CONFIG_DM)
+            value: Config value (e.g. '1')
+    """
+    config = {}
+    if os.path.exists(fname):
+        with open(fname, encoding='utf-8') as fd:
+            for line in fd:
+                line = line.strip()
+                if line.startswith('#define'):
+                    values = line[8:].split(' ', 1)
+                    if len(values) > 1:
+                        key, value = values
+                    else:
+                        key = values[0]
+                        value = '1' if squash_config_y else ''
+                    if not key.startswith('CONFIG_'):
+                        continue
+                elif not line or line[0] in ['#', '*', '/']:
+                    continue
+                else:
+                    key, value = line.split('=', 1)
+                if squash_config_y and value == 'y':
+                    value = '1'
+                config[key] = value
+    return config
