@@ -258,7 +258,7 @@ class TestFunctional(unittest.TestCase):
         """
         sys.argv = [sys.argv[0]] + list(args)
         args = cmdline.parse_args()
-        if brds == False:
+        if brds is False:
             brds = self._boards
         result = control.do_buildman(
             args, toolchains=self._toolchains, make_func=self._handle_make,
