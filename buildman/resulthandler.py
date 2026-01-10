@@ -74,7 +74,7 @@ class ResultHandler:
         Set up the base board list to be all those selected, and set the
         error lines to empty.
 
-        Following this, calls to print_result_summary() will use this
+        Following this, calls to _print_result_summary() will use this
         information to work out what has changed.
 
         Args:
@@ -93,7 +93,7 @@ class ResultHandler:
         self._base_environment = None
         self._error_lines = 0
 
-    def print_result_summary(self, board_selected, board_dict, err_lines,
+    def _print_result_summary(self, board_selected, board_dict, err_lines,
                              err_line_boards, warn_lines, warn_line_boards,
                              config, environment):
         """Compare results with the base results and display delta.
@@ -123,38 +123,38 @@ class ResultHandler:
             environment (dict): Dictionary keyed by environment variable, Each
                      value is the value of environment variable.
         """
-        brd_status = self.classify_boards(
+        brd_status = self._classify_boards(
             board_selected, board_dict, self._base_board_dict)
 
         # Get a list of errors and warnings that have appeared, and disappeared
-        better_err, worse_err = self.calc_error_delta(
+        better_err, worse_err = self._calc_error_delta(
             self._base_err_lines, self._base_err_line_boards, err_lines,
             err_line_boards, '', self._opts.list_error_boards)
-        better_warn, worse_warn = self.calc_error_delta(
+        better_warn, worse_warn = self._calc_error_delta(
             self._base_warn_lines, self._base_warn_line_boards, warn_lines,
             warn_line_boards, 'w', self._opts.list_error_boards)
 
         # For the IDE mode, print out all the output
         if self._opts.ide:
-            self.print_ide_output(board_selected, board_dict)
+            self._print_ide_output(board_selected, board_dict)
 
         # Display results by arch
         if not self._opts.ide:
-            self._error_lines += self.display_arch_results(
+            self._error_lines += self._display_arch_results(
                 board_selected, brd_status, better_err, worse_err, better_warn,
                 worse_warn, self._opts.show_unknown)
 
         if self._opts.show_sizes:
-            self.print_size_summary(
+            self._print_size_summary(
                 board_selected, board_dict, self._base_board_dict,
                 self._opts.show_detail, self._opts.show_bloat)
 
         if self._opts.show_environment and self._base_environment:
-            self.show_environment_changes(
+            self._show_environment_changes(
                 board_selected, board_dict, environment, self._base_environment)
 
         if self._opts.show_config and self._base_config:
-            self.show_config_changes(
+            self._show_config_changes(
                 board_selected, board_dict, config, self._base_config)
 
         # Save our updated information for the next call to this function
@@ -166,9 +166,9 @@ class ResultHandler:
         self._base_config = config
         self._base_environment = environment
 
-        self.show_not_built(board_selected, board_dict)
+        self._show_not_built(board_selected, board_dict)
 
-    def get_error_lines(self):
+    def _get_error_lines(self):
         """Get the number of error lines output
 
         Returns:
@@ -191,7 +191,7 @@ class ResultHandler:
         if commits:
             msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self._col.BLUE)
-        self.print_result_summary(
+        self._print_result_summary(
             board_selected, board_dict,
             err_lines if self._opts.show_errors else [], err_line_boards,
             warn_lines if self._opts.show_errors else [], warn_line_boards,
@@ -214,7 +214,7 @@ class ResultHandler:
         for commit_upto in range(0, commit_count, step):
             self.produce_result_summary(
                 commit_upto, commits, board_selected)
-        if not self.get_error_lines():
+        if not self._get_error_lines():
             tprint('(no errors to report)', colour=self._col.GREEN)
 
     def print_build_summary(self, count, already_done, kconfig_reconfig,
@@ -256,7 +256,7 @@ class ResultHandler:
                 f'Failed: {len(thread_exceptions)} thread exceptions',
                 colour=self._col.RED)
 
-    def colour_num(self, num):
+    def _colour_num(self, num):
         """Format a number with colour depending on its value
 
         Args:
@@ -270,7 +270,7 @@ class ResultHandler:
             return '0'
         return self._col.build(color, str(num))
 
-    def print_func_size_detail(self, fname, old, new):
+    def _print_func_size_detail(self, fname, old, new):
         """Print detailed size information for each function
 
         Args:
@@ -311,7 +311,7 @@ class ResultHandler:
         args = [add, -remove, grow, -shrink, up, -down, up - down]
         if max(args) == 0 and min(args) == 0:
             return
-        args = [self.colour_num(x) for x in args]
+        args = [self._colour_num(x) for x in args]
         indent = ' ' * 15
         tprint(f'{indent}{self._col.build(self._col.YELLOW, fname)}: add: '
                f'{args[0]}/{args[1]}, grow: {args[2]}/{args[3]} bytes: '
@@ -325,7 +325,7 @@ class ResultHandler:
                        f'{new.get(name, "-"):>7} {diff:+7d}')
                 tprint(msg, colour=color)
 
-    def print_size_detail(self, target_list, base_board_dict, board_dict,
+    def _print_size_detail(self, target_list, base_board_dict, board_dict,
                           show_bloat):
         """Show detailed size information for each board
 
@@ -360,12 +360,12 @@ class ResultHandler:
                     outcome = board_dict[target]
                     base_outcome = base_board_dict[target]
                     for fname in outcome.func_sizes:
-                        self.print_func_size_detail(fname,
+                        self._print_func_size_detail(fname,
                                                  base_outcome.func_sizes[fname],
                                                  outcome.func_sizes[fname])
 
     @staticmethod
-    def calc_image_size_changes(target, sizes, base_sizes):
+    def _calc_image_size_changes(target, sizes, base_sizes):
         """Calculate size changes for each image/part
 
         Args:
@@ -394,7 +394,7 @@ class ResultHandler:
                         err[name] = diff
         return err
 
-    def calc_size_changes(self, board_selected, board_dict, base_board_dict):
+    def _calc_size_changes(self, board_selected, board_dict, base_board_dict):
         """Calculate changes in size for different image parts
 
         The previous sizes are in Board.sizes, for each board
@@ -421,7 +421,7 @@ class ResultHandler:
             base_sizes = base_board_dict[target].sizes
             outcome = board_dict[target]
             sizes = outcome.sizes
-            err = self.calc_image_size_changes(target, sizes, base_sizes)
+            err = self._calc_image_size_changes(target, sizes, base_sizes)
             arch = board_selected[target].arch
             if not arch in arch_count:
                 arch_count[arch] = 1
@@ -435,7 +435,7 @@ class ResultHandler:
                 arch_list[arch].append(err)
         return arch_list, arch_count
 
-    def print_size_summary(self, board_selected, board_dict, base_board_dict,
+    def _print_size_summary(self, board_selected, board_dict, base_board_dict,
                            show_detail, show_bloat):
         """Print a summary of image sizes broken down by section.
 
@@ -457,7 +457,7 @@ class ResultHandler:
             show_detail (bool): Show size delta detail for each board
             show_bloat (bool): Show detail for each function
         """
-        arch_list, arch_count = self.calc_size_changes(board_selected,
+        arch_list, arch_count = self._calc_size_changes(board_selected,
                                                        board_dict,
                                                        base_board_dict)
 
@@ -516,10 +516,10 @@ class ResultHandler:
         if printed_arch:
             tprint()
             if show_detail:
-                self.print_size_detail(target_list, base_board_dict, board_dict,
+                self._print_size_detail(target_list, base_board_dict, board_dict,
                                        show_bloat)
 
-    def add_outcome(self, board_dict, arch_list, changes, char, color):
+    def _add_outcome(self, board_dict, arch_list, changes, char, color):
         """Add an output to our list of outcomes for each architecture
 
         This simple function adds failing boards (changes) to the
@@ -549,7 +549,7 @@ class ResultHandler:
             else:
                 arch_list[arch] += text
 
-    def output_err_lines(self, err_lines, colour):
+    def _output_err_lines(self, err_lines, colour):
         """Output the line of error/warning lines, if not empty
 
         Args:
@@ -578,7 +578,7 @@ class ResultHandler:
             return 1
         return 0
 
-    def display_arch_results(self, board_selected, brd_status, better_err,
+    def _display_arch_results(self, board_selected, brd_status, better_err,
                              worse_err, better_warn, worse_warn, show_unknown):
         """Display results by architecture
 
@@ -600,28 +600,28 @@ class ResultHandler:
                     worse_warn, better_warn)):
             return error_lines
         arch_list = {}
-        self.add_outcome(board_selected, arch_list, brd_status.ok, '',
+        self._add_outcome(board_selected, arch_list, brd_status.ok, '',
                          self._col.GREEN)
-        self.add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
+        self._add_outcome(board_selected, arch_list, brd_status.warn, 'w+',
                          self._col.YELLOW)
-        self.add_outcome(board_selected, arch_list, brd_status.err, '+',
+        self._add_outcome(board_selected, arch_list, brd_status.err, '+',
                          self._col.RED)
-        self.add_outcome(board_selected, arch_list, brd_status.new, '*',
+        self._add_outcome(board_selected, arch_list, brd_status.new, '*',
                          self._col.BLUE)
         if show_unknown:
-            self.add_outcome(board_selected, arch_list, brd_status.unknown,
+            self._add_outcome(board_selected, arch_list, brd_status.unknown,
                              '?', self._col.MAGENTA)
         for arch, target_list in arch_list.items():
             tprint(f'{arch:>10s}: {target_list}')
             error_lines += 1
-        error_lines += self.output_err_lines(better_err, colour=self._col.GREEN)
-        error_lines += self.output_err_lines(worse_err, colour=self._col.RED)
-        error_lines += self.output_err_lines(better_warn, colour=self._col.CYAN)
-        error_lines += self.output_err_lines(worse_warn, colour=self._col.YELLOW)
+        error_lines += self._output_err_lines(better_err, colour=self._col.GREEN)
+        error_lines += self._output_err_lines(worse_err, colour=self._col.RED)
+        error_lines += self._output_err_lines(better_warn, colour=self._col.CYAN)
+        error_lines += self._output_err_lines(worse_warn, colour=self._col.YELLOW)
         return error_lines
 
     @staticmethod
-    def print_ide_output(board_selected, board_dict):
+    def _print_ide_output(board_selected, board_dict):
         """Print output for IDE mode
 
         Args:
@@ -636,7 +636,7 @@ class ResultHandler:
                 sys.stderr.write(line)
 
     @staticmethod
-    def calc_config(delta, name, config):
+    def _calc_config(delta, name, config):
         """Calculate configuration changes
 
         Args:
@@ -655,7 +655,7 @@ class ResultHandler:
         return f'{delta} {name}: {out}'
 
     @classmethod
-    def add_config(cls, lines, name, config_plus, config_minus, config_change):
+    def _add_config(cls, lines, name, config_plus, config_minus, config_change):
         """Add changes in configuration to a list
 
         Args:
@@ -672,13 +672,13 @@ class ResultHandler:
                 value: config value
         """
         if config_plus:
-            lines.append(cls.calc_config('+', name, config_plus))
+            lines.append(cls._calc_config('+', name, config_plus))
         if config_minus:
-            lines.append(cls.calc_config('-', name, config_minus))
+            lines.append(cls._calc_config('-', name, config_minus))
         if config_change:
-            lines.append(cls.calc_config('c', name, config_change))
+            lines.append(cls._calc_config('c', name, config_change))
 
-    def output_config_info(self, lines):
+    def _output_config_info(self, lines):
         """Output configuration change information
 
         Args:
@@ -696,7 +696,7 @@ class ResultHandler:
                 col = self._col.YELLOW
             tprint('   ' + line, newline=True, colour=col)
 
-    def show_environment_changes(self, board_selected, board_dict,
+    def _show_environment_changes(self, board_selected, board_dict,
                                  environment, base_environment):
         """Show changes in environment variables
 
@@ -733,11 +733,11 @@ class ResultHandler:
                     desc = f'{value} -> {new_value}'
                     environment_change[key] = desc
 
-            self.add_config(lines, target, environment_plus,
+            self._add_config(lines, target, environment_plus,
                            environment_minus, environment_change)
-        self.output_config_info(lines)
+        self._output_config_info(lines)
 
-    def calc_config_changes(self, target, config, base_config,
+    def __calc_config_changes(self, target, config, base_config,
                             arch, arch_config_plus, arch_config_minus,
                             arch_config_change):
         """Calculate configuration changes for a single target
@@ -788,13 +788,13 @@ class ResultHandler:
             arch_config_minus[arch][name].update(config_minus)
             arch_config_change[arch][name].update(config_change)
 
-            self.add_config(lines, name, config_plus, config_minus,
+            self._add_config(lines, name, config_plus, config_minus,
                            config_change)
-        self.add_config(lines, 'all', all_config_plus,
+        self._add_config(lines, 'all', all_config_plus,
                        all_config_minus, all_config_change)
         return '\n'.join(lines)
 
-    def print_arch_config_summary(self, arch, arch_config_plus,
+    def _print_arch_config_summary(self, arch, arch_config_plus,
                                   arch_config_minus, arch_config_change):
         """Print configuration summary for a single architecture
 
@@ -812,16 +812,16 @@ class ResultHandler:
             all_plus.update(arch_config_plus[arch][name])
             all_minus.update(arch_config_minus[arch][name])
             all_change.update(arch_config_change[arch][name])
-            self.add_config(lines, name,
+            self._add_config(lines, name,
                            arch_config_plus[arch][name],
                            arch_config_minus[arch][name],
                            arch_config_change[arch][name])
-        self.add_config(lines, 'all', all_plus, all_minus, all_change)
+        self._add_config(lines, 'all', all_plus, all_minus, all_change)
         if lines:
             tprint(f'{arch}:')
-            self.output_config_info(lines)
+            self._output_config_info(lines)
 
-    def show_config_changes(self, board_selected, board_dict, config,
+    def _show_config_changes(self, board_selected, board_dict, config,
                             base_config):
         """Show changes in configuration
 
@@ -859,7 +859,7 @@ class ResultHandler:
             if target not in board_selected:
                 continue
             arch = board_selected[target].arch
-            summary[target] = self.calc_config_changes(
+            summary[target] = self.__calc_config_changes(
                 target, config, base_config, arch,
                 arch_config_plus, arch_config_minus, arch_config_change)
 
@@ -871,7 +871,7 @@ class ResultHandler:
                 lines_by_target[lines] = [target]
 
         for arch in arch_list:
-            self.print_arch_config_summary(arch, arch_config_plus,
+            self._print_arch_config_summary(arch, arch_config_plus,
                                           arch_config_minus,
                                           arch_config_change)
 
@@ -879,10 +879,10 @@ class ResultHandler:
             if not lines:
                 continue
             tprint(f"{' '.join(sorted(targets))} :")
-            self.output_config_info(lines.split('\n'))
+            self._output_config_info(lines.split('\n'))
 
     @staticmethod
-    def classify_boards(board_selected, board_dict, base_board_dict):
+    def _classify_boards(board_selected, board_dict, base_board_dict):
         """Classify boards into outcome categories
 
         Args:
@@ -926,7 +926,7 @@ class ResultHandler:
         return BoardStatus(ok, warn, err, new, unknown)
 
     @staticmethod
-    def show_not_built(board_selected, board_dict):
+    def _show_not_built(board_selected, board_dict):
         """Show boards that were not built
 
         This reports boards that couldn't be built due to toolchain issues.
@@ -980,7 +980,7 @@ class ResultHandler:
         return brds
 
     @classmethod
-    def calc_error_delta(cls, base_lines, base_line_boards, lines, line_boards,
+    def _calc_error_delta(cls, base_lines, base_line_boards, lines, line_boards,
                          char, list_error_boards):
         """Calculate the required output based on changes in errors
 

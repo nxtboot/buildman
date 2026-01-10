@@ -372,7 +372,7 @@ class Builder:
         self.re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
-        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_threads(self, mrproper, per_board_out_dir,
                        test_thread_exceptions):
@@ -409,7 +409,7 @@ class Builder:
         """Get rid of all threads created by the builder"""
         self.threads.clear()
 
-    def signal_handler(self, _signum, _frame):
+    def _signal_handler(self, _signum, _frame):
         """Handle a signal by exiting"""
         sys.exit(1)
 
@@ -482,7 +482,7 @@ class Builder:
             self._timestamps.popleft()
             count -= 1
 
-    def select_commit(self, commit, checkout=True):
+    def _select_commit(self, commit, checkout=True):
         """Checkout the selected commit for this build
 
         Args:
@@ -714,7 +714,7 @@ class Builder:
         output_dir = self.get_build_dir(commit_upto, target)
         return os.path.join(output_dir, 'err')
 
-    def filter_errors(self, lines):
+    def _filter_errors(self, lines):
         """Filter out errors in which we have no interest
 
         We should probably use map().
@@ -812,7 +812,7 @@ class Builder:
             err_file = self.get_err_file(commit_upto, target)
             if os.path.exists(err_file):
                 with open(err_file, 'r', encoding='utf-8') as fd:
-                    err_lines = self.filter_errors(fd.readlines())
+                    err_lines = self._filter_errors(fd.readlines())
 
             # Decide whether the build was ok, failed or created warnings
             if return_code:
@@ -1008,7 +1008,7 @@ class Builder:
         return (board_dict, err_lines_summary, err_lines_boards,
                 warn_lines_summary, warn_lines_boards, config, environment)
 
-    def setup_build(self, board_selected, _commits):
+    def _setup_build(self, board_selected, _commits):
         """Set up ready to start a build.
 
         Args:
@@ -1182,7 +1182,7 @@ class Builder:
         if not self._opts.ide:
             tprint('\rStarting build...', newline=False)
         self._start_time = datetime.now()
-        self.setup_build(board_selected, commits)
+        self._setup_build(board_selected, commits)
         self.process_result(None)
         self.thread_exceptions = []
         # Create jobs to build all commits for each board
