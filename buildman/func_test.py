@@ -27,7 +27,7 @@ from u_boot_pylib import terminal
 from u_boot_pylib import test_util
 from u_boot_pylib import tools
 
-settings_data = '''
+SETTINGS_DATA = '''
 # Buildman settings file
 [global]
 
@@ -51,7 +51,7 @@ BOARDS = [
     ['Active', 'sandbox', 'sandbox', '', 'Tester', 'Sandbox board', 'board4', ''],
 ]
 
-commit_shortlog = """4aca821 patman: Avoid changing the order of tags
+COMMIT_SHORTLOG = """4aca821 patman: Avoid changing the order of tags
 39403bb patman: Use --no-pager' to stop git from forking a pager
 db6e6f2 patman: Remove the -a option
 f2ccf03 patman: Correct unit tests to run correctly
@@ -192,7 +192,7 @@ class TestFunctional(unittest.TestCase):
         self._buildman_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
         command.TEST_RESULT = self._HandleCommand
         bsettings.setup(None)
-        bsettings.add_file(settings_data)
+        bsettings.add_file(SETTINGS_DATA)
         self.setupToolchains()
         self._toolchains.add('arm-gcc', test=False)
         self._toolchains.add('powerpc-gcc', test=False)
@@ -202,7 +202,7 @@ class TestFunctional(unittest.TestCase):
 
         # Directories where the source been cloned
         self._clone_dirs = []
-        self._commits = len(commit_shortlog.splitlines()) + 1
+        self._commits = len(COMMIT_SHORTLOG.splitlines()) + 1
         self._total_builds = self._commits * len(BOARDS)
 
         # Number of calls to make
@@ -303,7 +303,7 @@ class TestFunctional(unittest.TestCase):
         if '-n0' in args:
             return command.CommandResult(return_code=0)
         elif args[-1] == 'upstream/master..%s' % self._test_branch:
-            return command.CommandResult(return_code=0, stdout=commit_shortlog)
+            return command.CommandResult(return_code=0, stdout=COMMIT_SHORTLOG)
         elif args[:3] == ['--no-color', '--no-decorate', '--reverse']:
             if args[-1] == self._test_branch:
                 count = int(args[3][2:])
