@@ -2,6 +2,12 @@
 # Copyright (c) 2014 Google, Inc
 #
 
+"""Functional tests for buildman
+
+These tests run buildman with mocked commands to verify its behavior
+without actually building anything.
+"""
+
 import io
 import os
 from pathlib import Path
@@ -230,6 +236,7 @@ class TestFunctional(unittest.TestCase):
         shutil.rmtree(self._output_dir)
 
     def setup_toolchains(self):
+        """Set up toolchains for testing"""
         self._toolchains = toolchain.Toolchains()
         self._toolchains.add('gcc', test=False)
 
@@ -268,6 +275,7 @@ class TestFunctional(unittest.TestCase):
         return result
 
     def test_full_help(self):
+        """Test that -H shows the full README.rst file"""
         command.TEST_RESULT = None
         result = self._run_buildman('-H')
         help_file = os.path.join(self._buildman_dir, 'README.rst')
@@ -279,6 +287,7 @@ class TestFunctional(unittest.TestCase):
         self.assertEqual(0, result.return_code)
 
     def test_help(self):
+        """Test that -h shows help text"""
         command.TEST_RESULT = None
         result = self._run_buildman('-h')
         help_file = os.path.join(self._buildman_dir, 'README.rst')
@@ -536,8 +545,12 @@ Some images are invalid'''
         print('_handle_make failure: make', stage)
         sys.exit(1)
 
-    # Example function to print output lines
     def print_lines(self, lines):
+        """Print output lines for debugging tests
+
+        Args:
+            lines (list of str): Lines to print
+        """
         print(len(lines))
         for line in lines:
             print(line)
@@ -1524,7 +1537,15 @@ something: me
         call_count = [0]
         config_exists = [False]
 
-        def mock_kconfig_changed(fname, srcdir='.', target=None):
+        def mock_kconfig_changed(fname, _srcdir='.', _target=None):
+            """Mock for kconfig_changed_since that checks if .config exists
+
+            Args:
+                fname (str): Path to the .config file
+
+            Returns:
+                bool: True if .config exists, False otherwise
+            """
             call_count[0] += 1
             # Return True only if .config exists (i.e. not the first build)
             # The first build has no .config to compare against
@@ -1553,7 +1574,12 @@ something: me
         """Test that -Z flag disables Kconfig change detection"""
         call_count = [0]
 
-        def mock_kconfig_changed(fname, srcdir='.', target=None):
+        def mock_kconfig_changed(_fname, _srcdir='.', _target=None):
+            """Mock for kconfig_changed_since that always returns True
+
+            Returns:
+                bool: Always True
+            """
             call_count[0] += 1
             return True  # Would trigger reconfig if checking was enabled
 
