@@ -216,7 +216,7 @@ class Builder:
     """
 
     def __init__(self, toolchains, base_dir, git_dir, num_threads, num_jobs,
-                 col, gnu_make='make', checkout=True, step=1,
+                 col, result_handler, gnu_make='make', checkout=True, step=1,
                  no_subdirs=False, full_path=False, verbose_build=False,
                  mrproper=False, fallback_mrproper=False,
                  per_board_out_dir=False, config_only=False,
@@ -234,6 +234,7 @@ class Builder:
             toolchains: Toolchains object to use for building
             base_dir: Base directory to use for builder
             git_dir: Git directory containing source repository
+            result_handler: ResultHandler object for displaying results
             num_threads: Number of builder threads to run
             num_jobs: Number of jobs to run at once (passed to make as -j)
             col: terminal.Color object for coloured output
@@ -337,6 +338,7 @@ class Builder:
 
         self.warnings_as_errors = warnings_as_errors
         self.col = col
+        self._result_handler = result_handler
 
         self.thread_exceptions = []
         self.test_thread_exceptions = test_thread_exceptions

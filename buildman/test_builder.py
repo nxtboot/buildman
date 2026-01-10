@@ -13,7 +13,8 @@ from unittest import mock
 from buildman import builder
 from buildman import builderthread
 from buildman.outcome import (OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
-                              OUTCOME_UNKNOWN)
+                              OUTCOME_UNKNOWN, DisplayOptions)
+from buildman.resulthandler import ResultHandler
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
@@ -25,9 +26,14 @@ class TestPrintFuncSizeDetail(unittest.TestCase):
         """Set up test fixtures"""
         # Create a minimal Builder for testing
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp', git_dir=None, num_threads=0,
-            num_jobs=1, col=self.col)
+            num_jobs=1, col=self.col, result_handler=self.result_handler)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -155,9 +161,15 @@ class TestPrepareThread(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -270,9 +282,15 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -481,9 +499,15 @@ class TestPrepareOutputSpace(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
         terminal.set_print_test_mode()
 
     def tearDown(self):
@@ -565,9 +589,15 @@ class TestCheckOutputForLoop(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
         # Reset state before each test
         self.builder._restarting_config = False
         self.builder._terminated = False
@@ -645,9 +675,15 @@ class TestMake(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
 
     @mock.patch('buildman.builder.command.run_one')
     def test_make_basic(self, mock_run_one):
@@ -738,9 +774,15 @@ class TestPrintBuildSummary(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.col = terminal.Color()
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self.result_handler = ResultHandler(self.col, opts)
         self.builder = builder.Builder(
             toolchains=None, base_dir='/tmp/test', git_dir='/src/repo',
-            num_threads=4, num_jobs=1, col=self.col)
+            num_threads=4, num_jobs=1, col=self.col,
+            result_handler=self.result_handler)
         # Set a start time in the past (less than 1 second ago to avoid
         # duration output)
         self.builder._start_time = datetime.now()

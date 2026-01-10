@@ -25,6 +25,7 @@ from buildman import cfgutil
 from buildman import control
 from buildman import toolchain
 from buildman.outcome import DisplayOptions
+from buildman.resulthandler import ResultHandler
 from patman import commit
 from u_boot_pylib import command
 from u_boot_pylib import terminal
@@ -196,6 +197,11 @@ class TestBuildBase(unittest.TestCase):
         # Avoid sending any output
         terminal.set_print_test_mode()
         self._col = terminal.Color()
+        self._opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        self._result_handler = ResultHandler(self._col, self._opts)
 
         self.base_dir = tempfile.mkdtemp()
         if not os.path.isdir(self.base_dir):
@@ -263,8 +269,13 @@ class TestBuildOutput(TestBuildBase):
         Returns:
             Iterator containing the output lines, each a PrintLine() object
         """
+        opts = DisplayOptions(
+            show_errors=show_errors, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=list_error_boards)
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
-                                2, self._col, checkout=False)
+                                2, self._col, ResultHandler(self._col, opts),
+                                checkout=False)
         build.do_make = self.make
         board_selected = self.brds.get_selected_dict()
 
@@ -281,10 +292,6 @@ class TestBuildOutput(TestBuildBase):
         # We should get two starting messages, an update for every commit built
         # and a summary message
         self.assertEqual(count, len(COMMITS) * len(BOARDS) + 3)
-        opts = DisplayOptions(
-            show_errors=show_errors, show_sizes=False, show_detail=False,
-            show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=False, ide=False, list_error_boards=list_error_boards)
         build.set_display_options(opts, filter_dtb_warnings,
                                   filter_migration_warnings)
         build.show_summary(self.commits, board_selected)
@@ -642,7 +649,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir(self):
         """Test output-directory naming for a commit"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                self._col, checkout=False)
+                                self._col, self._result_handler,
+                                checkout=False)
         build.commits = self.commits
         build.commit_count = len(self.commits)
         subject = self.commits[1].subject.translate(builder.trans_valid_chars)
@@ -652,7 +660,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir_current(self):
         """Test output-directory naming for current source"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                self._col, checkout=False)
+                                self._col, self._result_handler,
+                                checkout=False)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '/current')
@@ -660,7 +669,8 @@ class TestBuild(TestBuildBase):
     def test_output_dir_no_subdirs(self):
         """Test output-directory naming without subdirectories"""
         build = builder.Builder(self.toolchains, BASE_DIR, None, 1, 2,
-                                self._col, checkout=False, no_subdirs=True)
+                                self._col, self._result_handler,
+                                checkout=False, no_subdirs=True)
         build.commits = None
         build.commit_count = 0
         self.check_dirs(build, '')
@@ -760,7 +770,7 @@ class TestBuild(TestBuildBase):
             _touch(name)
 
         build = builder.Builder(self.toolchains, base_dir, None, 1, 2,
-                                self._col)
+                                self._col, self._result_handler)
         build.commits = self.commits
         build.commit_count = len(COMMITS)
         # pylint: disable=protected-access
@@ -1004,7 +1014,7 @@ class TestBuildMisc(TestBuildBase):
             # Check a missing tool
             with self.assertRaises(ValueError) as exc:
                 builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col, dtc_skip=True)
+                                self._col, self._result_handler, dtc_skip=True)
             self.assertIn('Cannot find dtc', str(exc.exception))
 
             # Create a fake tool to use
@@ -1013,14 +1023,15 @@ class TestBuildMisc(TestBuildBase):
             os.chmod(dtc, 0o777)
 
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                    self._col, dtc_skip=True)
+                                    self._col, self._result_handler,
+                                    dtc_skip=True)
             tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertIn(b'DTC', env)
 
             # Try the normal case, i.e. not skipping the dtc build
             build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                    self._col)
+                                    self._col, self._result_handler)
             tch = self.toolchains.select('arm')
             env = build.make_environment(tch)
             self.assertNotIn(b'DTC', env)
@@ -1149,7 +1160,7 @@ class TestBuilderFuncs(TestBuildBase):
     def test_read_func_sizes(self):
         """Test read_func_sizes() function"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col)
+                                self._col, self._result_handler)
 
         # Create test data simulating 'nm' output
         # NM_SYMBOL_TYPES = 'tTdDbBr' - text, data, bss, rodata
@@ -1179,7 +1190,7 @@ class TestBuilderFuncs(TestBuildBase):
     def test_read_func_sizes_static(self):
         """Test read_func_sizes() with static function symbols"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col)
+                                self._col, self._result_handler)
 
         # Test static functions (have . in name after first char)
         nm_output = '''00000100 t func.1234
@@ -1201,7 +1212,7 @@ class TestBuilderFuncs(TestBuildBase):
     def test_process_environment(self):
         """Test _process_environment() function"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col)
+                                self._col, self._result_handler)
 
         # Environment file uses null-terminated strings
         env_data = 'bootcmd=run bootm\x00bootdelay=3\x00console=ttyS0\x00'
@@ -1221,7 +1232,7 @@ class TestBuilderFuncs(TestBuildBase):
     def test_process_environment_nonexistent(self):
         """Test _process_environment() with non-existent file"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col)
+                                self._col, self._result_handler)
 
         env = build._process_environment('/nonexistent/path/uboot.env')
         self.assertEqual({}, env)
@@ -1229,7 +1240,7 @@ class TestBuilderFuncs(TestBuildBase):
     def test_process_environment_invalid_lines(self):
         """Test _process_environment() handles invalid lines gracefully"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
-                                self._col)
+                                self._col, self._result_handler)
 
         # Include lines without '=' which should be ignored
         env_data = 'valid=value\x00invalid_no_equals\x00another=good\x00'

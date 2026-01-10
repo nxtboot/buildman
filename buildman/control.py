@@ -21,6 +21,7 @@ from buildman import cfgutil
 from buildman import toolchain
 from buildman.builder import Builder
 from buildman.outcome import DisplayOptions
+from buildman.resulthandler import ResultHandler
 from patman import patchstream
 import qconfig
 from u_boot_pylib import command
@@ -535,7 +536,7 @@ def setup_output_dir(output_dir, work_in_output, branch, no_subdirs, col,
     return output_dir
 
 
-def run_builder(builder, commits, board_selected, args):
+def run_builder(builder, commits, board_selected, display_options, args):
     """Run the builder or show the summary
 
     Args:
@@ -544,6 +545,8 @@ def run_builder(builder, commits, board_selected, args):
         board_selected (dict): Dict of selected boards:
             key: target name
             value: Board object
+        display_options (DisplayOptions): Named tuple containing display
+            settings
         args (Namespace): Namespace to use
 
     Returns:
@@ -560,16 +563,6 @@ def run_builder(builder, commits, board_selected, args):
         tprint(get_action_summary(args.summary, commit_count, board_selected,
                                   args.threads, args.jobs))
 
-    display_options = DisplayOptions(
-        show_errors=args.show_errors,
-        show_sizes=args.show_sizes,
-        show_detail=args.show_detail,
-        show_bloat=args.show_bloat,
-        show_config=args.show_config,
-        show_environment=args.show_environment,
-        show_unknown=args.show_unknown,
-        ide=args.ide,
-        list_error_boards=args.list_error_boards)
     builder.set_display_options(
         display_options, args.filter_dtb_warnings, args.filter_migration_warnings)
     if args.summary:
@@ -809,12 +802,24 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     if args.config_only and args.target:
         raise ValueError('Cannot use --config-only with --target')
 
-    # Create colour object for output
+    # Create colour, display options and result handler objects
     col = terminal.Color()
+    display_options = DisplayOptions(
+        show_errors=args.show_errors,
+        show_sizes=args.show_sizes,
+        show_detail=args.show_detail,
+        show_bloat=args.show_bloat,
+        show_config=args.show_config,
+        show_environment=args.show_environment,
+        show_unknown=args.show_unknown,
+        ide=args.ide,
+        list_error_boards=args.list_error_boards)
+    result_handler = ResultHandler(col, display_options)
 
     # Create a new builder with the selected args
     builder = Builder(toolchains, output_dir, git_dir,
-            args.threads, args.jobs, col=col, checkout=True, step=args.step,
+            args.threads, args.jobs, col=col,
+            result_handler=result_handler, checkout=True, step=args.step,
             no_subdirs=args.no_subdirs, full_path=args.full_path,
             verbose_build=args.verbose_build,
             mrproper=args.mrproper,
@@ -838,6 +843,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
             force_reconfig = args.force_reconfig, in_tree = args.in_tree,
             force_config_on_failure=not args.quick, make_func=make_func,
             dtc_skip=args.dtc_skip, build_target=args.target)
+    result_handler.set_builder(builder)
 
     TEST_BUILDER = builder
 
@@ -845,4 +851,4 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
         wait_for_process_limit(args.process_limit)
 
     return run_builder(builder, series.commits if series else None,
-                       brds.get_selected_dict(), args)
+                       brds.get_selected_dict(), display_options, args)
