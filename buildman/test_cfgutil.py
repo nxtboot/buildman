@@ -115,6 +115,37 @@ class TestAdjustCfg(unittest.TestCase):
              '~CONFIG_ABE,CONFIG_MARK=0x456', 'CONFIG_ANNA="anna"'])
         self.assertEqual(expect, actual)
 
+    def test_adjust_cfg_to_fragment(self):
+        """Test adjust_cfg_to_fragment creates correct fragment content"""
+        # Empty dict returns empty string
+        self.assertEqual('', cfgutil.adjust_cfg_to_fragment({}))
+
+        # Enable option
+        self.assertEqual('CONFIG_FRED=y\n',
+                         cfgutil.adjust_cfg_to_fragment({'FRED': 'FRED'}))
+
+        # Disable option
+        self.assertEqual('# CONFIG_FRED is not set\n',
+                         cfgutil.adjust_cfg_to_fragment({'FRED': '~FRED'}))
+
+        # Set value
+        self.assertEqual('CONFIG_FRED=0x123\n',
+                         cfgutil.adjust_cfg_to_fragment({'FRED': 'FRED=0x123'}))
+
+        # Set string value
+        self.assertEqual('CONFIG_FRED="fred"\n',
+                         cfgutil.adjust_cfg_to_fragment({'FRED': 'FRED="fred"'}))
+
+        # Multiple options (note: dict order is preserved in Python 3.7+)
+        result = cfgutil.adjust_cfg_to_fragment({
+            'FRED': 'FRED',
+            'MARY': '~MARY',
+            'JOHN': 'JOHN=42'
+        })
+        self.assertIn('CONFIG_FRED=y', result)
+        self.assertIn('# CONFIG_MARY is not set', result)
+        self.assertIn('CONFIG_JOHN=42', result)
+
     def test_check_cfg_file(self):
         """Test check_cfg_file detects conflicts as expected"""
         # Check failure to disable CONFIG

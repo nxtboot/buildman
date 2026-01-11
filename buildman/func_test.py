@@ -25,6 +25,7 @@ from buildman import boards
 from buildman.boards import Extended
 from buildman import bsettings
 from buildman import builderthread
+from buildman import cfgutil
 from buildman import cmdline
 from buildman import control
 from buildman import toolchain
@@ -446,6 +447,73 @@ Idx Name          Size      VMA       LMA       File off  Algn
                 print(line, file=buf)
         return command.CommandResult(stdout=buf.getvalue(), return_code=0)
 
+    def _run_merge_config(self, cmd_list, _kwargs):
+        """Run the real merge_config.sh script
+
+        Runs merge_config.sh from the real U-Boot source tree with real
+        Kconfig files for actual dependency resolution.
+
+        Args:
+            cmd_list (list): Original command and arguments
+
+        Returns:
+            CommandResult: Result of running the script
+        """
+        # Run from the real U-Boot source tree (not the test's fake git dir)
+        src_root = os.path.dirname(os.path.dirname(self._buildman_dir))
+        merge_script = os.path.join(src_root, 'scripts', 'kconfig',
+                                    'merge_config.sh')
+
+        # Build command with real script path, keeping original arguments
+        new_cmd = [merge_script] + list(cmd_list[1:])
+
+        # Use a clean host environment with CROSS_COMPILE cleared so Kconfig
+        # uses the host gcc
+        env = dict(os.environ)
+        env['CROSS_COMPILE'] = ''
+
+        # Temporarily disable TEST_RESULT to run the real command
+        old_test_result = command.TEST_RESULT
+        command.TEST_RESULT = None
+        try:
+            result = command.run_one(*new_cmd, cwd=src_root, env=env,
+                                     capture=True, capture_stderr=True)
+        finally:
+            command.TEST_RESULT = old_test_result
+        return result
+
+    def _handle_make_savedefconfig(self, args, _kwargs):
+        """Handle make savedefconfig command
+
+        This runs the real make savedefconfig to create a minimal defconfig
+        from the current .config file.
+
+        Args:
+            args (list): Arguments to make (after 'make')
+
+        Returns:
+            CommandResult: Result of running the command
+        """
+        # Run from the U-Boot source tree
+        src_root = os.path.dirname(os.path.dirname(self._buildman_dir))
+
+        # Build the full command
+        new_cmd = ['make'] + list(args)
+
+        # Use a clean host environment with CROSS_COMPILE cleared
+        env = dict(os.environ)
+        env['CROSS_COMPILE'] = ''
+
+        # Temporarily disable TEST_RESULT to run the real command
+        old_test_result = command.TEST_RESULT
+        command.TEST_RESULT = None
+        try:
+            result = command.run_one(*new_cmd, cwd=src_root, env=env,
+                                     capture=True, capture_stderr=True)
+        finally:
+            command.TEST_RESULT = old_test_result
+        return result
+
     def _handle_command(self, **kwargs): # pylint: disable=too-many-branches
         """Handle a command execution.
 
@@ -482,6 +550,12 @@ Idx Name          Size      VMA       LMA       File off  Algn
             result = self._handle_command_cpp(args)
         elif cmd == 'gcc' and args[0] == '-E':
             result = self._handle_command_cpp(args[1:])
+        elif cmd.endswith('merge_config.sh'):
+            # Run the real merge_config.sh using command.run_one()
+            result = self._run_merge_config(pipe_list[0], kwargs)
+        elif cmd == 'make' and 'savedefconfig' in args:
+            # Handle make savedefconfig - create minimal defconfig from .config
+            result = self._handle_make_savedefconfig(args, kwargs)
         else:
             # Not handled, so abort
             print('unknown command', kwargs)
@@ -1107,21 +1181,19 @@ Idx Name          Size      VMA       LMA       File off  Algn
         lines, cfg_data = self.check_command('board0', '-r')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
 
-        # We should see CONFIG_LOCALVERSION_AUTO unset
-        self.assertEqual(b'''CONFIG_SOMETHING=1
-# CONFIG_LOCALVERSION_AUTO is not set
-''', cfg_data)
+        # We should see CONFIG_LOCALVERSION_AUTO unset (uses real Kconfig)
+        self.assertIn(b'# CONFIG_LOCALVERSION_AUTO is not set', cfg_data)
 
         with terminal.capture() as (stdout, _stderr):
             lines, cfg_data = self.check_command('board0', '-r', '-a',
                                                  'LOCALVERSION')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
 
-        # We should see CONFIG_LOCALVERSION_AUTO unset
-        self.assertEqual(b'''CONFIG_SOMETHING=1
-CONFIG_LOCALVERSION=y
-''', cfg_data)
+        # When user explicitly sets LOCALVERSION, the warning appears
         self.assertIn('Not dropping LOCALVERSION_AUTO', stdout.getvalue())
+
+        # LOCALVERSION should be present in .config (it's a string config)
+        self.assertIn(b'CONFIG_LOCALVERSION=', cfg_data)
 
     def test_scan_defconfigs(self):
         """Test scanning the defconfigs to obtain all the boards"""
@@ -1619,3 +1691,51 @@ something: me
 
         # No reconfigs should be triggered
         self.assertEqual(0, self._builder.kconfig_reconfig)
+
+    def test_adjust_cfg_no_imply(self):
+        """Test that direct .config modification does not resolve imply
+
+        Modifying .config directly with cfgutil.adjust_cfg_file() does not
+        run Kconfig, so 'imply' dependencies are not resolved. This test
+        demonstrates the limitation that merge_config.sh fixes.
+        """
+        # Create a temporary .config file
+        cfg_file = os.path.join(self._output_dir, '.config')
+        tools.write_file(cfg_file, b'# Empty config\n')
+
+        # Use cfgutil to directly modify .config (old approach)
+        adjust_cfg = {'BUILDMAN_TEST_A': 'BUILDMAN_TEST_A'}
+        cfgutil.adjust_cfg_file(cfg_file, adjust_cfg)
+
+        # Read the result
+        cfg_data = tools.read_file(cfg_file)
+
+        # BUILDMAN_TEST_A should be enabled
+        self.assertIn(b'CONFIG_BUILDMAN_TEST_A=y', cfg_data)
+
+        # But BUILDMAN_TEST_B should NOT be enabled - imply is not resolved
+        # because we didn't run Kconfig
+        self.assertNotIn(b'CONFIG_BUILDMAN_TEST_B=y', cfg_data,
+                         'Direct .config modification should not resolve imply')
+
+    def test_adjust_cfg_imply(self):
+        """Test that merge_config.sh resolves Kconfig 'imply' dependencies
+
+        The --adjust-cfg option uses merge_config.sh to apply config changes,
+        which runs 'make alldefconfig' to resolve all Kconfig dependencies
+        including 'imply'. CONFIG_BUILDMAN_TEST_A implies
+        CONFIG_BUILDMAN_TEST_B, so enabling BUILDMAN_TEST_A should also enable
+        BUILDMAN_TEST_B.
+        """
+        # Use single board to avoid parallel merge_config.sh race conditions
+        # Enable UNIT_TEST since BUILDMAN_TEST_A depends on it
+        _lines, cfg_data = self.check_command(
+            'board0', '-a', 'UNIT_TEST,BUILDMAN_TEST_A')
+
+        # Verify BUILDMAN_TEST_A was enabled
+        self.assertIn(b'CONFIG_BUILDMAN_TEST_A=y', cfg_data)
+
+        # merge_config.sh resolves imply dependencies, so enabling
+        # BUILDMAN_TEST_A should also enable BUILDMAN_TEST_B
+        self.assertIn(b'CONFIG_BUILDMAN_TEST_B=y', cfg_data,
+                      '--adjust-cfg should resolve imply dependencies')
