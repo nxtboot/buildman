@@ -1048,23 +1048,26 @@ Idx Name          Size      VMA       LMA       File off  Algn
         self.assertEqual(False,
                          control.get_allow_missing(False, True, 2, True))
 
-    def check_command(self, *extra_args):
+    def check_command(self, brd, *extra_args):
         """Run a command with the extra arguments and return the commands used
 
         Args:
+            brd (str): Board name to build
             extra_args (list of str): List of extra arguments
 
         Returns:
-            list of str: Lines returned in the out-cmd file
+            tuple:
+                list of str: Lines returned in the out-cmd file
+                bytes: Contents of .config file
         """
-        self._run_control('-o', self._output_dir, *extra_args)
-        board0_dir = os.path.join(self._output_dir, 'current', 'board0')
-        self.assertTrue(os.path.exists(os.path.join(board0_dir, 'done')))
-        cmd_fname = os.path.join(board0_dir, 'out-cmd')
+        self._run_control('-o', self._output_dir, brd, *extra_args)
+        board_dir = os.path.join(self._output_dir, 'current', brd)
+        self.assertTrue(os.path.exists(os.path.join(board_dir, 'done')))
+        cmd_fname = os.path.join(board_dir, 'out-cmd')
         self.assertTrue(os.path.exists(cmd_fname))
         data = tools.read_file(cmd_fname)
 
-        config_fname = os.path.join(board0_dir, '.config')
+        config_fname = os.path.join(board_dir, '.config')
         self.assertTrue(os.path.exists(config_fname))
         cfg_data = tools.read_file(config_fname)
 
@@ -1072,14 +1075,14 @@ Idx Name          Size      VMA       LMA       File off  Algn
 
     def test_cmd_file(self):
         """Test that the -cmd-out file is produced"""
-        lines = self.check_command()[0]
+        lines = self.check_command('board0')[0]
         self.assertEqual(2, len(lines))
         self.assertRegex(lines[0], b'make O=/.*board0_defconfig')
         self.assertRegex(lines[0], b'make O=/.*-s.*')
 
     def test_no_lto(self):
         """Test that the --no-lto flag works"""
-        lines = self.check_command('-L')[0]
+        lines = self.check_command('board0', '-L')[0]
         self.assertIn(b'NO_LTO=1', lines[0])
 
     def test_fragments(self):
@@ -1110,7 +1113,8 @@ Idx Name          Size      VMA       LMA       File off  Algn
 ''', cfg_data)
 
         with terminal.capture() as (stdout, _stderr):
-            lines, cfg_data = self.check_command('-r', '-a', 'LOCALVERSION')
+            lines, cfg_data = self.check_command('board0', '-r', '-a',
+                                                 'LOCALVERSION')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
 
         # We should see CONFIG_LOCALVERSION_AUTO unset
@@ -1456,7 +1460,7 @@ CONFIG_SOC="fred"
 
     def test_target(self):
         """Test that the --target flag works"""
-        lines = self.check_command('--target', 'u-boot.dtb')[0]
+        lines = self.check_command('board0', '--target', 'u-boot.dtb')[0]
 
         # It should not affect the defconfig line
         self.assertNotIn(b'u-boot.dtb', lines[0])
