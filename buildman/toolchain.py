@@ -17,9 +17,17 @@ from u_boot_pylib import command
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
+# Toolchain priority levels (lower number = higher priority):
+#   PRIORITY_FULL_PREFIX: Explicit [toolchain-prefix] path exists as a file
+#   PRIORITY_PREFIX_GCC: [toolchain-prefix] path + 'gcc' exists as a file
+#   PRIORITY_PREFIX_GCC_PATH: [toolchain-prefix] path + 'gcc' found in PATH
+#   PRIORITY_DOWNLOADED: Toolchain downloaded via --fetch-arch
+#   PRIORITY_CALC: Toolchain found by scanning [toolchain] paths; actual
+#       priority is PRIORITY_CALC + offset based on toolchain name
 (PRIORITY_FULL_PREFIX, PRIORITY_PREFIX_GCC, PRIORITY_PREFIX_GCC_PATH,
-    PRIORITY_CALC) = list(range(4))
+    PRIORITY_DOWNLOADED, PRIORITY_CALC) = list(range(5))
 
+# Environment variable / argument types for get_env_args()
 (VAR_CROSS_COMPILE, VAR_PATH, VAR_ARCH, VAR_MAKE_ARGS) = range(4)
 
 class MyHTMLParser(HTMLParser):
@@ -290,6 +298,7 @@ class Toolchains:
         self.toolchains = {}
         self.prefixes = {}
         self.paths = []
+        self.download_paths = set()
         self.override_toolchain = override_toolchain
         self._make_flags = dict(bsettings.get_items('make-flags'))
 
@@ -329,6 +338,15 @@ class Toolchains:
         """
         self.prefixes = bsettings.get_items('toolchain-prefix')
         self.paths += self.get_path_list(show_warning)
+
+        # Track which paths are from downloaded toolchains
+        for name, value in bsettings.get_items('toolchain'):
+            if name == 'download':
+                fname = os.path.expanduser(value)
+                if '*' in value:
+                    self.download_paths.update(glob.glob(fname))
+                else:
+                    self.download_paths.add(fname)
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def add(self, fname, test=True, verbose=False, priority=PRIORITY_CALC,
@@ -435,8 +453,10 @@ class Toolchains:
             if verbose:
                 print(f"   - scanning path '{path}'")
             fnames = self.scan_path(path, verbose)
+            priority = (PRIORITY_DOWNLOADED if path in self.download_paths
+                        else PRIORITY_CALC)
             for fname in fnames:
-                self.add(fname, True, verbose)
+                self.add(fname, True, verbose, priority)
 
     def list(self):
         """List out the selected toolchains for each architecture"""
