@@ -1100,7 +1100,8 @@ Idx Name          Size      VMA       LMA       File off  Algn
 
     def test_reproducible(self):
         """Test that the -r flag works"""
-        lines, cfg_data = self.check_command('-r')
+        # Use single board to avoid parallel merge_config.sh race conditions
+        lines, cfg_data = self.check_command('board0', '-r')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
 
         # We should see CONFIG_LOCALVERSION_AUTO unset
