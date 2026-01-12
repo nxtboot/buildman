@@ -744,6 +744,30 @@ class TestBuild(TestBuildBase):
             # Verify downloaded priority beats system priority
             self.assertLess(toolchain.PRIORITY_DOWNLOADED, sys_tc.priority)
 
+    def test_is_doubled_prefix(self):
+        """Test detection of doubled toolchain prefixes"""
+        # Valid toolchain names (not doubled)
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('aarch64-linux-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('x86_64-linux-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('arm-linux-gnueabi-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('gcc'))
+
+        # Doubled prefixes (should be filtered out)
+        self.assertTrue(
+            toolchain.Toolchains.is_doubled_prefix(
+                'aarch64-linux-aarch64-linux-gcc'))
+        self.assertTrue(
+            toolchain.Toolchains.is_doubled_prefix(
+                'x86_64-linux-x86_64-linux-gcc'))
+
+        # Not a gcc file
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('aarch64-linux-ld'))
+
     def test_get_env_args(self):
         """Test the GetEnvArgs() function"""
         tc = self.toolchains.select('arm')

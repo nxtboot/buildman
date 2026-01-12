@@ -30,6 +30,10 @@ from u_boot_pylib import tools
 # Environment variable / argument types for get_env_args()
 (VAR_CROSS_COMPILE, VAR_PATH, VAR_ARCH, VAR_MAKE_ARGS) = range(4)
 
+# Matches a repeated prefix, e.g. 'aarch64-linux-aarch64-linux-gcc'
+RE_DOUBLED_PREFIX = re.compile(r'^(.+)\1gcc$')
+
+
 class MyHTMLParser(HTMLParser):
     """Simple class to collect links from a page
 
@@ -378,6 +382,22 @@ class Toolchains:
                       f"toolchain for arch '{toolchain.arch}' has priority "
                       f"{self.toolchains[toolchain.arch].priority}")
 
+    @staticmethod
+    def is_doubled_prefix(fname):
+        """Check if a gcc filename has a doubled prefix
+
+        Some toolchain tarballs contain symlinks with the cross-compile prefix
+        repeated, e.g. 'x86_64-linux-x86_64-linux-gcc'. These are not valid
+        toolchains and should be ignored.
+
+        Args:
+            fname (str): Filename to check (basename, not full path)
+
+        Returns:
+            bool: True if the prefix is doubled, False otherwise
+        """
+        return bool(RE_DOUBLED_PREFIX.match(fname))
+
     def scan_path(self, path, verbose):
         """Scan a path for a valid toolchain
 
@@ -394,6 +414,11 @@ class Toolchains:
             if verbose:
                 print(f"      - looking in '{dirname}'")
             for fname in glob.glob(dirname + '/*gcc'):
+                basename = os.path.basename(fname)
+                if self.is_doubled_prefix(basename):
+                    if verbose:
+                        print(f"         - ignoring '{fname}' (doubled prefix)")
+                    continue
                 if verbose:
                     print(f"         - found '{fname}'")
                 fnames.append(fname)
