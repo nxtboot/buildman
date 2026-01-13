@@ -474,7 +474,10 @@ Setting up
       sudo mkdir -p /toolchains
       sudo mv ~/.buildman-toolchains/*/* /toolchains/
 
-   Buildman should now be set up to use your new toolchain.
+   Buildman should now be set up to use your new toolchain. Downloaded
+   toolchains are given priority over system-installed toolchains, so if you
+   have both a downloaded toolchain and one installed via your
+   distribution's package manager, the downloaded one will be used.
 
    At the time of writing, U-Boot has these architectures:
 
@@ -938,12 +941,30 @@ a set of (tag, value) pairs.
 
 '[toolchain-prefix]' section
     This can be used to provide the full toolchain-prefix for one or more
-    architectures. The full CROSS_COMPILE prefix must be provided. These
-    typically have a higher priority than matches in the '[toolchain]', due to
-    this prefix.
+    architectures. The full CROSS_COMPILE prefix must be provided.
 
     The tilde character ``~`` is supported in paths, to represent the home
     directory.
+
+Toolchain priority
+    When multiple toolchains are available for an architecture, buildman
+    selects the one with the highest priority (lowest priority number).
+
+    Note: Lower numbers indicate higher priority, so a toolchain with
+    priority 3 is preferred over one with priority 6.
+
+    The priority levels are:
+
+    - 0: Full prefix path from '[toolchain-prefix]' that exists as a file
+    - 1: Prefix from '[toolchain-prefix]' with 'gcc' appended that exists
+    - 2: Prefix from '[toolchain-prefix]' found in PATH
+    - 3: Downloaded toolchains (from ``--fetch-arch``)
+    - 4+: Toolchains found by scanning '[toolchain]' paths (priority
+      calculated from filename, e.g. '-linux' variants get priority 6)
+
+    This means that downloaded toolchains are preferred over system-installed
+    toolchains (e.g. from a distribution package), but explicit
+    '[toolchain-prefix]' entries take the highest priority.
 
 '[toolchain-alias]' section
     This converts toolchain architecture names to U-Boot names. For example,

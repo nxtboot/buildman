@@ -701,6 +701,73 @@ class TestBuild(TestBuildBase):
                     'crosstool/files/bin/x86_64/.*/'
                     'x86_64-gcc-.*-nolibc[-_]arm-.*linux-gnueabi.tar.xz')
 
+    def test_toolchain_download_priority(self):
+        """Test that downloaded toolchains have priority over system ones"""
+        # Create a temp directory structure with two toolchains for same arch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create 'system' toolchain path (simulating /usr/bin)
+            system_path = os.path.join(tmpdir, 'system')
+            os.makedirs(os.path.join(system_path, 'bin'))
+            system_gcc = os.path.join(system_path, 'bin', 'aarch64-linux-gcc')
+            tools.write_file(system_gcc, b'#!/bin/sh\necho gcc')
+            os.chmod(system_gcc, 0o755)
+
+            # Create 'download' toolchain path
+            download_path = os.path.join(tmpdir, 'download')
+            os.makedirs(os.path.join(download_path, 'bin'))
+            download_gcc = os.path.join(download_path, 'bin',
+                                        'aarch64-linux-gcc')
+            tools.write_file(download_gcc, b'#!/bin/sh\necho gcc')
+            os.chmod(download_gcc, 0o755)
+
+            # Check system toolchain priority (not in download_paths)
+            sys_tc = toolchain.Toolchain(system_gcc, test=False)
+            self.assertEqual(toolchain.PRIORITY_CALC + 2, sys_tc.priority)
+
+            # Set up toolchains with download path tracked
+            tcs = toolchain.Toolchains()
+            tcs.paths = [system_path, download_path]
+            tcs.download_paths = {download_path}
+
+            # Scan and check which toolchain is selected
+            with terminal.capture():
+                tcs.scan(False, raise_on_error=False)
+
+            # The downloaded toolchain should be selected
+            tc = tcs.toolchains.get('aarch64')
+            self.assertIsNotNone(tc)
+            self.assertTrue(tc.gcc.startswith(download_path),
+                f"Expected downloaded toolchain from {download_path}, "
+                f"got {tc.gcc}")
+            self.assertEqual(toolchain.PRIORITY_DOWNLOADED, tc.priority)
+
+            # Verify downloaded priority beats system priority
+            self.assertLess(toolchain.PRIORITY_DOWNLOADED, sys_tc.priority)
+
+    def test_is_doubled_prefix(self):
+        """Test detection of doubled toolchain prefixes"""
+        # Valid toolchain names (not doubled)
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('aarch64-linux-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('x86_64-linux-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('arm-linux-gnueabi-gcc'))
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('gcc'))
+
+        # Doubled prefixes (should be filtered out)
+        self.assertTrue(
+            toolchain.Toolchains.is_doubled_prefix(
+                'aarch64-linux-aarch64-linux-gcc'))
+        self.assertTrue(
+            toolchain.Toolchains.is_doubled_prefix(
+                'x86_64-linux-x86_64-linux-gcc'))
+
+        # Not a gcc file
+        self.assertFalse(
+            toolchain.Toolchains.is_doubled_prefix('aarch64-linux-ld'))
+
     def test_get_env_args(self):
         """Test the GetEnvArgs() function"""
         tc = self.toolchains.select('arm')

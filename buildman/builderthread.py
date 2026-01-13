@@ -516,7 +516,11 @@ class BuilderThread(threading.Thread):
                 setup.config_args, config_out, cmd_list, mrproper)
             do_config = False   # No need to configure next time
             if req.adjust_cfg:
-                cfgutil.adjust_cfg_file(cfg_file, req.adjust_cfg)
+                merge_result = cfgutil.run_merge_config(
+                    setup.cwd, out_dir, cfg_file, req.adjust_cfg, setup.env)
+                config_out.write(merge_result.combined)
+                if merge_result.return_code:
+                    result = merge_result
         return result, do_config, cfg_file
 
     def _build_and_get_result(self, req, setup, commit, cmd_list, config_out,
@@ -537,12 +541,6 @@ class BuilderThread(threading.Thread):
             CommandResult: Result of the build
         """
         if result.return_code == 0:
-            if req.adjust_cfg:
-                oldc_args = list(setup.args) + ['oldconfig']
-                oldc_result = self.make(commit, req.brd, 'oldconfig', setup.cwd,
-                                        *oldc_args, env=setup.env)
-                if oldc_result.return_code:
-                    return oldc_result
             result = self._build(commit, req.brd, setup.cwd, setup.args,
                                  setup.env, cmd_list, config_only)
             if req.adjust_cfg:

@@ -7,7 +7,9 @@
 
 import os
 import re
+import tempfile
 
+from u_boot_pylib import command
 from u_boot_pylib import tools
 
 
@@ -306,3 +308,89 @@ def process_config(fname, squash_config_y):
                     value = '1'
                 config[key] = value
     return config
+
+
+def adjust_cfg_to_fragment(adjust_cfg):
+    """Convert adjust_cfg dict to config fragment content
+
+    Args:
+        adjust_cfg (dict): Changes to make to .config file. Keys are config
+            names (without CONFIG_ prefix), values are the setting. Format
+            matches make_cfg_line():
+                ~...     - disable the option
+                ...=val  - set the option to val (val contains full assignment)
+                other    - enable the option with =y
+
+    Returns:
+        str: Config fragment content suitable for merge_config.sh
+    """
+    lines = []
+    for opt, val in adjust_cfg.items():
+        if val.startswith('~'):
+            lines.append(f'# CONFIG_{opt} is not set')
+        elif '=' in val:
+            lines.append(f'CONFIG_{val}')
+        else:
+            lines.append(f'CONFIG_{opt}=y')
+    return '\n'.join(lines) + '\n' if lines else ''
+
+
+def run_merge_config(src_dir, out_dir, cfg_file, adjust_cfg, env):
+    """Run merge_config.sh to apply config changes with Kconfig resolution
+
+    This uses scripts/kconfig/merge_config.sh to merge config fragments
+    into the .config file, then runs 'make alldefconfig' to resolve all
+    Kconfig dependencies including 'imply' and 'select'.
+
+    To properly resolve 'imply' relationships, we must use a minimal
+    defconfig as the base (not the full .config). The full .config contains
+    '# CONFIG_xxx is not set' lines which count as "specified" and prevent
+    imply from taking effect. Using savedefconfig output ensures only
+    explicitly set options are in the base, allowing imply to work.
+
+    Args:
+        src_dir (str): Source directory (containing scripts/kconfig)
+        out_dir (str): Output directory containing .config
+        cfg_file (str): Path to the .config file
+        adjust_cfg (dict): Config changes to apply
+        env (dict): Environment variables
+
+    Returns:
+        CommandResult: Result of the merge_config.sh operation
+    """
+    # Create a temporary fragment file with the config changes
+    fragment_content = adjust_cfg_to_fragment(adjust_cfg)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.config',
+                                     delete=False) as frag:
+        frag.write(fragment_content)
+        frag_path = frag.name
+
+    # Create a minimal defconfig from the current .config
+    # This is necessary for 'imply' to work - the full .config has
+    # '# CONFIG_xxx is not set' lines that prevent imply from taking effect
+    defconfig_path = os.path.join(out_dir or '.', 'defconfig')
+    make_cmd = ['make', f'O={out_dir}' if out_dir else None,
+                f'KCONFIG_CONFIG={cfg_file}', 'savedefconfig']
+    make_cmd = [x for x in make_cmd if x]  # Remove None elements
+    result = command.run_one(*make_cmd, cwd=src_dir, env=env, capture=True,
+                             capture_stderr=True)
+    if result.return_code:
+        if os.path.exists(frag_path):
+            os.unlink(frag_path)
+        return result
+
+    try:
+        # Run merge_config.sh with the minimal defconfig as base
+        # -O sets output dir; defconfig is the base, fragment is merged
+        merge_script = os.path.join(src_dir or '.', 'scripts', 'kconfig',
+                                    'merge_config.sh')
+        out = out_dir or '.'
+        cmd = [merge_script, '-O', out, defconfig_path, frag_path]
+        result = command.run_one(*cmd, cwd=src_dir, env=env, capture=True,
+                                capture_stderr=True)
+    finally:
+        # Clean up temporary files
+        if os.path.exists(frag_path):
+            os.unlink(frag_path)
+
+    return result

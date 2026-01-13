@@ -17,10 +17,22 @@ from u_boot_pylib import command
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
+# Toolchain priority levels (lower number = higher priority):
+#   PRIORITY_FULL_PREFIX: Explicit [toolchain-prefix] path exists as a file
+#   PRIORITY_PREFIX_GCC: [toolchain-prefix] path + 'gcc' exists as a file
+#   PRIORITY_PREFIX_GCC_PATH: [toolchain-prefix] path + 'gcc' found in PATH
+#   PRIORITY_DOWNLOADED: Toolchain downloaded via --fetch-arch
+#   PRIORITY_CALC: Toolchain found by scanning [toolchain] paths; actual
+#       priority is PRIORITY_CALC + offset based on toolchain name
 (PRIORITY_FULL_PREFIX, PRIORITY_PREFIX_GCC, PRIORITY_PREFIX_GCC_PATH,
-    PRIORITY_CALC) = list(range(4))
+    PRIORITY_DOWNLOADED, PRIORITY_CALC) = list(range(5))
 
+# Environment variable / argument types for get_env_args()
 (VAR_CROSS_COMPILE, VAR_PATH, VAR_ARCH, VAR_MAKE_ARGS) = range(4)
+
+# Matches a repeated prefix, e.g. 'aarch64-linux-aarch64-linux-gcc'
+RE_DOUBLED_PREFIX = re.compile(r'^(.+)\1gcc$')
+
 
 class MyHTMLParser(HTMLParser):
     """Simple class to collect links from a page
@@ -290,6 +302,7 @@ class Toolchains:
         self.toolchains = {}
         self.prefixes = {}
         self.paths = []
+        self.download_paths = set()
         self.override_toolchain = override_toolchain
         self._make_flags = dict(bsettings.get_items('make-flags'))
 
@@ -330,6 +343,15 @@ class Toolchains:
         self.prefixes = bsettings.get_items('toolchain-prefix')
         self.paths += self.get_path_list(show_warning)
 
+        # Track which paths are from downloaded toolchains
+        for name, value in bsettings.get_items('toolchain'):
+            if name == 'download':
+                fname = os.path.expanduser(value)
+                if '*' in value:
+                    self.download_paths.update(glob.glob(fname))
+                else:
+                    self.download_paths.add(fname)
+
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def add(self, fname, test=True, verbose=False, priority=PRIORITY_CALC,
             arch=None):
@@ -360,6 +382,22 @@ class Toolchains:
                       f"toolchain for arch '{toolchain.arch}' has priority "
                       f"{self.toolchains[toolchain.arch].priority}")
 
+    @staticmethod
+    def is_doubled_prefix(fname):
+        """Check if a gcc filename has a doubled prefix
+
+        Some toolchain tarballs contain symlinks with the cross-compile prefix
+        repeated, e.g. 'x86_64-linux-x86_64-linux-gcc'. These are not valid
+        toolchains and should be ignored.
+
+        Args:
+            fname (str): Filename to check (basename, not full path)
+
+        Returns:
+            bool: True if the prefix is doubled, False otherwise
+        """
+        return bool(RE_DOUBLED_PREFIX.match(fname))
+
     def scan_path(self, path, verbose):
         """Scan a path for a valid toolchain
 
@@ -376,6 +414,11 @@ class Toolchains:
             if verbose:
                 print(f"      - looking in '{dirname}'")
             for fname in glob.glob(dirname + '/*gcc'):
+                basename = os.path.basename(fname)
+                if self.is_doubled_prefix(basename):
+                    if verbose:
+                        print(f"         - ignoring '{fname}' (doubled prefix)")
+                    continue
                 if verbose:
                     print(f"         - found '{fname}'")
                 fnames.append(fname)
@@ -435,8 +478,10 @@ class Toolchains:
             if verbose:
                 print(f"   - scanning path '{path}'")
             fnames = self.scan_path(path, verbose)
+            priority = (PRIORITY_DOWNLOADED if path in self.download_paths
+                        else PRIORITY_CALC)
             for fname in fnames:
-                self.add(fname, True, verbose)
+                self.add(fname, True, verbose, priority)
 
     def list(self):
         """List out the selected toolchains for each architecture"""
