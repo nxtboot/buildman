@@ -185,6 +185,8 @@ def add_after_m(parser):
     parser.add_argument('-Y', '--filter-migration-warnings', action='store_true',
           default=False,
           help='Filter out migration warnings from output')
+    parser.add_argument('-z', '--build-summary', action='store_true',
+          default=False, help='Build first, then show a summary of the results')
 
 
 def parse_args():

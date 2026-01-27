@@ -111,7 +111,10 @@ Otherwise buildman will perform random actions. Use -n to check what the
 random actions might be.
 
 Buildman effectively has two modes: without -s it builds, with -s it
-summarises the results of previous (or active) builds.
+summarises the results of previous (or active) builds. You can combine
+both with -z (--build-summary), which builds first and then shows the
+summary. This is useful when you want to do a build and immediately see
+a summary of the results without running buildman twice.
 
 If you just want to build the current source tree, leave off the -b flag.
 This will display results and errors as they happen. You can still look at
