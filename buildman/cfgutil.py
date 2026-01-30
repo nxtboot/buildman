@@ -368,9 +368,18 @@ def run_merge_config(src_dir, out_dir, cfg_file, adjust_cfg, env):
     # Create a minimal defconfig from the current .config
     # This is necessary for 'imply' to work - the full .config has
     # '# CONFIG_xxx is not set' lines that prevent imply from taking effect
-    defconfig_path = os.path.join(out_dir or '.', 'defconfig')
-    make_cmd = ['make', f'O={out_dir}' if out_dir else None,
-                f'KCONFIG_CONFIG={cfg_file}', 'savedefconfig']
+    #
+    # Convert paths to be relative to src_dir since commands run with
+    # cwd=src_dir
+    if src_dir and out_dir:
+        rel_out_dir = os.path.relpath(out_dir, src_dir)
+        rel_cfg_file = os.path.relpath(cfg_file, src_dir)
+    else:
+        rel_out_dir = out_dir or '.'
+        rel_cfg_file = cfg_file
+    defconfig_path = os.path.join(rel_out_dir, 'defconfig')
+    make_cmd = ['make', f'O={rel_out_dir}' if rel_out_dir != '.' else None,
+                f'KCONFIG_CONFIG={rel_cfg_file}', 'savedefconfig']
     make_cmd = [x for x in make_cmd if x]  # Remove None elements
     result = command.run_one(*make_cmd, cwd=src_dir, env=env, capture=True,
                              capture_stderr=True)
@@ -382,10 +391,8 @@ def run_merge_config(src_dir, out_dir, cfg_file, adjust_cfg, env):
     try:
         # Run merge_config.sh with the minimal defconfig as base
         # -O sets output dir; defconfig is the base, fragment is merged
-        merge_script = os.path.join(src_dir or '.', 'scripts', 'kconfig',
-                                    'merge_config.sh')
-        out = out_dir or '.'
-        cmd = [merge_script, '-O', out, defconfig_path, frag_path]
+        merge_script = os.path.join('scripts', 'kconfig', 'merge_config.sh')
+        cmd = [merge_script, '-O', rel_out_dir, defconfig_path, frag_path]
         result = command.run_one(*cmd, cwd=src_dir, env=env, capture=True,
                                 capture_stderr=True)
     finally:

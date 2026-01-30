@@ -1222,6 +1222,116 @@ class TestBuildMisc(TestBuildBase):
                                                     'other_board'))
 
 
+class TestBuildSummary(TestBuildBase):
+    """Tests for build summary functionality"""
+
+    def test_build_summary(self):
+        """Test --build-summary option builds then shows summary"""
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 1,
+                                2, self._col, ResultHandler(self._col, opts),
+                                checkout=False)
+        build._result_handler.set_builder(build)
+
+        # Track calls to build_boards and show_summary
+        build_boards_called = []
+        show_summary_called = []
+
+        def mock_build_boards(*args, **kwargs):
+            build_boards_called.append(True)
+            return False, False, False
+
+        def mock_show_summary(*args, **kwargs):
+            show_summary_called.append(True)
+
+        build.build_boards = mock_build_boards
+        build._result_handler.show_summary = mock_show_summary
+
+        # Create args with build_summary=True
+        class Args:
+            summary = False
+            build_summary = True
+            step = 1
+            keep_outputs = False
+            verbose = False
+            fragments = ''
+            ignore_warnings = False
+            ide = False
+            filter_dtb_warnings = False
+            filter_migration_warnings = False
+            git = '.'
+            threads = 1
+            jobs = 1
+
+        args = Args()
+        board_selected = self.brds.get_selected_dict()
+
+        # Mock gnu_make detection
+        with patch.object(command, 'output', return_value='make'):
+            control.run_builder(build, self.commits, board_selected,
+                                opts, args)
+
+        # Verify both build_boards and show_summary were called
+        self.assertEqual(1, len(build_boards_called),
+                         'build_boards should be called once')
+        self.assertEqual(1, len(show_summary_called),
+                         'show_summary should be called once')
+
+    def test_build_summary_with_failures(self):
+        """Test --build-summary shows summary even when build fails"""
+        opts = DisplayOptions(
+            show_errors=False, show_sizes=False, show_detail=False,
+            show_bloat=False, show_config=False, show_environment=False,
+            show_unknown=False, ide=False, list_error_boards=False)
+        build = builder.Builder(self.toolchains, self.base_dir, None, 1,
+                                2, self._col, ResultHandler(self._col, opts),
+                                checkout=False)
+        build._result_handler.set_builder(build)
+
+        show_summary_called = []
+
+        def mock_build_boards(*args, **kwargs):
+            # Simulate build failure
+            return True, False, False
+
+        def mock_show_summary(*args, **kwargs):
+            show_summary_called.append(True)
+
+        build.build_boards = mock_build_boards
+        build._result_handler.show_summary = mock_show_summary
+
+        class Args:
+            summary = False
+            build_summary = True
+            step = 1
+            keep_outputs = False
+            verbose = False
+            fragments = ''
+            ignore_warnings = False
+            ide = False
+            filter_dtb_warnings = False
+            filter_migration_warnings = False
+            git = '.'
+            threads = 1
+            jobs = 1
+
+        args = Args()
+        board_selected = self.brds.get_selected_dict()
+
+        with patch.object(command, 'output', return_value='make'):
+            ret = control.run_builder(build, self.commits, board_selected,
+                                      opts, args)
+
+        # Summary should still be shown even with failures
+        self.assertEqual(1, len(show_summary_called),
+                         'show_summary should be called even on failure')
+        # Return code should indicate failure
+        self.assertEqual(100, ret)
+
+
 class TestBuilderFuncs(TestBuildBase):
     """Tests for individual Builder methods"""
 
