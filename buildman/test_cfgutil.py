@@ -180,6 +180,54 @@ class TestAdjustCfg(unittest.TestCase):
             result)
 
 
+class TestRunMergeConfig(unittest.TestCase):
+    """Tests for run_merge_config() function"""
+
+    def test_merge_script_path(self):
+        """Test that merge_config.sh path is relative to cwd, not absolute"""
+        from unittest import mock
+        from u_boot_pylib import command
+
+        # Track commands that were run
+        commands_run = []
+
+        def mock_run_one(*args, **kwargs):
+            commands_run.append((args, kwargs))
+            result = command.CommandResult()
+            result.return_code = 0
+            result.stdout = ''
+            result.stderr = ''
+            return result
+
+        with mock.patch.object(command, 'run_one', mock_run_one):
+            with mock.patch('os.path.exists', return_value=True):
+                with mock.patch('os.unlink'):
+                    # Use a work directory path like buildman does
+                    src_dir = '../branch/.bm-work/00'
+                    cfgutil.run_merge_config(
+                        src_dir, 'build', 'build/.config',
+                        {'LOCALVERSION_AUTO': '~LOCALVERSION_AUTO'}, {})
+
+        # Find the merge_config.sh command
+        merge_cmd = None
+        for args, kwargs in commands_run:
+            if args and 'merge_config.sh' in args[0]:
+                merge_cmd = args
+                merge_cwd = kwargs.get('cwd')
+                break
+
+        self.assertIsNotNone(merge_cmd, 'merge_config.sh command not found')
+
+        # The script path should be relative, not include src_dir
+        script_path = merge_cmd[0]
+        self.assertEqual('scripts/kconfig/merge_config.sh', script_path,
+                         f'Script path should be relative, got: {script_path}')
+
+        # The cwd should be src_dir
+        self.assertEqual(src_dir, merge_cwd,
+                         f'cwd should be src_dir, got: {merge_cwd}')
+
+
 class TestProcessConfig(unittest.TestCase):
     """Tests for process_config() function"""
 
