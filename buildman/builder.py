@@ -374,6 +374,7 @@ class Builder:
         self.count = 0
         self.timestamps = collections.deque()
         self.verbose = False
+        self.progress = ''
 
         # Note: baseline state for result summaries is now in ResultHandler
 
@@ -591,6 +592,9 @@ class Builder:
                     sys.stderr.write(result.stderr)
             elif self.verbose:
                 terminal.print_clear()
+                machine = result.remote
+                if machine and (result.return_code or result.stderr):
+                    tprint(f'[{machine}]')
                 boards_selected = {target : result.brd}
                 self._result_handler.reset_result_summary(boards_selected)
                 self._result_handler.produce_result_summary(
@@ -616,7 +620,13 @@ class Builder:
         if self._complete_delay:
             line += f'{self._complete_delay}  : '
 
-        line += target
+        machine = result.remote if result else None
+        if machine:
+            line += f'{target} [{machine}]'
+        elif self.progress:
+            line += f'{target} [{self.progress}]'
+        else:
+            line += f'{target} [local]'
         if not self._opts.ide:
             terminal.print_clear()
             tprint(line, newline=False, limit_to_line=True)

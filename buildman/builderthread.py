@@ -434,6 +434,7 @@ class BuilderThread(threading.Thread):
                     - result.stderr set to 'bad' if stderr output was recorded
         """
         result = command.CommandResult()
+        result.remote = None
         done_file = self.builder.get_done_file(commit_upto, brd.target)
         result.already_done = os.path.exists(done_file)
         result.kconfig_reconfig = False
@@ -728,6 +729,7 @@ class BuilderThread(threading.Thread):
                 req, commit_upto, do_config, mrproper, config_only,
                 out_dir, out_rel_dir, result)
 
+        result.remote = None
         result.toolchain = self.toolchain
         result.brd = req.brd
         result.commit_upto = commit_upto
