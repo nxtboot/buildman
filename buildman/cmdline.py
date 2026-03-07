@@ -105,6 +105,13 @@ def add_upto_m(parser):
     parser.add_argument(
           '-M', '--allow-missing', action='store_true', default=False,
           help='Tell binman to allow missing blobs and generate fake ones as needed')
+    parser.add_argument('--mach', '--machines', action='store_true',
+          default=False, dest='machines',
+          help='Probe all remote machines from [machines] config and show '
+               'their status and available toolchains')
+    parser.add_argument('--machines-buildman-path', type=str,
+          default='buildman',
+          help='Path to buildman on remote machines (default: %(default)s)')
     parser.add_argument(
           '--maintainer-check', action='store_true',
           help='Check that maintainer entries exist for each board')

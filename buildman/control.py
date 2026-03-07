@@ -18,6 +18,7 @@ import time
 from buildman import boards
 from buildman import bsettings
 from buildman import cfgutil
+from buildman import machine
 from buildman import toolchain
 from buildman.builder import Builder
 from buildman.outcome import DisplayOptions
@@ -757,6 +758,11 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
 
     gitutil.setup()
     col = terminal.Color()
+
+    # Handle --machines: probe remote machines and show status
+    if args.machines:
+        return machine.do_probe_machines(
+            col, buildman_path=args.machines_buildman_path)
 
     git_dir = os.path.join(args.git, '.git')
 
