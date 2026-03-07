@@ -173,6 +173,20 @@ sandbox   : /usr/bin/gcc
         })
 
     @mock.patch('buildman.machine._run_ssh')
+    def test_fetch_toolchain_success(self, mock_ssh):
+        """Test successful toolchain fetch"""
+        mock_ssh.return_value = 'Downloading...\nDone'
+        m = machine.Machine('server1')
+        self.assertTrue(m.fetch_toolchain('buildman', 'arm'))
+
+    @mock.patch('buildman.machine._run_ssh')
+    def test_fetch_toolchain_failure(self, mock_ssh):
+        """Test failed toolchain fetch"""
+        mock_ssh.side_effect = machine.MachineError('fetch failed')
+        m = machine.Machine('server1')
+        self.assertFalse(m.fetch_toolchain('buildman', 'arm'))
+
+    @mock.patch('buildman.machine._run_ssh')
     def test_weight_calculation(self, mock_ssh):
         """Test weight calculation based on load"""
         mock_ssh.return_value = json.dumps({

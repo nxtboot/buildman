@@ -760,9 +760,10 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     col = terminal.Color()
 
     # Handle --machines: probe remote machines and show status
-    if args.machines:
+    if args.machines or args.machines_fetch_arch:
         return machine.do_probe_machines(
-            col, buildman_path=args.machines_buildman_path)
+            col, fetch=args.machines_fetch_arch,
+            buildman_path=args.machines_buildman_path)
 
     git_dir = os.path.join(args.git, '.git')
 

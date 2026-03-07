@@ -109,6 +109,10 @@ def add_upto_m(parser):
           default=False, dest='machines',
           help='Probe all remote machines from [machines] config and show '
                'their status and available toolchains')
+    parser.add_argument('--machines-fetch-arch', action='store_true',
+          default=False,
+          help='Fetch missing toolchains on remote machines (implies '
+               '--machines)')
     parser.add_argument('--machines-buildman-path', type=str,
           default='buildman',
           help='Path to buildman on remote machines (default: %(default)s)')
