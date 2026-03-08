@@ -298,7 +298,8 @@ class TestFunctional(unittest.TestCase):
         # Remove possible extraneous strings
         extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
         gothelp = result.stdout.replace(extra, '')
-        self.assertEqual(len(gothelp), os.path.getsize(help_file))
+        self.assertEqual(len(gothelp.encode('utf-8')),
+                         os.path.getsize(help_file))
         self.assertEqual(0, len(result.stderr))
         self.assertEqual(0, result.return_code)
 
