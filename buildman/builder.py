@@ -232,7 +232,7 @@ class Builder:
                  in_tree=False, force_config_on_failure=False, make_func=None,
                  dtc_skip=False, build_target=None,
                  thread_class=builderthread.BuilderThread,
-                 handle_signals=True):
+                 handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
 
         Args:
@@ -310,6 +310,7 @@ class Builder:
         self.kconfig_reconfig = 0
         self.force_build = False
         self.git_dir = git_dir
+        self._setup_git = False
         self._timestamp_count = 10
         self._build_period_us = None
         self._complete_delay = None
@@ -377,6 +378,7 @@ class Builder:
         # Note: baseline state for result summaries is now in ResultHandler
 
         self._thread_class = thread_class
+        self._lazy_thread_setup = lazy_thread_setup
         self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
 
         ignore_lines = ['(make.*Waiting for unfinished)',
@@ -1047,6 +1049,18 @@ class Builder:
             return self._working_dir
         return os.path.join(self._working_dir, f'{max(thread_num, 0):02d}')
 
+    def prepare_thread(self, thread_num):
+        """Prepare a single thread's working directory on demand
+
+        This can be called by a BuilderThread to lazily set up its
+        worktree/clone on first use, rather than doing all threads upfront.
+        Uses the git setup method determined by _detect_git_setup().
+
+        Args:
+            thread_num (int): Thread number (0, 1, ...)
+        """
+        self._prepare_thread(thread_num, self._setup_git)
+
     def _prepare_thread(self, thread_num, setup_git):
         """Prepare the working directory for a thread.
 
@@ -1103,6 +1117,11 @@ class Builder:
         Set up the git repo for each thread. Creates a linked working tree
         if git-worktree is available, or clones the repo if it isn't.
 
+        When lazy_thread_setup is True, only the working directory and git
+        setup type are determined here.  Each thread sets up its own
+        worktree/clone on first use via prepare_thread(), which avoids a
+        long sequential setup phase on machines with many threads.
+
         Args:
             max_threads: Maximum number of threads we expect to need. If 0 then
                 1 is set up, since the main process still needs somewhere to
@@ -1110,20 +1129,35 @@ class Builder:
             setup_git: True to set up a git worktree or a git clone
         """
         builderthread.mkdir(self._working_dir)
+
+        self._setup_git = self._detect_git_setup(setup_git)
+
+        if self._lazy_thread_setup:
+            return
+
+        # Always do at least one thread
+        for thread in range(max(max_threads, 1)):
+            self._prepare_thread(thread, self._setup_git)
+
+    def _detect_git_setup(self, setup_git):
+        """Determine which git setup method to use
+
+        Args:
+            setup_git: True to set up git, False to skip
+
+        Returns:
+            str or False: 'worktree', 'clone', or False
+        """
         if setup_git and self.git_dir:
             src_dir = os.path.abspath(self.git_dir)
             if gitutil.check_worktree_is_available(src_dir):
-                setup_git = 'worktree'
                 # If we previously added a worktree but the directory for it
                 # got deleted, we need to prune its files from the repo so
                 # that we can check out another in its place.
                 gitutil.prune_worktrees(src_dir)
-            else:
-                setup_git = 'clone'
-
-        # Always do at least one thread
-        for thread in range(max(max_threads, 1)):
-            self._prepare_thread(thread, setup_git)
+                return 'worktree'
+            return 'clone'
+        return False
 
     def _get_output_space_removals(self):
         """Get the output directories ready to receive files.

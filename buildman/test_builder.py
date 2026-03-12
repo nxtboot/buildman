@@ -354,10 +354,28 @@ class TestPrepareWorkingSpace(unittest.TestCase):
         self.builder.git_dir = None
         self.builder._prepare_working_space(2, True)
 
-        # setup_git should remain True but git operations skipped
+        # _detect_git_setup returns False when git_dir is None
         self.assertEqual(mock_prepare_thread.call_count, 2)
-        mock_prepare_thread.assert_any_call(0, True)
-        mock_prepare_thread.assert_any_call(1, True)
+        mock_prepare_thread.assert_any_call(0, False)
+        mock_prepare_thread.assert_any_call(1, False)
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(gitutil, 'prune_worktrees')
+    @mock.patch.object(gitutil, 'check_worktree_is_available',
+                       return_value=True)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_lazy_setup(self, _mock_mkdir, mock_check_worktree,
+                        mock_prune, mock_prepare_thread):
+        """Test lazy_thread_setup skips upfront thread preparation"""
+        self.builder._lazy_thread_setup = True
+        self.builder._prepare_working_space(4, True)
+
+        # Git setup type is detected so prepare_thread() can use it
+        # later, but no threads are prepared upfront
+        self.assertEqual(self.builder._setup_git, 'worktree')
+        mock_check_worktree.assert_called_once()
+        mock_prune.assert_called_once()
+        mock_prepare_thread.assert_not_called()
 
 
 class TestShowNotBuilt(unittest.TestCase):
