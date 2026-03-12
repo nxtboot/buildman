@@ -52,20 +52,19 @@ BuildSetup = namedtuple('BuildSetup', ['env', 'args', 'config_args', 'cwd',
 RETURN_CODE_RETRY = -1
 BASE_ELF_FILENAMES = ['u-boot', 'spl/u-boot-spl', 'tpl/u-boot-tpl']
 
+# Per-commit cache for the kconfig_changed_since() result.  The answer only
+# depends on the commit (did any Kconfig file change since the previous
+# checkout?), so one thread can do the walk and every other thread building
+# the same commit reuses the boolean.
+_kconfig_cache = {}
+_kconfig_cache_lock = threading.Lock()
 
-def kconfig_changed_since(fname, srcdir='.', target=None):
-    """Check if any Kconfig or defconfig files are newer than the given file.
 
-    Args:
-        fname (str): Path to file to compare against (typically '.config')
-        srcdir (str): Source directory to search for Kconfig/defconfig files
-        target (str): Board target name; if provided, only check that board's
-            defconfig file (e.g. 'sandbox' checks 'configs/sandbox_defconfig')
+def _kconfig_changed_uncached(fname, srcdir, target):
+    """Check if any Kconfig or defconfig files are newer than fname.
 
-    Returns:
-        bool: True if any Kconfig* file (or the board's defconfig) in srcdir
-            is newer than fname, False otherwise. Also returns False if fname
-            doesn't exist.
+    This does the real work — an os.walk() of srcdir. It should only be
+    called once per commit; the result is cached by kconfig_changed_since().
     """
     if not os.path.exists(fname):
         return False
@@ -78,14 +77,51 @@ def kconfig_changed_since(fname, srcdir='.', target=None):
             if os.path.getmtime(defconfig) > ref_time:
                 return True
 
-    # Check all Kconfig files
-    for dirpath, _, filenames in os.walk(srcdir):
+    for dirpath, dirnames, filenames in os.walk(srcdir):
+        # Prune in-place so os.walk() skips dotdirs and build dirs
+        dirnames[:] = [d for d in dirnames if d[0] != '.' and d != 'build']
         for filename in filenames:
             if filename.startswith('Kconfig'):
                 filepath = os.path.join(dirpath, filename)
                 if os.path.getmtime(filepath) > ref_time:
                     return True
     return False
+
+
+def reset_kconfig_cache():
+    """Reset the cached kconfig results, for testing"""
+    _kconfig_cache.clear()
+
+
+def kconfig_changed_since(fname, srcdir='.', target=None, commit_upto=None):
+    """Check if any Kconfig or defconfig files are newer than the given file.
+
+    Args:
+        fname (str): Path to file to compare against (typically '.config')
+        srcdir (str): Source directory to search for Kconfig/defconfig files
+        target (str): Board target name; if provided, only check that board's
+            defconfig file (e.g. 'sandbox' checks 'configs/sandbox_defconfig')
+        commit_upto (int or None): Commit index for caching. When set, only
+            the first thread to check a given commit does the walk; all
+            other threads reuse that result.
+
+    Returns:
+        bool: True if any Kconfig* file (or the board's defconfig) in srcdir
+            is newer than fname, False otherwise. Also returns False if fname
+            doesn't exist.
+    """
+    if commit_upto is None:
+        return _kconfig_changed_uncached(fname, srcdir, target)
+
+    if commit_upto in _kconfig_cache:
+        return _kconfig_cache[commit_upto]
+
+    with _kconfig_cache_lock:
+        if commit_upto in _kconfig_cache:
+            return _kconfig_cache[commit_upto]
+        result = _kconfig_changed_uncached(fname, srcdir, target)
+        _kconfig_cache[commit_upto] = result
+        return result
 
 # Common extensions for images
 COMMON_EXTS = ['.bin', '.rom', '.itb', '.img']
@@ -625,11 +661,15 @@ class BuilderThread(threading.Thread):
         if self.toolchain:
             commit = self._checkout(commit_upto, req.work_dir)
 
-            # Check if Kconfig files have changed since last config
-            if self.builder.kconfig_check:
+            # Check if Kconfig files have changed since last config. Skip
+            # when do_config is already True (e.g. first commit) since
+            # defconfig will run anyway. This avoids an expensive os.walk()
+            # of the source tree that can be very slow when many threads
+            # do it simultaneously.
+            if self.builder.kconfig_check and not do_config:
                 config_file = os.path.join(out_dir, '.config')
                 if kconfig_changed_since(config_file, req.work_dir,
-                                         req.brd.target):
+                                         req.brd.target, commit_upto):
                     kconfig_reconfig = True
                     do_config = True
 

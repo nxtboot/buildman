@@ -1634,7 +1634,8 @@ something: me
         call_count = [0]
         config_exists = [False]
 
-        def mock_kconfig_changed(fname, _srcdir='.', _target=None):
+        def mock_kconfig_changed(fname, _srcdir='.', _target=None,
+                                 _commit_upto=None):
             """Mock for kconfig_changed_since that checks if .config exists
 
             Args:
@@ -1671,7 +1672,8 @@ something: me
         """Test that -Z flag disables Kconfig change detection"""
         call_count = [0]
 
-        def mock_kconfig_changed(_fname, _srcdir='.', _target=None):
+        def mock_kconfig_changed(_fname, _srcdir='.', _target=None,
+                                 _commit_upto=None):
             """Mock for kconfig_changed_since that always returns True
 
             Returns:

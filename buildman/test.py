@@ -1148,6 +1148,7 @@ class TestBuildMisc(TestBuildBase):
 
     def test_kconfig_changed_since(self):
         """Test the kconfig_changed_since() function"""
+        builderthread.reset_kconfig_cache()
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a reference file
             ref_file = os.path.join(tmpdir, 'done')
@@ -1163,6 +1164,7 @@ class TestBuildMisc(TestBuildBase):
             # Create a Kconfig file newer than the reference
             kconfig = os.path.join(tmpdir, 'Kconfig')
             tools.write_file(kconfig, b'config TEST\n')
+            builderthread.reset_kconfig_cache()
 
             # Should now return True since Kconfig is newer
             self.assertTrue(
@@ -1187,6 +1189,7 @@ class TestBuildMisc(TestBuildBase):
             time.sleep(0.1)
             tools.write_file(os.path.join(subdir, 'Kconfig.sub'),
                              b'config SUBTEST\n')
+            builderthread.reset_kconfig_cache()
 
             # Should return True due to newer Kconfig.sub in subdir
             self.assertTrue(
