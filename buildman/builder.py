@@ -231,7 +231,8 @@ class Builder:
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
                  dtc_skip=False, build_target=None,
-                 thread_class=builderthread.BuilderThread):
+                 thread_class=builderthread.BuilderThread,
+                 handle_signals=True):
         """Create a new Builder object
 
         Args:
@@ -289,6 +290,9 @@ class Builder:
                 builderthread.BuilderThread). This allows the caller to
                 override how results are processed, e.g. sending over SSH
                 instead of writing to disk.
+            handle_signals (bool): True to register SIGINT handler (default
+                True). Set to False when running inside a worker that has
+                its own signal handling.
         """
         self.toolchains = toolchains
         self.base_dir = base_dir
@@ -380,7 +384,8 @@ class Builder:
         self._re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
-        signal.signal(signal.SIGINT, self._signal_handler)
+        if handle_signals:
+            signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_threads(self, mrproper, per_board_out_dir,
                        test_thread_exceptions):
