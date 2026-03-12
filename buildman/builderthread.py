@@ -344,6 +344,7 @@ class BuilderThread(threading.Thread):
                 num_jobs = max(1, nthreads // active)
         if num_jobs is not None:
             args.extend(['-j', str(num_jobs)])
+            args.append(f'NPROC={num_jobs}')
         if self.builder.warnings_as_errors:
             args.append('KCFLAGS=-Werror')
             args.append('HOSTCFLAGS=-Werror')
