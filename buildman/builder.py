@@ -362,7 +362,7 @@ class Builder:
         self.commit_count = 0
         self.commits = None
         self.count = 0
-        self._timestamps = None
+        self._timestamps = collections.deque()
         self._verbose = False
 
         # Note: baseline state for result summaries is now in ResultHandler
