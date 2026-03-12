@@ -230,7 +230,8 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, build_target=None):
+                 dtc_skip=False, build_target=None,
+                 thread_class=builderthread.BuilderThread):
         """Create a new Builder object
 
         Args:
@@ -284,6 +285,10 @@ class Builder:
             make_func (function): Function to call to run 'make'
             dtc_skip (bool): True to skip building dtc and use the system one
             build_target (str): Build target to use (None to use the default)
+            thread_class (type): BuilderThread subclass to use (default
+                builderthread.BuilderThread). This allows the caller to
+                override how results are processed, e.g. sending over SSH
+                instead of writing to disk.
         """
         self.toolchains = toolchains
         self.base_dir = base_dir
@@ -367,6 +372,7 @@ class Builder:
 
         # Note: baseline state for result summaries is now in ResultHandler
 
+        self._thread_class = thread_class
         self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
 
         ignore_lines = ['(make.*Waiting for unfinished)',
@@ -392,7 +398,7 @@ class Builder:
             self.queue = queue.Queue()
             self.out_queue = queue.Queue()
             for i in range(self._num_threads):
-                t = builderthread.BuilderThread(
+                t = self._thread_class(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
                 t.daemon = True
@@ -404,7 +410,7 @@ class Builder:
             t.start()
             self._threads.append(t)
         else:
-            self._single_builder = builderthread.BuilderThread(
+            self._single_builder = self._thread_class(
                 self, -1, mrproper, per_board_out_dir)
 
     def __del__(self):
