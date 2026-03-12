@@ -332,8 +332,18 @@ class BuilderThread(threading.Thread):
             args.append('V=1')
         else:
             args.append('-s')
-        if self.builder.num_jobs is not None:
-            args.extend(['-j', str(self.builder.num_jobs)])
+        num_jobs = self.builder.num_jobs
+        if num_jobs is None and self.builder.active_boards:
+            active = self.builder.active_boards
+            nthreads = self.builder.num_threads
+            baseline = self.builder.max_boards or nthreads
+            if active < baseline:
+                # Tail: ramp up 2x to compensate for make overhead
+                num_jobs = max(1, nthreads * 2 // active)
+            else:
+                num_jobs = max(1, nthreads // active)
+        if num_jobs is not None:
+            args.extend(['-j', str(num_jobs)])
         if self.builder.warnings_as_errors:
             args.append('KCFLAGS=-Werror')
             args.append('HOSTCFLAGS=-Werror')
@@ -1022,10 +1032,15 @@ class BuilderThread(threading.Thread):
         """
         while True:
             job = self.builder.queue.get()
+            with self.builder.active_lock:
+                self.builder.active_boards += 1
             try:
                 self.run_job(job)
             except Exception as exc:  # pylint: disable=W0718
                 print('Thread exception (use -T0 to run without threads):',
                       exc)
                 self.builder.thread_exceptions.append(exc)
+            finally:
+                with self.builder.active_lock:
+                    self.builder.active_boards -= 1
             self.builder.queue.task_done()

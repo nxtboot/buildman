@@ -199,7 +199,7 @@ class Builder:
         _complete_delay: Expected delay until completion (timedelta)
         _next_delay_update: Next time we plan to display a progress update
                 (datatime)
-        _num_threads: Number of builder threads to run
+        num_threads: Number of builder threads to run
         _opts: DisplayOptions for result output
         _re_make_err: Compiled regex for make error detection
         _restarting_config: True if 'Restart config' is detected in output
@@ -304,11 +304,11 @@ class Builder:
         self.do_make = make_func or self.make
         self.gnu_make = gnu_make
         self.checkout = checkout
-        self._num_threads = num_threads
+        self.num_threads = num_threads
         self.num_jobs = num_jobs
         self.active_boards = 0
         self.max_boards = 0
-        self._active_lock = threading.Lock()
+        self.active_lock = threading.Lock()
         self._already_done = 0
         self.kconfig_reconfig = 0
         self.force_build = False
@@ -403,11 +403,11 @@ class Builder:
             test_thread_exceptions (bool): True to make threads raise an
                 exception instead of reporting their result (for tests)
         """
-        if self._num_threads:
+        if self.num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
             self.out_queue = queue.Queue()
-            for i in range(self._num_threads):
+            for i in range(self.num_threads):
                 t = self._thread_class(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
@@ -1227,7 +1227,7 @@ class Builder:
 
         self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
-        self._prepare_working_space(min(self._num_threads, len(board_selected)),
+        self._prepare_working_space(min(self.num_threads, len(board_selected)),
                 board_selected and commits is not None)
         self._prepare_output_space()
         if not self._opts.ide:
@@ -1247,7 +1247,7 @@ class Builder:
             job.adjust_cfg = self.adjust_cfg
             job.fragments = fragments
             job.step = self._step
-            if self._num_threads:
+            if self.num_threads:
                 self.queue.put(job)
             else:
                 self._single_builder.run_job(job)
@@ -1268,7 +1268,7 @@ class Builder:
                 - number of boards that issued warnings
                 - list of thread exceptions raised
         """
-        if self._num_threads:
+        if self.num_threads:
             term = threading.Thread(target=self.queue.join)
             term.daemon = True
             term.start()
