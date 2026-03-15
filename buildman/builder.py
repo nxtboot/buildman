@@ -21,10 +21,9 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
-from buildman.outcome import (BoardStatus, DisplayOptions, ErrLine, Outcome,
+from buildman.outcome import (DisplayOptions, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
                               OUTCOME_UNKNOWN)
-from buildman.resulthandler import ResultHandler
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
