@@ -264,7 +264,8 @@ class TestMachinePool(unittest.TestCase):
             'host2\n'
         )
         pool = machine.MachinePool()
-        available = pool.probe_all()
+        with terminal.capture():
+            available = pool.probe_all()
         self.assertEqual(len(available), 2)
         self.assertEqual(pool.get_total_weight(), 14)
 
@@ -285,7 +286,8 @@ class TestMachinePool(unittest.TestCase):
             'host2\n'
         )
         pool = machine.MachinePool()
-        available = pool.probe_all()
+        with terminal.capture():
+            available = pool.probe_all()
         self.assertEqual(len(available), 1)
         self.assertEqual(available[0].hostname, 'host1')
 
@@ -311,8 +313,10 @@ sandbox   : /usr/bin/gcc
             'host1\n'
         )
         pool = machine.MachinePool()
-        pool.probe_all()
-        missing = pool.check_toolchains({'arm', 'sandbox'})
+        with terminal.capture():
+            pool.probe_all()
+        with terminal.capture():
+            missing = pool.check_toolchains({'arm', 'sandbox'})
         self.assertEqual(missing, {})
 
     @mock.patch('buildman.machine._run_ssh')
@@ -336,8 +340,10 @@ sandbox   : /usr/bin/gcc
             'host1\n'
         )
         pool = machine.MachinePool()
-        pool.probe_all()
-        missing = pool.check_toolchains({'arm', 'sandbox'})
+        with terminal.capture():
+            pool.probe_all()
+        with terminal.capture():
+            missing = pool.check_toolchains({'arm', 'sandbox'})
         self.assertEqual(len(missing), 1)
         m = list(missing.keys())[0]
         self.assertIn('arm', missing[m])
@@ -683,7 +689,8 @@ class TestMachinePoolExtended(unittest.TestCase):
             'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         # Just verify it doesn't crash
         with terminal.capture():
             pool.print_summary()
@@ -703,8 +710,10 @@ class TestMachinePoolExtended(unittest.TestCase):
         mock_ssh.side_effect = ssh_side_effect
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
-        pool.check_toolchains({'arm', 'sandbox'})
+        with terminal.capture():
+            pool.probe_all()
+        with terminal.capture():
+            pool.check_toolchains({'arm', 'sandbox'})
         with terminal.capture():
             pool.print_summary(local_archs={'arm', 'sandbox'})
 
@@ -728,7 +737,8 @@ class TestMachinePoolExtended(unittest.TestCase):
         mock_ssh.side_effect = ssh_side_effect
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
 
         local_gcc = {
             'arm': f'{home}/.buildman-toolchains/gcc-13.1.0-nolibc/'
@@ -751,7 +761,8 @@ class TestMachinePoolExtended(unittest.TestCase):
         with mock.patch.object(machine.Machine,
                                '_probe_toolchains_from_boss',
                                fake_probe):
-            missing = pool.check_toolchains({'arm'}, local_gcc=local_gcc)
+            with terminal.capture():
+                missing = pool.check_toolchains({'arm'}, local_gcc=local_gcc)
 
         # arm should be flagged as missing due to version mismatch
         self.assertEqual(len(missing), 1)
@@ -839,7 +850,8 @@ class TestPrintSummaryEdgeCases(unittest.TestCase):
         mock_ssh.side_effect = machine.MachineError('refused')
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         # Should not crash with unavailable machine
         with terminal.capture():
             pool.print_summary()
@@ -851,7 +863,8 @@ class TestPrintSummaryEdgeCases(unittest.TestCase):
             **MACHINE_INFO, 'load_1m': 10.0})
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         with terminal.capture():
             pool.print_summary()
 
@@ -865,7 +878,8 @@ class TestPrintSummaryEdgeCases(unittest.TestCase):
             '[machines]\nhost1\n'
             '[machine:host1]\nmax_boards = 50\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         with terminal.capture():
             pool.print_summary()
 
@@ -877,7 +891,8 @@ class TestPrintSummaryEdgeCases(unittest.TestCase):
             'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         pool.machines[0].tc_error = 'buildman not found'
         with terminal.capture():
             pool.print_summary(local_archs={'arm'})
@@ -890,7 +905,8 @@ class TestPrintSummaryEdgeCases(unittest.TestCase):
             'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         pool.machines[0].toolchains = {'sandbox': '/usr/bin/gcc'}
         local_gcc = {
             'arm': os.path.expanduser(
@@ -912,7 +928,8 @@ class TestCheckToolchainsEdge(unittest.TestCase):
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
         # Machine is not probed, so not reachable
-        result = pool.check_toolchains({'arm'})
+        with terminal.capture():
+            result = pool.check_toolchains({'arm'})
         self.assertEqual(result, {})
 
     @mock.patch('buildman.machine._run_ssh')
@@ -931,15 +948,17 @@ class TestCheckToolchainsEdge(unittest.TestCase):
         mock_ssh.side_effect = ssh_side_effect
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
 
         local_gcc = {
             'arm': f'{home}/.buildman-toolchains/gcc-13/arm/bin/gcc',
         }
         # fetch=True should trigger _fetch_all_missing
         with mock.patch.object(pool, '_fetch_all_missing') as mock_fetch:
-            pool.check_toolchains({'arm'}, fetch=True,
-                                  local_gcc=local_gcc)
+            with terminal.capture():
+                pool.check_toolchains({'arm'}, fetch=True,
+                                      local_gcc=local_gcc)
             mock_fetch.assert_called_once()
 
 
@@ -1011,7 +1030,8 @@ class TestPrintSummaryMissingNoVersion(unittest.TestCase):
             'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
         bsettings.add_file('[machines]\nhost1\n')
         pool = machine.MachinePool()
-        pool.probe_all()
+        with terminal.capture():
+            pool.probe_all()
         pool.machines[0].toolchains = {}
         # arm has a version (under ~/.buildman-toolchains),
         # sandbox does not

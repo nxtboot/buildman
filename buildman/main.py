@@ -43,6 +43,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
     from buildman import test_cfgutil
     from buildman import test_machine
     from buildman import test_worker
+    from buildman import test_boss
 
     test_name = args.terms and args.terms[0] or None
     if skip_net_tests:
@@ -67,6 +68,7 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_builder.TestPrintBuildSummary,
          test_machine,
          test_worker,
+         test_boss,
          'buildman.toolchain'])
 
     return (0 if result.wasSuccessful() else 1)
