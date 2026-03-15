@@ -199,15 +199,12 @@ class Builder:
         _complete_delay: Expected delay until completion (timedelta)
         _next_delay_update: Next time we plan to display a progress update
                 (datatime)
-        num_threads: Number of builder threads to run
         _opts: DisplayOptions for result output
         _re_make_err: Compiled regex for make error detection
         _restarting_config: True if 'Restart config' is detected in output
         _result_handler: ResultHandler for displaying results
         _single_builder: BuilderThread object for the singer builder, if
             threading is not being used
-        _start_time: Start time for the build
-        _step: Step value for processing commits (1=all, 2=every other, etc.)
         _terminated: Thread was terminated due to an error
         _threads: List of active threads
         _timestamps: List of timestamps for the completion of the last
@@ -318,8 +315,8 @@ class Builder:
         self._build_period_us = None
         self._complete_delay = None
         self._next_delay_update = datetime.now()
-        self._start_time = None
-        self._step = step
+        self.start_time = None
+        self.step = step
         self.no_subdirs = no_subdirs
         self.full_path = full_path
         self.verbose_build = verbose_build
@@ -369,14 +366,14 @@ class Builder:
         # Attributes set by other methods
         self._build_period = None
         self._commit = None
-        self._upto = 0
+        self.upto = 0
         self._warned = 0
         self.fail = 0
         self.commit_count = 0
         self.commits = None
         self.count = 0
-        self._timestamps = collections.deque()
-        self._verbose = False
+        self.timestamps = collections.deque()
+        self.verbose = False
 
         # Note: baseline state for result summaries is now in ResultHandler
 
@@ -478,9 +475,9 @@ class Builder:
         build (one board, one commit).
         """
         now = datetime.now()
-        self._timestamps.append(now)
-        count = len(self._timestamps)
-        delta = self._timestamps[-1] - self._timestamps[0]
+        self.timestamps.append(now)
+        count = len(self.timestamps)
+        delta = self.timestamps[-1] - self.timestamps[0]
         seconds = delta.total_seconds()
 
         # If we have enough data, estimate build period (time taken for a
@@ -489,7 +486,7 @@ class Builder:
             self._next_delay_update = now + timedelta(seconds=2)
             if seconds > 0:
                 self._build_period = float(seconds) / count
-                todo = self.count - self._upto
+                todo = self.count - self.upto
                 self._complete_delay = timedelta(microseconds=
                         self._build_period * todo * 1000000)
                 # Round it
@@ -497,7 +494,7 @@ class Builder:
                         microseconds=self._complete_delay.microseconds)
 
         if seconds > 60:
-            self._timestamps.popleft()
+            self.timestamps.popleft()
             count -= 1
 
     def _select_commit(self, commit, checkout=True):
@@ -580,7 +577,7 @@ class Builder:
         if result:
             target = result.brd.target
 
-            self._upto += 1
+            self.upto += 1
             if result.return_code != 0:
                 self.fail += 1
             elif result.stderr:
@@ -592,7 +589,7 @@ class Builder:
             if self._opts.ide:
                 if result.stderr:
                     sys.stderr.write(result.stderr)
-            elif self._verbose:
+            elif self.verbose:
                 terminal.print_clear()
                 boards_selected = {target : result.brd}
                 self._result_handler.reset_result_summary(boards_selected)
@@ -602,13 +599,13 @@ class Builder:
             target = '(starting)'
 
         # Display separate counts for ok, warned and fail
-        ok = self._upto - self._warned - self.fail
+        ok = self.upto - self._warned - self.fail
         line = '\r' + self.col.build(self.col.GREEN, f'{ok:5d}')
         line += self.col.build(self.col.YELLOW, f'{self._warned:5d}')
         line += self.col.build(self.col.RED, f'{self.fail:5d}')
 
         line += f' /{self.count:<5d}  '
-        remaining = self.count - self._upto
+        remaining = self.count - self.upto
         if remaining:
             line += self.col.build(self.col.MAGENTA, f' -{remaining:<5d}  ')
         else:
@@ -1033,10 +1030,10 @@ class Builder:
             board_selected (dict): Selected boards to build
         """
         # First work out how many commits we will build
-        count = (self.commit_count + self._step - 1) // self._step
+        count = (self.commit_count + self.step - 1) // self.step
         self.count = len(board_selected) * count
-        self._upto = self._warned = self.fail = 0
-        self._timestamps = collections.deque()
+        self.upto = self._warned = self.fail = 0
+        self.timestamps = collections.deque()
 
     def get_thread_dir(self, thread_num):
         """Get the directory path to the working dir for a thread.
@@ -1114,7 +1111,7 @@ class Builder:
             else:
                 raise ValueError(f"Can't setup git repo with {setup_git}.")
 
-    def _prepare_working_space(self, max_threads, setup_git):
+    def prepare_working_space(self, max_threads, setup_git):
         """Prepare the working directory for use.
 
         Set up the git repo for each thread. Creates a linked working tree
@@ -1187,7 +1184,7 @@ class Builder:
                     to_remove.append(dirname)
         return to_remove
 
-    def _prepare_output_space(self):
+    def prepare_output_space(self):
         """Get the output directories ready to receive files.
 
         We delete any output directories which look like ones we need to
@@ -1223,16 +1220,16 @@ class Builder:
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
-        self._verbose = verbose
+        self.verbose = verbose
 
         self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
-        self._prepare_working_space(min(self.num_threads, len(board_selected)),
+        self.prepare_working_space(min(self.num_threads, len(board_selected)),
                 board_selected and commits is not None)
-        self._prepare_output_space()
+        self.prepare_output_space()
         if not self._opts.ide:
             tprint('\rStarting build...', newline=False)
-        self._start_time = datetime.now()
+        self.start_time = datetime.now()
         self._setup_build(board_selected, commits)
         self.count += extra_count
         self.process_result(None)
@@ -1246,7 +1243,7 @@ class Builder:
             job.work_in_output = self.work_in_output
             job.adjust_cfg = self.adjust_cfg
             job.fragments = fragments
-            job.step = self._step
+            job.step = self.step
             if self.num_threads:
                 self.queue.put(job)
             else:
@@ -1318,4 +1315,4 @@ class Builder:
         """
         self._result_handler.print_build_summary(
             self.count, self._already_done, self.kconfig_reconfig,
-            self._start_time, self.thread_exceptions)
+            self.start_time, self.thread_exceptions)

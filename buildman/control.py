@@ -759,6 +759,11 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     gitutil.setup()
     col = terminal.Color()
 
+    # Handle --worker: run in worker mode for distributed builds
+    if args.worker:
+        from buildman import worker  # pylint: disable=C0415
+        return worker.do_worker()
+
     # Handle --machines: probe remote machines and show status
     if args.machines or args.machines_fetch_arch:
         return machine.do_probe_machines(

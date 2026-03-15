@@ -119,6 +119,9 @@ def add_upto_m(parser):
     parser.add_argument(
           '--maintainer-check', action='store_true',
           help='Check that maintainer entries exist for each board')
+    parser.add_argument('--worker', action='store_true', default=False,
+          help='Run in worker mode, accepting build commands on stdin '
+               '(used internally for distributed builds)')
     parser.add_argument(
           '--no-allow-missing', action='store_true', default=False,
           help='Disable telling binman to allow missing blobs')

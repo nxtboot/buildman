@@ -277,7 +277,7 @@ class TestPrepareThread(unittest.TestCase):
 
 
 class TestPrepareWorkingSpace(unittest.TestCase):
-    """Tests for Builder._prepare_working_space()"""
+    """Tests for Builder.prepare_working_space()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -296,7 +296,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     @mock.patch.object(builderthread, 'mkdir')
     def test_no_setup_git(self, mock_mkdir, mock_prepare_thread):
         """Test with setup_git=False"""
-        self.builder._prepare_working_space(2, False)
+        self.builder.prepare_working_space(2, False)
 
         mock_mkdir.assert_called_once()
         # Should prepare 2 threads with setup_git=False
@@ -312,7 +312,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     def test_worktree_available(self, _mock_mkdir, mock_check_worktree,
                                 mock_prune, mock_prepare_thread):
         """Test when worktree is available"""
-        self.builder._prepare_working_space(3, True)
+        self.builder.prepare_working_space(3, True)
 
         mock_check_worktree.assert_called_once()
         mock_prune.assert_called_once()
@@ -329,7 +329,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     def test_worktree_not_available(self, _mock_mkdir, mock_check_worktree,
                                     mock_prepare_thread):
         """Test when worktree is not available (falls back to clone)"""
-        self.builder._prepare_working_space(2, True)
+        self.builder.prepare_working_space(2, True)
 
         mock_check_worktree.assert_called_once()
         # Should prepare 2 threads with setup_git='clone'
@@ -341,7 +341,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     @mock.patch.object(builderthread, 'mkdir')
     def test_zero_threads(self, _mock_mkdir, mock_prepare_thread):
         """Test with max_threads=0 (should still prepare 1 thread)"""
-        self.builder._prepare_working_space(0, False)
+        self.builder.prepare_working_space(0, False)
 
         # Should prepare at least 1 thread
         self.assertEqual(mock_prepare_thread.call_count, 1)
@@ -352,7 +352,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     def test_no_git_dir(self, _mock_mkdir, mock_prepare_thread):
         """Test with no git_dir set"""
         self.builder.git_dir = None
-        self.builder._prepare_working_space(2, True)
+        self.builder.prepare_working_space(2, True)
 
         # _detect_git_setup returns False when git_dir is None
         self.assertEqual(mock_prepare_thread.call_count, 2)
@@ -368,7 +368,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
                         mock_prune, mock_prepare_thread):
         """Test lazy_thread_setup skips upfront thread preparation"""
         self.builder._lazy_thread_setup = True
-        self.builder._prepare_working_space(4, True)
+        self.builder.prepare_working_space(4, True)
 
         # Git setup type is detected so prepare_thread() can use it
         # later, but no threads are prepared upfront
@@ -510,7 +510,7 @@ class TestShowNotBuilt(unittest.TestCase):
 
 
 class TestPrepareOutputSpace(unittest.TestCase):
-    """Tests for _prepare_output_space() and _get_output_space_removals()"""
+    """Tests for prepare_output_space() and _get_output_space_removals()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -561,25 +561,25 @@ class TestPrepareOutputSpace(unittest.TestCase):
         self.assertEqual(result, ['/tmp/test/02_g1234567_old'])
 
     @mock.patch.object(builder.Builder, '_get_output_space_removals')
-    def test_prepare_output_space_nothing_to_remove(self, mock_get_removals):
-        """Test _prepare_output_space with nothing to remove"""
+    def testprepare_output_space_nothing_to_remove(self, mock_get_removals):
+        """Test prepare_output_space with nothing to remove"""
         mock_get_removals.return_value = []
         terminal.get_print_test_lines()  # Clear
 
-        self.builder._prepare_output_space()
+        self.builder.prepare_output_space()
 
         lines = terminal.get_print_test_lines()
         self.assertEqual(len(lines), 0)
 
     @mock.patch.object(shutil, 'rmtree')
     @mock.patch.object(builder.Builder, '_get_output_space_removals')
-    def test_prepare_output_space_removes_dirs(self, mock_get_removals,
+    def testprepare_output_space_removes_dirs(self, mock_get_removals,
                                                mock_rmtree):
-        """Test _prepare_output_space removes old directories"""
+        """Test prepare_output_space removes old directories"""
         mock_get_removals.return_value = ['/tmp/test/old1', '/tmp/test/old2']
         terminal.get_print_test_lines()  # Clear
 
-        self.builder._prepare_output_space()
+        self.builder.prepare_output_space()
 
         # Check rmtree was called for each directory
         self.assertEqual(mock_rmtree.call_count, 2)
