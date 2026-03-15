@@ -306,6 +306,9 @@ class Builder:
         self.checkout = checkout
         self._num_threads = num_threads
         self.num_jobs = num_jobs
+        self.active_boards = 0
+        self.max_boards = 0
+        self._active_lock = threading.Lock()
         self._already_done = 0
         self.kconfig_reconfig = 0
         self.force_build = False
@@ -1200,7 +1203,7 @@ class Builder:
             terminal.print_clear()
 
     def init_build(self, commits, board_selected, keep_outputs, verbose,
-                    fragments):
+                    fragments, extra_count=0):
         """Initialise a build: prepare working space and create jobs
 
         This sets up the working directory, output space and job queue
@@ -1214,6 +1217,9 @@ class Builder:
             keep_outputs (bool): True to save build output files
             verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
+            extra_count (int): Additional builds expected from external
+                sources (e.g. distributed workers) to include in the
+                progress total
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
@@ -1228,6 +1234,7 @@ class Builder:
             tprint('\rStarting build...', newline=False)
         self._start_time = datetime.now()
         self._setup_build(board_selected, commits)
+        self.count += extra_count
         self.process_result(None)
         self.thread_exceptions = []
         # Create jobs to build all commits for each board
@@ -1245,11 +1252,15 @@ class Builder:
             else:
                 self._single_builder.run_job(job)
 
-    def run_build(self):
+    def run_build(self, delay_summary=False):
         """Run the build to completion
 
-        Waits for all jobs to finish and prints a summary.
+        Waits for all jobs to finish and optionally prints a summary.
         Call init_build() first to set up the jobs.
+
+        Args:
+            delay_summary (bool): True to skip printing the build
+                summary at the end (caller will print it later)
 
         Returns:
             tuple: Tuple containing:
@@ -1266,13 +1277,13 @@ class Builder:
 
             # Wait until we have processed all output
             self.out_queue.join()
-        if not self._opts.ide:
+        if not self._opts.ide and not delay_summary:
             self.print_summary()
 
         return (self.fail, self._warned, self.thread_exceptions)
 
     def build_boards(self, commits, board_selected, keep_outputs, verbose,
-                     fragments):
+                     fragments, extra_count=0, delay_summary=False):
         """Build all commits for a list of boards
 
         Convenience method that calls init_build() then run_build().
@@ -1284,6 +1295,11 @@ class Builder:
             keep_outputs (bool): True to save build output files
             verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
+            extra_count (int): Additional builds expected from external
+                sources (e.g. distributed workers) to include in the
+                progress total
+            delay_summary (bool): True to skip printing the build
+                summary at the end (caller will print it later)
 
         Returns:
             tuple: Tuple containing:
@@ -1292,8 +1308,8 @@ class Builder:
                 - list of thread exceptions raised
         """
         self.init_build(commits, board_selected, keep_outputs, verbose,
-                        fragments)
-        return self.run_build()
+                        fragments, extra_count)
+        return self.run_build(delay_summary)
 
     def print_summary(self):
         """Print the build summary line
