@@ -1199,9 +1199,13 @@ class Builder:
                 shutil.rmtree(dirname)
             terminal.print_clear()
 
-    def build_boards(self, commits, board_selected, keep_outputs, verbose,
-                     fragments):
-        """Build all commits for a list of boards
+    def init_build(self, commits, board_selected, keep_outputs, verbose,
+                    fragments):
+        """Initialise a build: prepare working space and create jobs
+
+        This sets up the working directory, output space and job queue
+        but does not start the build threads.  Call run_build() after
+        this to start the build.
 
         Args:
             commits (list): List of commits to be build, each a Commit object
@@ -1210,12 +1214,6 @@ class Builder:
             keep_outputs (bool): True to save build output files
             verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
-
-        Returns:
-            tuple: Tuple containing:
-                - number of boards that failed to build
-                - number of boards that issued warnings
-                - list of thread exceptions raised
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
@@ -1224,7 +1222,7 @@ class Builder:
         self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
         self._prepare_working_space(min(self._num_threads, len(board_selected)),
-                commits is not None)
+                board_selected and commits is not None)
         self._prepare_output_space()
         if not self._opts.ide:
             tprint('\rStarting build...', newline=False)
@@ -1247,6 +1245,18 @@ class Builder:
             else:
                 self._single_builder.run_job(job)
 
+    def run_build(self):
+        """Run the build to completion
+
+        Waits for all jobs to finish and prints a summary.
+        Call init_build() first to set up the jobs.
+
+        Returns:
+            tuple: Tuple containing:
+                - number of boards that failed to build
+                - number of boards that issued warnings
+                - list of thread exceptions raised
+        """
         if self._num_threads:
             term = threading.Thread(target=self.queue.join)
             term.daemon = True
@@ -1257,8 +1267,39 @@ class Builder:
             # Wait until we have processed all output
             self.out_queue.join()
         if not self._opts.ide:
-            self._result_handler.print_build_summary(
-                self.count, self._already_done, self.kconfig_reconfig,
-                self._start_time, self.thread_exceptions)
+            self.print_summary()
 
         return (self.fail, self._warned, self.thread_exceptions)
+
+    def build_boards(self, commits, board_selected, keep_outputs, verbose,
+                     fragments):
+        """Build all commits for a list of boards
+
+        Convenience method that calls init_build() then run_build().
+
+        Args:
+            commits (list): List of commits to be build, each a Commit object
+            board_selected (dict): Dict of selected boards, key is target name,
+                    value is Board object
+            keep_outputs (bool): True to save build output files
+            verbose (bool): Display build results as they are completed
+            fragments (str): config fragments added to defconfig
+
+        Returns:
+            tuple: Tuple containing:
+                - number of boards that failed to build
+                - number of boards that issued warnings
+                - list of thread exceptions raised
+        """
+        self.init_build(commits, board_selected, keep_outputs, verbose,
+                        fragments)
+        return self.run_build()
+
+    def print_summary(self):
+        """Print the build summary line
+
+        Shows total built, time taken, and any thread exceptions.
+        """
+        self._result_handler.print_build_summary(
+            self.count, self._already_done, self.kconfig_reconfig,
+            self._start_time, self.thread_exceptions)
