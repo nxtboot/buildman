@@ -1517,6 +1517,138 @@ output directory. It also writes the commands used to build U-Boot in an
 `out-cmd` file. You can check these if you suspect something strange is
 happening.
 
+Distributed builds
+-------------------
+
+Buildman can distribute builds across multiple machines over SSH, so that
+builds which need cross-compilers not available locally can be offloaded to
+machines that have them.
+
+To use this, add a ``[machines]`` section to your ``~/.buildman`` config file
+listing the remote machines::
+
+    [machines]
+    ohau
+    moa
+    myserver = user@build1.example.com
+
+Each entry is either a bare hostname (used as both the name and SSH target) or
+a ``name = hostname`` pair. The machines must be accessible via SSH without a
+password (use ``ssh-agent`` or key-based authentication).
+
+Per-machine settings can be added in ``[machine:<name>]`` sections::
+
+    [machine:ruru]
+    max_boards = 64
+
+The ``max_boards`` setting limits how many boards a machine builds
+concurrently. By default, a machine builds one board per CPU thread, but
+machines with very high thread counts (e.g. 256) can suffer from resource
+contention when every thread runs a separate build. Capping concurrent
+boards means each board gets a higher ``make -j`` value (e.g. 256 threads /
+64 boards = ``-j4``), reducing contention and improving throughput.
+
+A lower ``max_boards`` also reduces the build "tail": when the shared pool
+of boards is nearly empty, a capped machine has fewer in-flight boards and
+finishes sooner, while the remaining pool boards flow to other machines.
+
+You can check which machines are reachable and what toolchains they have::
+
+    buildman --mach
+
+This probes each machine over SSH and reports its architecture, thread count,
+load average, available memory and disk space. Machines that are too busy (load
+average exceeds 80% of CPU count), low on disk (<1 GB) or low on memory
+(<512 MB) are marked as unavailable and will not receive builds. Re-run
+``--mach`` after the load drops to see them become available again.
+
+To fetch missing toolchains on the remote machines::
+
+    buildman --mach --machines-fetch-arch
+
+Once machines are configured, use ``--dist`` to distribute builds::
+
+    buildman --dist arm
+
+This probes the configured machines, checks which toolchains each has, and
+splits the selected boards between local and remote workers based on
+architecture support. Each remote worker builds its assigned boards in parallel,
+using all available CPU threads.
+
+Use ``--use-machines`` to select specific machines::
+
+    buildman --use-machines ohau,moa arm
+
+This implies ``--dist``, so there is no need to pass both.
+
+Use ``--no-local`` to skip local builds entirely and send everything to the
+remote machines::
+
+    buildman --dist --no-local arm
+
+Most build flags are forwarded to remote workers automatically. For example
+``-f`` (force build), ``-L`` (no LTO), ``-M`` (allow missing blobs),
+``-V`` (verbose build), ``-E`` (warnings as errors), ``-m`` (mrproper),
+``--fallback-mrproper``, ``--config-only`` and ``-r`` (reproducible builds)
+all take effect on remote workers just as they do locally. The ``-f`` flag
+also cleans stale output on the workers so that builds start from scratch.
+
+Use ``-D`` to enable debug output from the workers, which shows each build
+as it starts and finishes::
+
+    buildman --dist -D arm
+
+The ``--machines-buildman-path`` option allows specifying a custom path to
+buildman on the remote machines, if it is not in the default ``PATH``::
+
+    buildman --dist --machines-buildman-path /opt/tools/buildman arm
+
+The distributed build protocol uses JSON messages over SSH stdin/stdout.
+The boss pushes the local source tree to each worker via ``git push``, so
+workers always build with the same code as the boss. Build results (return
+codes, stdout, stderr, sizes) are streamed back and written into the same
+output directory structure as local builds.
+
+Per-worker log files are written to the output directory as
+``worker-<hostname>.log`` for debugging protocol issues.
+
+Protocol overview
+~~~~~~~~~~~~~~~~~
+
+The boss starts each worker via ``ssh host buildman --worker``. The worker
+reads JSON commands from stdin and writes ``BM>``-prefixed JSON responses
+to stdout. Stderr is forwarded to the boss for diagnostics.
+
+A typical session looks like::
+
+    boss → worker:  {"cmd": "setup", "work_dir": "~/dev/.bm-worker"}
+    worker → boss:  BM> {"resp": "setup_done", "work_dir": "...", "git_dir": "..."}
+
+    boss:           git push host:~/.bm-worker/.git HEAD:refs/heads/work
+
+    boss → worker:  {"cmd": "configure", "settings": {"no_lto": true, ...}}
+    worker → boss:  BM> {"resp": "configure_done"}
+
+    boss → worker:  {"cmd": "build_prepare", "commits": ["abc123", ...]}
+    worker → boss:  BM> {"resp": "build_started", "num_threads": 8}
+    worker → boss:  BM> {"resp": "worktree_created", "thread": 0}
+    ...
+    worker → boss:  BM> {"resp": "build_prepare_done"}
+
+    boss → worker:  {"cmd": "build_board", "board": "sandbox", "arch": "sandbox"}
+    worker → boss:  BM> {"resp": "build_result", "board": "sandbox", ...}
+
+    boss → worker:  {"cmd": "build_done"}
+    worker → boss:  BM> {"resp": "build_done", "exceptions": 0}
+
+    boss → worker:  {"cmd": "quit"}
+    worker → boss:  BM> {"resp": "quit_ack"}
+
+The boss uses demand-driven dispatch: it sends an initial batch of boards to
+each worker, then sends more as results come back. This naturally balances load
+across workers with different build speeds.
+
+
 TODO
 ----
 

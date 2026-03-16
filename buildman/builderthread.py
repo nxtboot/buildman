@@ -52,20 +52,19 @@ BuildSetup = namedtuple('BuildSetup', ['env', 'args', 'config_args', 'cwd',
 RETURN_CODE_RETRY = -1
 BASE_ELF_FILENAMES = ['u-boot', 'spl/u-boot-spl', 'tpl/u-boot-tpl']
 
+# Per-commit cache for the kconfig_changed_since() result.  The answer only
+# depends on the commit (did any Kconfig file change since the previous
+# checkout?), so one thread can do the walk and every other thread building
+# the same commit reuses the boolean.
+_kconfig_cache = {}
+_kconfig_cache_lock = threading.Lock()
 
-def kconfig_changed_since(fname, srcdir='.', target=None):
-    """Check if any Kconfig or defconfig files are newer than the given file.
 
-    Args:
-        fname (str): Path to file to compare against (typically '.config')
-        srcdir (str): Source directory to search for Kconfig/defconfig files
-        target (str): Board target name; if provided, only check that board's
-            defconfig file (e.g. 'sandbox' checks 'configs/sandbox_defconfig')
+def _kconfig_changed_uncached(fname, srcdir, target):
+    """Check if any Kconfig or defconfig files are newer than fname.
 
-    Returns:
-        bool: True if any Kconfig* file (or the board's defconfig) in srcdir
-            is newer than fname, False otherwise. Also returns False if fname
-            doesn't exist.
+    This does the real work — an os.walk() of srcdir. It should only be
+    called once per commit; the result is cached by kconfig_changed_since().
     """
     if not os.path.exists(fname):
         return False
@@ -78,14 +77,51 @@ def kconfig_changed_since(fname, srcdir='.', target=None):
             if os.path.getmtime(defconfig) > ref_time:
                 return True
 
-    # Check all Kconfig files
-    for dirpath, _, filenames in os.walk(srcdir):
+    for dirpath, dirnames, filenames in os.walk(srcdir):
+        # Prune in-place so os.walk() skips dotdirs and build dirs
+        dirnames[:] = [d for d in dirnames if d[0] != '.' and d != 'build']
         for filename in filenames:
             if filename.startswith('Kconfig'):
                 filepath = os.path.join(dirpath, filename)
                 if os.path.getmtime(filepath) > ref_time:
                     return True
     return False
+
+
+def reset_kconfig_cache():
+    """Reset the cached kconfig results, for testing"""
+    _kconfig_cache.clear()
+
+
+def kconfig_changed_since(fname, srcdir='.', target=None, commit_upto=None):
+    """Check if any Kconfig or defconfig files are newer than the given file.
+
+    Args:
+        fname (str): Path to file to compare against (typically '.config')
+        srcdir (str): Source directory to search for Kconfig/defconfig files
+        target (str): Board target name; if provided, only check that board's
+            defconfig file (e.g. 'sandbox' checks 'configs/sandbox_defconfig')
+        commit_upto (int or None): Commit index for caching. When set, only
+            the first thread to check a given commit does the walk; all
+            other threads reuse that result.
+
+    Returns:
+        bool: True if any Kconfig* file (or the board's defconfig) in srcdir
+            is newer than fname, False otherwise. Also returns False if fname
+            doesn't exist.
+    """
+    if commit_upto is None:
+        return _kconfig_changed_uncached(fname, srcdir, target)
+
+    if commit_upto in _kconfig_cache:
+        return _kconfig_cache[commit_upto]
+
+    with _kconfig_cache_lock:
+        if commit_upto in _kconfig_cache:
+            return _kconfig_cache[commit_upto]
+        result = _kconfig_changed_uncached(fname, srcdir, target)
+        _kconfig_cache[commit_upto] = result
+        return result
 
 # Common extensions for images
 COMMON_EXTS = ['.bin', '.rom', '.itb', '.img']
@@ -296,8 +332,19 @@ class BuilderThread(threading.Thread):
             args.append('V=1')
         else:
             args.append('-s')
-        if self.builder.num_jobs is not None:
-            args.extend(['-j', str(self.builder.num_jobs)])
+        num_jobs = self.builder.num_jobs
+        if num_jobs is None and self.builder.active_boards:
+            active = self.builder.active_boards
+            nthreads = self.builder.num_threads
+            baseline = self.builder.max_boards or nthreads
+            if active < baseline:
+                # Tail: ramp up 2x to compensate for make overhead
+                num_jobs = max(1, nthreads * 2 // active)
+            else:
+                num_jobs = max(1, nthreads // active)
+        if num_jobs is not None:
+            args.extend(['-j', str(num_jobs)])
+            args.append(f'NPROC={num_jobs}')
         if self.builder.warnings_as_errors:
             args.append('KCFLAGS=-Werror')
             args.append('HOSTCFLAGS=-Werror')
@@ -387,6 +434,7 @@ class BuilderThread(threading.Thread):
                     - result.stderr set to 'bad' if stderr output was recorded
         """
         result = command.CommandResult()
+        result.remote = None
         done_file = self.builder.get_done_file(commit_upto, brd.target)
         result.already_done = os.path.exists(done_file)
         result.kconfig_reconfig = False
@@ -625,11 +673,15 @@ class BuilderThread(threading.Thread):
         if self.toolchain:
             commit = self._checkout(commit_upto, req.work_dir)
 
-            # Check if Kconfig files have changed since last config
-            if self.builder.kconfig_check:
+            # Check if Kconfig files have changed since last config. Skip
+            # when do_config is already True (e.g. first commit) since
+            # defconfig will run anyway. This avoids an expensive os.walk()
+            # of the source tree that can be very slow when many threads
+            # do it simultaneously.
+            if self.builder.kconfig_check and not do_config:
                 config_file = os.path.join(out_dir, '.config')
                 if kconfig_changed_since(config_file, req.work_dir,
-                                         req.brd.target):
+                                         req.brd.target, commit_upto):
                     kconfig_reconfig = True
                     do_config = True
 
@@ -677,6 +729,7 @@ class BuilderThread(threading.Thread):
                 req, commit_upto, do_config, mrproper, config_only,
                 out_dir, out_rel_dir, result)
 
+        result.remote = None
         result.toolchain = self.toolchain
         result.brd = req.brd
         result.commit_upto = commit_upto
@@ -982,10 +1035,15 @@ class BuilderThread(threading.Thread):
         """
         while True:
             job = self.builder.queue.get()
+            with self.builder.active_lock:
+                self.builder.active_boards += 1
             try:
                 self.run_job(job)
             except Exception as exc:  # pylint: disable=W0718
                 print('Thread exception (use -T0 to run without threads):',
                       exc)
                 self.builder.thread_exceptions.append(exc)
+            finally:
+                with self.builder.active_lock:
+                    self.builder.active_boards -= 1
             self.builder.queue.task_done()

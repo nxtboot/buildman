@@ -298,7 +298,8 @@ class TestFunctional(unittest.TestCase):
         # Remove possible extraneous strings
         extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
         gothelp = result.stdout.replace(extra, '')
-        self.assertEqual(len(gothelp), os.path.getsize(help_file))
+        self.assertEqual(len(gothelp.encode('utf-8')),
+                         os.path.getsize(help_file))
         self.assertEqual(0, len(result.stderr))
         self.assertEqual(0, result.return_code)
 
@@ -1634,7 +1635,8 @@ something: me
         call_count = [0]
         config_exists = [False]
 
-        def mock_kconfig_changed(fname, _srcdir='.', _target=None):
+        def mock_kconfig_changed(fname, _srcdir='.', _target=None,
+                                 _commit_upto=None):
             """Mock for kconfig_changed_since that checks if .config exists
 
             Args:
@@ -1671,7 +1673,8 @@ something: me
         """Test that -Z flag disables Kconfig change detection"""
         call_count = [0]
 
-        def mock_kconfig_changed(_fname, _srcdir='.', _target=None):
+        def mock_kconfig_changed(_fname, _srcdir='.', _target=None,
+                                 _commit_upto=None):
             """Mock for kconfig_changed_since that always returns True
 
             Returns:

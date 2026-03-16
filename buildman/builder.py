@@ -21,10 +21,9 @@ import threading
 
 from buildman import builderthread
 from buildman.cfgutil import Config, process_config
-from buildman.outcome import (BoardStatus, DisplayOptions, ErrLine, Outcome,
+from buildman.outcome import (DisplayOptions, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
                               OUTCOME_UNKNOWN)
-from buildman.resulthandler import ResultHandler
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -200,15 +199,12 @@ class Builder:
         _complete_delay: Expected delay until completion (timedelta)
         _next_delay_update: Next time we plan to display a progress update
                 (datatime)
-        _num_threads: Number of builder threads to run
         _opts: DisplayOptions for result output
         _re_make_err: Compiled regex for make error detection
         _restarting_config: True if 'Restart config' is detected in output
         _result_handler: ResultHandler for displaying results
         _single_builder: BuilderThread object for the singer builder, if
             threading is not being used
-        _start_time: Start time for the build
-        _step: Step value for processing commits (1=all, 2=every other, etc.)
         _terminated: Thread was terminated due to an error
         _threads: List of active threads
         _timestamps: List of timestamps for the completion of the last
@@ -231,7 +227,9 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, build_target=None):
+                 dtc_skip=False, build_target=None,
+                 thread_class=builderthread.BuilderThread,
+                 handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
 
         Args:
@@ -285,6 +283,13 @@ class Builder:
             make_func (function): Function to call to run 'make'
             dtc_skip (bool): True to skip building dtc and use the system one
             build_target (str): Build target to use (None to use the default)
+            thread_class (type): BuilderThread subclass to use (default
+                builderthread.BuilderThread). This allows the caller to
+                override how results are processed, e.g. sending over SSH
+                instead of writing to disk.
+            handle_signals (bool): True to register SIGINT handler (default
+                True). Set to False when running inside a worker that has
+                its own signal handling.
         """
         self.toolchains = toolchains
         self.base_dir = base_dir
@@ -296,18 +301,22 @@ class Builder:
         self.do_make = make_func or self.make
         self.gnu_make = gnu_make
         self.checkout = checkout
-        self._num_threads = num_threads
+        self.num_threads = num_threads
         self.num_jobs = num_jobs
+        self.active_boards = 0
+        self.max_boards = 0
+        self.active_lock = threading.Lock()
         self._already_done = 0
         self.kconfig_reconfig = 0
         self.force_build = False
         self.git_dir = git_dir
+        self._setup_git = False
         self._timestamp_count = 10
         self._build_period_us = None
         self._complete_delay = None
         self._next_delay_update = datetime.now()
-        self._start_time = None
-        self._step = step
+        self.start_time = None
+        self.step = step
         self.no_subdirs = no_subdirs
         self.full_path = full_path
         self.verbose_build = verbose_build
@@ -357,17 +366,20 @@ class Builder:
         # Attributes set by other methods
         self._build_period = None
         self._commit = None
-        self._upto = 0
+        self.upto = 0
         self._warned = 0
         self.fail = 0
         self.commit_count = 0
         self.commits = None
         self.count = 0
-        self._timestamps = None
-        self._verbose = False
+        self.timestamps = collections.deque()
+        self.verbose = False
+        self.progress = ''
 
         # Note: baseline state for result summaries is now in ResultHandler
 
+        self._thread_class = thread_class
+        self._lazy_thread_setup = lazy_thread_setup
         self._setup_threads(mrproper, per_board_out_dir, test_thread_exceptions)
 
         ignore_lines = ['(make.*Waiting for unfinished)',
@@ -375,7 +387,8 @@ class Builder:
         self._re_make_err = re.compile('|'.join(ignore_lines))
 
         # Handle existing graceful with SIGINT / Ctrl-C
-        signal.signal(signal.SIGINT, self._signal_handler)
+        if handle_signals:
+            signal.signal(signal.SIGINT, self._signal_handler)
 
     def _setup_threads(self, mrproper, per_board_out_dir,
                        test_thread_exceptions):
@@ -388,12 +401,12 @@ class Builder:
             test_thread_exceptions (bool): True to make threads raise an
                 exception instead of reporting their result (for tests)
         """
-        if self._num_threads:
+        if self.num_threads:
             self._single_builder = None
             self.queue = queue.Queue()
             self.out_queue = queue.Queue()
-            for i in range(self._num_threads):
-                t = builderthread.BuilderThread(
+            for i in range(self.num_threads):
+                t = self._thread_class(
                         self, i, mrproper, per_board_out_dir,
                         test_exception=test_thread_exceptions)
                 t.daemon = True
@@ -405,7 +418,7 @@ class Builder:
             t.start()
             self._threads.append(t)
         else:
-            self._single_builder = builderthread.BuilderThread(
+            self._single_builder = self._thread_class(
                 self, -1, mrproper, per_board_out_dir)
 
     def __del__(self):
@@ -463,9 +476,9 @@ class Builder:
         build (one board, one commit).
         """
         now = datetime.now()
-        self._timestamps.append(now)
-        count = len(self._timestamps)
-        delta = self._timestamps[-1] - self._timestamps[0]
+        self.timestamps.append(now)
+        count = len(self.timestamps)
+        delta = self.timestamps[-1] - self.timestamps[0]
         seconds = delta.total_seconds()
 
         # If we have enough data, estimate build period (time taken for a
@@ -474,7 +487,7 @@ class Builder:
             self._next_delay_update = now + timedelta(seconds=2)
             if seconds > 0:
                 self._build_period = float(seconds) / count
-                todo = self.count - self._upto
+                todo = self.count - self.upto
                 self._complete_delay = timedelta(microseconds=
                         self._build_period * todo * 1000000)
                 # Round it
@@ -482,7 +495,7 @@ class Builder:
                         microseconds=self._complete_delay.microseconds)
 
         if seconds > 60:
-            self._timestamps.popleft()
+            self.timestamps.popleft()
             count -= 1
 
     def _select_commit(self, commit, checkout=True):
@@ -565,7 +578,7 @@ class Builder:
         if result:
             target = result.brd.target
 
-            self._upto += 1
+            self.upto += 1
             if result.return_code != 0:
                 self.fail += 1
             elif result.stderr:
@@ -577,8 +590,11 @@ class Builder:
             if self._opts.ide:
                 if result.stderr:
                     sys.stderr.write(result.stderr)
-            elif self._verbose:
+            elif self.verbose:
                 terminal.print_clear()
+                machine = result.remote
+                if machine and (result.return_code or result.stderr):
+                    tprint(f'[{machine}]')
                 boards_selected = {target : result.brd}
                 self._result_handler.reset_result_summary(boards_selected)
                 self._result_handler.produce_result_summary(
@@ -587,13 +603,13 @@ class Builder:
             target = '(starting)'
 
         # Display separate counts for ok, warned and fail
-        ok = self._upto - self._warned - self.fail
+        ok = self.upto - self._warned - self.fail
         line = '\r' + self.col.build(self.col.GREEN, f'{ok:5d}')
         line += self.col.build(self.col.YELLOW, f'{self._warned:5d}')
         line += self.col.build(self.col.RED, f'{self.fail:5d}')
 
         line += f' /{self.count:<5d}  '
-        remaining = self.count - self._upto
+        remaining = self.count - self.upto
         if remaining:
             line += self.col.build(self.col.MAGENTA, f' -{remaining:<5d}  ')
         else:
@@ -604,7 +620,13 @@ class Builder:
         if self._complete_delay:
             line += f'{self._complete_delay}  : '
 
-        line += target
+        machine = result.remote if result else None
+        if machine:
+            line += f'{target} [{machine}]'
+        elif self.progress:
+            line += f'{target} [{self.progress}]'
+        else:
+            line += f'{target} [local]'
         if not self._opts.ide:
             terminal.print_clear()
             tprint(line, newline=False, limit_to_line=True)
@@ -1018,10 +1040,10 @@ class Builder:
             board_selected (dict): Selected boards to build
         """
         # First work out how many commits we will build
-        count = (self.commit_count + self._step - 1) // self._step
+        count = (self.commit_count + self.step - 1) // self.step
         self.count = len(board_selected) * count
-        self._upto = self._warned = self.fail = 0
-        self._timestamps = collections.deque()
+        self.upto = self._warned = self.fail = 0
+        self.timestamps = collections.deque()
 
     def get_thread_dir(self, thread_num):
         """Get the directory path to the working dir for a thread.
@@ -1036,6 +1058,18 @@ class Builder:
         if self.work_in_output:
             return self._working_dir
         return os.path.join(self._working_dir, f'{max(thread_num, 0):02d}')
+
+    def prepare_thread(self, thread_num):
+        """Prepare a single thread's working directory on demand
+
+        This can be called by a BuilderThread to lazily set up its
+        worktree/clone on first use, rather than doing all threads upfront.
+        Uses the git setup method determined by _detect_git_setup().
+
+        Args:
+            thread_num (int): Thread number (0, 1, ...)
+        """
+        self._prepare_thread(thread_num, self._setup_git)
 
     def _prepare_thread(self, thread_num, setup_git):
         """Prepare the working directory for a thread.
@@ -1087,11 +1121,16 @@ class Builder:
             else:
                 raise ValueError(f"Can't setup git repo with {setup_git}.")
 
-    def _prepare_working_space(self, max_threads, setup_git):
+    def prepare_working_space(self, max_threads, setup_git):
         """Prepare the working directory for use.
 
         Set up the git repo for each thread. Creates a linked working tree
         if git-worktree is available, or clones the repo if it isn't.
+
+        When lazy_thread_setup is True, only the working directory and git
+        setup type are determined here.  Each thread sets up its own
+        worktree/clone on first use via prepare_thread(), which avoids a
+        long sequential setup phase on machines with many threads.
 
         Args:
             max_threads: Maximum number of threads we expect to need. If 0 then
@@ -1100,20 +1139,35 @@ class Builder:
             setup_git: True to set up a git worktree or a git clone
         """
         builderthread.mkdir(self._working_dir)
+
+        self._setup_git = self._detect_git_setup(setup_git)
+
+        if self._lazy_thread_setup:
+            return
+
+        # Always do at least one thread
+        for thread in range(max(max_threads, 1)):
+            self._prepare_thread(thread, self._setup_git)
+
+    def _detect_git_setup(self, setup_git):
+        """Determine which git setup method to use
+
+        Args:
+            setup_git: True to set up git, False to skip
+
+        Returns:
+            str or False: 'worktree', 'clone', or False
+        """
         if setup_git and self.git_dir:
             src_dir = os.path.abspath(self.git_dir)
             if gitutil.check_worktree_is_available(src_dir):
-                setup_git = 'worktree'
                 # If we previously added a worktree but the directory for it
                 # got deleted, we need to prune its files from the repo so
                 # that we can check out another in its place.
                 gitutil.prune_worktrees(src_dir)
-            else:
-                setup_git = 'clone'
-
-        # Always do at least one thread
-        for thread in range(max(max_threads, 1)):
-            self._prepare_thread(thread, setup_git)
+                return 'worktree'
+            return 'clone'
+        return False
 
     def _get_output_space_removals(self):
         """Get the output directories ready to receive files.
@@ -1140,7 +1194,7 @@ class Builder:
                     to_remove.append(dirname)
         return to_remove
 
-    def _prepare_output_space(self):
+    def prepare_output_space(self):
         """Get the output directories ready to receive files.
 
         We delete any output directories which look like ones we need to
@@ -1155,9 +1209,13 @@ class Builder:
                 shutil.rmtree(dirname)
             terminal.print_clear()
 
-    def build_boards(self, commits, board_selected, keep_outputs, verbose,
-                     fragments):
-        """Build all commits for a list of boards
+    def init_build(self, commits, board_selected, keep_outputs, verbose,
+                    fragments, extra_count=0):
+        """Initialise a build: prepare working space and create jobs
+
+        This sets up the working directory, output space and job queue
+        but does not start the build threads.  Call run_build() after
+        this to start the build.
 
         Args:
             commits (list): List of commits to be build, each a Commit object
@@ -1166,26 +1224,24 @@ class Builder:
             keep_outputs (bool): True to save build output files
             verbose (bool): Display build results as they are completed
             fragments (str): config fragments added to defconfig
-
-        Returns:
-            tuple: Tuple containing:
-                - number of boards that failed to build
-                - number of boards that issued warnings
-                - list of thread exceptions raised
+            extra_count (int): Additional builds expected from external
+                sources (e.g. distributed workers) to include in the
+                progress total
         """
         self.commit_count = len(commits) if commits else 1
         self.commits = commits
-        self._verbose = verbose
+        self.verbose = verbose
 
         self._result_handler.reset_result_summary(board_selected)
         builderthread.mkdir(self.base_dir, parents = True)
-        self._prepare_working_space(min(self._num_threads, len(board_selected)),
-                commits is not None)
-        self._prepare_output_space()
+        self.prepare_working_space(min(self.num_threads, len(board_selected)),
+                board_selected and commits is not None)
+        self.prepare_output_space()
         if not self._opts.ide:
             tprint('\rStarting build...', newline=False)
-        self._start_time = datetime.now()
+        self.start_time = datetime.now()
         self._setup_build(board_selected, commits)
+        self.count += extra_count
         self.process_result(None)
         self.thread_exceptions = []
         # Create jobs to build all commits for each board
@@ -1197,13 +1253,29 @@ class Builder:
             job.work_in_output = self.work_in_output
             job.adjust_cfg = self.adjust_cfg
             job.fragments = fragments
-            job.step = self._step
-            if self._num_threads:
+            job.step = self.step
+            if self.num_threads:
                 self.queue.put(job)
             else:
                 self._single_builder.run_job(job)
 
-        if self._num_threads:
+    def run_build(self, delay_summary=False):
+        """Run the build to completion
+
+        Waits for all jobs to finish and optionally prints a summary.
+        Call init_build() first to set up the jobs.
+
+        Args:
+            delay_summary (bool): True to skip printing the build
+                summary at the end (caller will print it later)
+
+        Returns:
+            tuple: Tuple containing:
+                - number of boards that failed to build
+                - number of boards that issued warnings
+                - list of thread exceptions raised
+        """
+        if self.num_threads:
             term = threading.Thread(target=self.queue.join)
             term.daemon = True
             term.start()
@@ -1212,9 +1284,45 @@ class Builder:
 
             # Wait until we have processed all output
             self.out_queue.join()
-        if not self._opts.ide:
-            self._result_handler.print_build_summary(
-                self.count, self._already_done, self.kconfig_reconfig,
-                self._start_time, self.thread_exceptions)
+        if not self._opts.ide and not delay_summary:
+            self.print_summary()
 
         return (self.fail, self._warned, self.thread_exceptions)
+
+    def build_boards(self, commits, board_selected, keep_outputs, verbose,
+                     fragments, extra_count=0, delay_summary=False):
+        """Build all commits for a list of boards
+
+        Convenience method that calls init_build() then run_build().
+
+        Args:
+            commits (list): List of commits to be build, each a Commit object
+            board_selected (dict): Dict of selected boards, key is target name,
+                    value is Board object
+            keep_outputs (bool): True to save build output files
+            verbose (bool): Display build results as they are completed
+            fragments (str): config fragments added to defconfig
+            extra_count (int): Additional builds expected from external
+                sources (e.g. distributed workers) to include in the
+                progress total
+            delay_summary (bool): True to skip printing the build
+                summary at the end (caller will print it later)
+
+        Returns:
+            tuple: Tuple containing:
+                - number of boards that failed to build
+                - number of boards that issued warnings
+                - list of thread exceptions raised
+        """
+        self.init_build(commits, board_selected, keep_outputs, verbose,
+                        fragments, extra_count)
+        return self.run_build(delay_summary)
+
+    def print_summary(self):
+        """Print the build summary line
+
+        Shows total built, time taken, and any thread exceptions.
+        """
+        self._result_handler.print_build_summary(
+            self.count, self._already_done, self.kconfig_reconfig,
+            self.start_time, self.thread_exceptions)

@@ -20,7 +20,7 @@ def setup(fname=''):
     global settings  # pylint: disable=W0603
     global config_fname  # pylint: disable=W0603
 
-    settings = configparser.ConfigParser()
+    settings = configparser.ConfigParser(allow_no_value=True)
     if fname is not None:
         config_fname = fname
         if config_fname == '':
@@ -110,6 +110,14 @@ x86 = i386
 # snapper-boards=ENABLE_AT91_TEST=1
 # snapper9260=${snapper-boards} BUILD_TAG=442
 # snapper9g45=${snapper-boards} BUILD_TAG=443
+
+[machines]
+# Remote build machines for distributed builds
+# List hostnames, one per line (or user@hostname)
+# e.g.
+# ohau
+# moa
+# user@build-server
 ''', file=out)
     except IOError:
         print(f"Couldn't create buildman config file '{cfgname}'\n")

@@ -10,25 +10,29 @@ This holds the main control logic for buildman, when not running tests.
 import getpass
 import multiprocessing
 import os
+import signal
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
 from buildman import boards
 from buildman import bsettings
 from buildman import cfgutil
+from buildman import machine
 from buildman import toolchain
 from buildman.builder import Builder
 from buildman.outcome import DisplayOptions
 from buildman.resulthandler import ResultHandler
-from patman import patchstream
 import qconfig
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 from u_boot_pylib.terminal import print_clear, tprint
+
+from patman import patchstream
 
 TEST_BUILDER = None
 
@@ -65,7 +69,8 @@ def count_build_commits(commits, step):
     return 0
 
 
-def get_action_summary(is_summary, commit_count, selected, threads, jobs):
+def get_action_summary(is_summary, commit_count, selected, threads, jobs,
+                       no_local=False):
     """Return a string summarising the intended action.
 
     Args:
@@ -74,6 +79,7 @@ def get_action_summary(is_summary, commit_count, selected, threads, jobs):
         selected (list of Board): List of Board objects that are marked
         threads (int): Number of processor threads being used
         jobs (int): Number of jobs to build at once
+        no_local (bool): True if all builds are remote (no local threads)
 
     Returns:
         str: Summary string
@@ -84,8 +90,9 @@ def get_action_summary(is_summary, commit_count, selected, threads, jobs):
         commit_str = 'current source'
     msg = (f"{'Summary of' if is_summary else 'Building'} "
            f'{commit_str} for {len(selected)} boards')
-    msg += (f' ({threads} thread{get_plural(threads)}, '
-            f'{jobs} job{get_plural(jobs)} per thread)')
+    if not no_local:
+        msg += (f' ({threads} thread{get_plural(threads)}, '
+                f'{jobs} job{get_plural(jobs)} per thread)')
     return msg
 
 # pylint: disable=R0913,R0917
@@ -375,7 +382,8 @@ def get_toolchains(toolchains, col, override_toolchain, fetch_arch,
 
     if no_toolchains:
         toolchains.get_settings()
-        toolchains.scan(list_tool_chains and verbose)
+        toolchains.scan(list_tool_chains and verbose,
+                        raise_on_error=not list_tool_chains)
     if list_tool_chains:
         toolchains.list()
         print()
@@ -536,12 +544,240 @@ def setup_output_dir(output_dir, work_in_output, branch, no_subdirs, col,
     return output_dir
 
 
+def _filter_mismatched_toolchains(machines, local_toolchains):
+    """Remove remote toolchains whose gcc version differs from local
+
+    Compares the gcc version directory (e.g. gcc-13.1.0-nolibc) in
+    each toolchain path. If a remote machine has a different version
+    for an architecture, that architecture is removed from the
+    machine's toolchain list so no boards are sent to it for that arch.
+
+    Args:
+        machines (list of Machine): Remote machines with toolchains
+        local_toolchains (dict): arch -> gcc path on the local machine
+    """
+    local_versions = {}
+    for arch, gcc in local_toolchains.items():
+        ver = machine.gcc_version(gcc)
+        if ver:
+            local_versions[arch] = ver
+
+    for mach in machines:
+        mismatched = []
+        for arch, gcc in mach.toolchains.items():
+            local_ver = local_versions.get(arch)
+            if not local_ver:
+                continue
+            remote_ver = machine.gcc_version(gcc)
+            if remote_ver and remote_ver != local_ver:
+                mismatched.append(arch)
+        for arch in mismatched:
+            del mach.toolchains[arch]
+
+
+def _collect_worker_settings(args):
+    """Collect build settings to send to remote workers
+
+    Gathers the command-line flags that affect how make is invoked and
+    returns them as a dict for the worker's 'configure' command.
+
+    Args:
+        args (Namespace): Command-line arguments
+
+    Returns:
+        dict: Settings dict (only includes flags that are set)
+    """
+    settings = {}
+    flag_names = [
+        'verbose_build', 'allow_missing', 'no_lto',
+        'reproducible_builds', 'warnings_as_errors',
+        'mrproper', 'fallback_mrproper', 'config_only',
+        'force_build', 'kconfig_check',
+    ]
+    for name in flag_names:
+        val = getattr(args, name, None)
+        if val is not None:
+            settings[name] = val
+    return settings
+
+
+def _setup_remote_builds(board_selected, args, git_dir):
+    """Set up remote workers if machines are configured
+
+    Probes machines, checks toolchains and splits boards into local
+    and remote sets. Returns a WorkerPool for the remote boards.
+
+    Args:
+        board_selected (dict): All selected boards
+        args (Namespace): Command-line arguments
+        git_dir (str): Path to local .git directory
+
+    Returns:
+        tuple:
+            dict: Boards to build locally
+            dict: Boards to build remotely
+            WorkerPool or None: Pool of remote workers, or None
+    """
+    from buildman import boss  # pylint: disable=C0415
+
+    # Parse machine name filter from --use-machines
+    machine_names = None
+    if args.use_machines:
+        machine_names = [n.strip() for n in args.use_machines.split(',')]
+
+    no_local = args.no_local
+
+    def _fail(msg):
+        """Handle a failure to set up remote builds
+
+        With --no-local, prints the error and returns empty dicts so
+        nothing is built. Otherwise falls back to building everything
+        locally.
+        """
+        if no_local:
+            tprint(msg)
+            return {}, {}, None
+        return board_selected, {}, None
+
+    machines_config = machine.get_machines_config()
+    if not machines_config:
+        return _fail('No machines configured')
+
+    # Probe machines and their toolchains
+    pool = machine.MachinePool(names=machine_names)
+    available = pool.probe_all()
+    if not available:
+        return _fail('No machines available')
+
+    # Check which of the boss's toolchains exist on each remote
+    # machine. This makes workers use the boss's toolchain choices
+    # rather than their own .buildman config.
+    local_tc = toolchain.Toolchains()
+    local_tc.get_settings(show_warning=False)
+    local_tc.scan(verbose=False)
+    local_gcc = {arch: tc.gcc for arch, tc in local_tc.toolchains.items()}
+
+    # Resolve toolchain aliases (e.g. x86->i386) so that board
+    # architectures using alias names are recognised by split_boards()
+    machine.resolve_toolchain_aliases(local_gcc)
+
+    pool.check_toolchains(
+        set(), buildman_path=args.machines_buildman_path,
+        local_gcc=local_gcc)
+    remote_toolchains = {}
+    for mach in available:
+        remote_toolchains.update(mach.toolchains)
+
+    if not remote_toolchains:
+        return _fail('No remote toolchains available')
+
+    if no_local:
+        local = {}
+        remote = board_selected
+    else:
+        local, remote = boss.split_boards(
+            board_selected, remote_toolchains)
+
+    if not remote:
+        return board_selected, {}, None
+
+    # Collect build settings to send to workers. Resolve allow_missing
+    # using the .buildman config, since workers don't have it.
+    settings = _collect_worker_settings(args)
+    settings['allow_missing'] = get_allow_missing(
+        args.allow_missing, args.no_allow_missing,
+        len(board_selected), args.branch)
+
+    # Start workers: init git, push source, start from tree
+    worker_pool = boss.WorkerPool(available)
+    workers = worker_pool.start_all(git_dir, 'HEAD:refs/heads/work',
+                                     debug=args.debug,
+                                     settings=settings)
+    if not workers:
+        return _fail('No remote workers available')
+
+    return local, remote, worker_pool
+
+
+def _start_remote_builds(builder, commits, board_selected, args):
+    """Start remote builds in a background thread
+
+    Splits boards between local and remote machines, launches remote
+    builds in a background thread, and installs a SIGINT handler for
+    clean shutdown.
+
+    Args:
+        builder (Builder): Builder to use
+        commits (list of Commit): Commits to build, or None
+        board_selected (dict): target -> Board for all selected boards
+        args (Namespace): Command-line arguments
+
+    Returns:
+        tuple: (local_boards, remote_thread, worker_pool, extra_count,
+            old_sigint)
+    """
+    local_boards, remote_boards, worker_pool = (
+        _setup_remote_builds(board_selected, args, builder.git_dir))
+
+    extra_count = 0
+    if worker_pool and remote_boards:
+        commit_count = len(commits) if commits else 1
+        extra_count = len(remote_boards) * commit_count
+
+    remote_thread = None
+    if worker_pool and remote_boards:
+        remote_thread = threading.Thread(
+            target=worker_pool.build_boards,
+            args=(remote_boards, commits, builder,
+                  len(local_boards)))
+        remote_thread.daemon = True
+        remote_thread.start()
+
+    # Install a SIGINT handler that cleanly shuts down workers.
+    # This is more reliable than try/except KeyboardInterrupt since
+    # SIGINT may terminate the process before the exception handler
+    # runs.
+    old_sigint = None
+    if worker_pool:
+        def _sigint_handler(_signum, _frame):
+            worker_pool.close_all()
+            signal.signal(signal.SIGINT, old_sigint or signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGINT)
+        old_sigint = signal.signal(signal.SIGINT, _sigint_handler)
+
+    return local_boards, remote_thread, worker_pool, extra_count, old_sigint
+
+
+def _finish_remote_builds(remote_thread, worker_pool, old_sigint, builder):
+    """Wait for remote builds to finish and clean up
+
+    Args:
+        remote_thread (Thread or None): Background remote build thread
+        worker_pool (WorkerPool or None): Worker pool to shut down
+        old_sigint: Previous SIGINT handler to restore
+        builder (Builder): Builder for printing the summary
+    """
+    if remote_thread:
+        try:
+            while remote_thread.is_alive():
+                remote_thread.join(timeout=0.5)
+        except KeyboardInterrupt:
+            worker_pool.close_all()
+            raise
+        worker_pool.quit_all()
+        builder.print_summary()
+
+    if worker_pool and old_sigint is not None:
+        signal.signal(signal.SIGINT, old_sigint)
+
+
 def run_builder(builder, commits, board_selected, display_options, args):
     """Run the builder or show the summary
 
     Args:
         builder (Builder): Builder to use
-        commits (list of Commit): List of commits being built, None if no branch
+        commits (list of Commit): List of commits being built, None if
+            no branch
         board_selected (dict): Dict of selected boards:
             key: target name
             value: Board object
@@ -560,19 +796,43 @@ def run_builder(builder, commits, board_selected, display_options, args):
 
     if not args.ide:
         commit_count = count_build_commits(commits, args.step)
-        tprint(get_action_summary(args.summary, commit_count, board_selected,
-                                  args.threads, args.jobs))
+        tprint(get_action_summary(args.summary, commit_count,
+                                  board_selected, args.threads,
+                                  args.jobs, no_local=args.no_local))
 
     builder.set_display_options(
-        display_options, args.filter_dtb_warnings, args.filter_migration_warnings)
+        display_options, args.filter_dtb_warnings,
+        args.filter_migration_warnings)
     if args.summary:
         builder.commits = commits
         builder.result_handler.show_summary(
             commits, board_selected, args.step)
     else:
-        fail, warned, excs = builder.build_boards(
-            commits, board_selected, args.keep_outputs, args.verbose,
-            args.fragments)
+        local_boards = board_selected
+        remote_thread = None
+        worker_pool = None
+        extra_count = 0
+        old_sigint = None
+
+        if args.distribute:
+            (local_boards, remote_thread, worker_pool,
+             extra_count, old_sigint) = _start_remote_builds(
+                builder, commits, board_selected, args)
+
+        try:
+            fail, warned, excs = builder.build_boards(
+                commits, local_boards, args.keep_outputs,
+                args.verbose, args.fragments,
+                extra_count=extra_count,
+                delay_summary=bool(remote_thread))
+        except KeyboardInterrupt:
+            if worker_pool:
+                worker_pool.close_all()
+            raise
+
+        _finish_remote_builds(remote_thread, worker_pool,
+                              old_sigint, builder)
+
         if args.build_summary:
             builder.commits = commits
             builder.result_handler.show_summary(
@@ -755,6 +1015,35 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
 
     gitutil.setup()
     col = terminal.Color()
+
+    # Handle --worker: run in worker mode for distributed builds
+    if args.worker:
+        from buildman import worker  # pylint: disable=C0415
+        return worker.do_worker(args.debug)
+
+    # Handle --kill-workers: kill stale workers and exit
+    if args.kill_workers:
+        from buildman import boss  # pylint: disable=C0415
+
+        machines_config = machine.get_machines_config()
+        if not machines_config:
+            print('No machines configured')
+            return 1
+        return boss.kill_workers(machines_config)
+
+    # Handle --machines: probe remote machines and show status
+    if args.machines or args.machines_fetch_arch:
+        return machine.do_probe_machines(
+            col, fetch=args.machines_fetch_arch,
+            buildman_path=args.machines_buildman_path)
+
+    # --use-machines implies --dist
+    if args.use_machines:
+        args.distribute = True
+
+    if args.no_local and not args.distribute:
+        print('--no-local requires --dist')
+        return 1
 
     git_dir = os.path.join(args.git, '.git')
 

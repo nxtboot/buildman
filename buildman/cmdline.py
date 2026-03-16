@@ -105,9 +105,39 @@ def add_upto_m(parser):
     parser.add_argument(
           '-M', '--allow-missing', action='store_true', default=False,
           help='Tell binman to allow missing blobs and generate fake ones as needed')
+    parser.add_argument('--dist', '--distribute', action='store_true',
+          dest='distribute',
+          default=False,
+          help='Distribute builds to remote machines from [machines] config')
+    parser.add_argument('--use-machines', type=str, default=None,
+          dest='use_machines',
+          help='Comma-separated list of machine names to use for '
+               'distributed builds (default: all from [machines] config)')
+    parser.add_argument('--no-local', action='store_true', default=False,
+          dest='no_local',
+          help='Do not build on the local machine; send all boards to '
+               'remote workers (requires --dist)')
+    parser.add_argument('--mach', '--machines', action='store_true',
+          default=False, dest='machines',
+          help='Probe all remote machines from [machines] config and show '
+               'their status and available toolchains')
+    parser.add_argument('--machines-fetch-arch', action='store_true',
+          default=False,
+          help='Fetch missing toolchains on remote machines (implies '
+               '--machines)')
+    parser.add_argument('--machines-buildman-path', type=str,
+          default='buildman',
+          help='Path to buildman on remote machines (default: %(default)s)')
     parser.add_argument(
           '--maintainer-check', action='store_true',
           help='Check that maintainer entries exist for each board')
+    parser.add_argument('--kill-workers', action='store_true', default=False,
+          dest='kill_workers',
+          help='Kill stale worker processes and remove lock files on all '
+               'remote machines, then exit')
+    parser.add_argument('--worker', action='store_true', default=False,
+          help='Run in worker mode, accepting build commands on stdin '
+               '(used internally for distributed builds)')
     parser.add_argument(
           '--no-allow-missing', action='store_true', default=False,
           help='Disable telling binman to allow missing blobs')

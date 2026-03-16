@@ -4,6 +4,8 @@
 
 """Unit tests for builder.py"""
 
+# pylint: disable=W0212
+
 from datetime import datetime
 import os
 import shutil
@@ -12,7 +14,7 @@ from unittest import mock
 
 from buildman import builder
 from buildman import builderthread
-from buildman.outcome import (DisplayOptions, OUTCOME_OK, OUTCOME_WARNING,
+from buildman.outcome import (DisplayOptions, OUTCOME_OK,
                               OUTCOME_ERROR, OUTCOME_UNKNOWN)
 from buildman.resulthandler import ResultHandler
 from u_boot_pylib import gitutil
@@ -183,7 +185,7 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(gitutil, 'fetch')
     @mock.patch.object(os.path, 'isdir', return_value=True)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_existing_clone(self, mock_mkdir, mock_isdir, mock_fetch):
+    def test_existing_clone(self, _mock_mkdir, _mock_isdir, mock_fetch):
         """Test with existing git clone (fetches updates)"""
         terminal.get_print_test_lines()  # Clear
         self.builder._prepare_thread(0, 'clone')
@@ -196,7 +198,7 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=True)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_existing_worktree(self, mock_mkdir, mock_isdir, mock_isfile):
+    def test_existing_worktree(self, _mock_mkdir, _mock_isdir, _mock_isfile):
         """Test with existing worktree (no action needed)"""
         terminal.get_print_test_lines()  # Clear
         self.builder._prepare_thread(0, 'worktree')
@@ -209,8 +211,8 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=False)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_invalid_git_dir(self, mock_mkdir, mock_isdir, mock_isfile,
-                             mock_exists):
+    def test_invalid_git_dir(self, _mock_mkdir, _mock_isdir, _mock_isfile,
+                             _mock_exists):
         """Test with git_dir that exists but is neither file nor directory"""
         with self.assertRaises(ValueError) as ctx:
             self.builder._prepare_thread(0, 'clone')
@@ -222,8 +224,8 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=False)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_create_worktree(self, mock_mkdir, mock_isdir, mock_isfile,
-                             mock_exists, mock_add_worktree):
+    def test_create_worktree(self, _mock_mkdir, _mock_isdir, _mock_isfile,
+                             _mock_exists, mock_add_worktree):
         """Test creating a new worktree"""
         terminal.get_print_test_lines()  # Clear
         self.builder._prepare_thread(0, 'worktree')
@@ -238,8 +240,8 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=False)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_create_clone(self, mock_mkdir, mock_isdir, mock_isfile,
-                          mock_exists, mock_clone):
+    def test_create_clone(self, _mock_mkdir, _mock_isdir, _mock_isfile,
+                          _mock_exists, mock_clone):
         """Test creating a new clone"""
         terminal.get_print_test_lines()  # Clear
         self.builder._prepare_thread(0, 'clone')
@@ -254,8 +256,8 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=False)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_create_clone_with_true(self, mock_mkdir, mock_isdir, mock_isfile,
-                                    mock_exists, mock_clone):
+    def test_create_clone_with_true(self, _mock_mkdir, _mock_isdir,
+                                    _mock_isfile, _mock_exists, mock_clone):
         """Test creating a clone when setup_git=True"""
         terminal.get_print_test_lines()  # Clear
         self.builder._prepare_thread(0, True)
@@ -266,8 +268,8 @@ class TestPrepareThread(unittest.TestCase):
     @mock.patch.object(os.path, 'isfile', return_value=False)
     @mock.patch.object(os.path, 'isdir', return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_invalid_setup_git(self, mock_mkdir, mock_isdir, mock_isfile,
-                               mock_exists):
+    def test_invalid_setup_git(self, _mock_mkdir, _mock_isdir, _mock_isfile,
+                               _mock_exists):
         """Test with invalid setup_git value"""
         with self.assertRaises(ValueError) as ctx:
             self.builder._prepare_thread(0, 'invalid')
@@ -275,7 +277,7 @@ class TestPrepareThread(unittest.TestCase):
 
 
 class TestPrepareWorkingSpace(unittest.TestCase):
-    """Tests for Builder._prepare_working_space()"""
+    """Tests for Builder.prepare_working_space()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -294,7 +296,7 @@ class TestPrepareWorkingSpace(unittest.TestCase):
     @mock.patch.object(builderthread, 'mkdir')
     def test_no_setup_git(self, mock_mkdir, mock_prepare_thread):
         """Test with setup_git=False"""
-        self.builder._prepare_working_space(2, False)
+        self.builder.prepare_working_space(2, False)
 
         mock_mkdir.assert_called_once()
         # Should prepare 2 threads with setup_git=False
@@ -304,12 +306,13 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
     @mock.patch.object(builder.Builder, '_prepare_thread')
     @mock.patch.object(gitutil, 'prune_worktrees')
-    @mock.patch.object(gitutil, 'check_worktree_is_available', return_value=True)
+    @mock.patch.object(gitutil, 'check_worktree_is_available',
+                       return_value=True)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_worktree_available(self, mock_mkdir, mock_check_worktree,
+    def test_worktree_available(self, _mock_mkdir, mock_check_worktree,
                                 mock_prune, mock_prepare_thread):
         """Test when worktree is available"""
-        self.builder._prepare_working_space(3, True)
+        self.builder.prepare_working_space(3, True)
 
         mock_check_worktree.assert_called_once()
         mock_prune.assert_called_once()
@@ -320,12 +323,13 @@ class TestPrepareWorkingSpace(unittest.TestCase):
         mock_prepare_thread.assert_any_call(2, 'worktree')
 
     @mock.patch.object(builder.Builder, '_prepare_thread')
-    @mock.patch.object(gitutil, 'check_worktree_is_available', return_value=False)
+    @mock.patch.object(gitutil, 'check_worktree_is_available',
+                       return_value=False)
     @mock.patch.object(builderthread, 'mkdir')
-    def test_worktree_not_available(self, mock_mkdir, mock_check_worktree,
+    def test_worktree_not_available(self, _mock_mkdir, mock_check_worktree,
                                     mock_prepare_thread):
         """Test when worktree is not available (falls back to clone)"""
-        self.builder._prepare_working_space(2, True)
+        self.builder.prepare_working_space(2, True)
 
         mock_check_worktree.assert_called_once()
         # Should prepare 2 threads with setup_git='clone'
@@ -335,9 +339,9 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
     @mock.patch.object(builder.Builder, '_prepare_thread')
     @mock.patch.object(builderthread, 'mkdir')
-    def test_zero_threads(self, mock_mkdir, mock_prepare_thread):
+    def test_zero_threads(self, _mock_mkdir, mock_prepare_thread):
         """Test with max_threads=0 (should still prepare 1 thread)"""
-        self.builder._prepare_working_space(0, False)
+        self.builder.prepare_working_space(0, False)
 
         # Should prepare at least 1 thread
         self.assertEqual(mock_prepare_thread.call_count, 1)
@@ -345,15 +349,33 @@ class TestPrepareWorkingSpace(unittest.TestCase):
 
     @mock.patch.object(builder.Builder, '_prepare_thread')
     @mock.patch.object(builderthread, 'mkdir')
-    def test_no_git_dir(self, mock_mkdir, mock_prepare_thread):
+    def test_no_git_dir(self, _mock_mkdir, mock_prepare_thread):
         """Test with no git_dir set"""
         self.builder.git_dir = None
-        self.builder._prepare_working_space(2, True)
+        self.builder.prepare_working_space(2, True)
 
-        # setup_git should remain True but git operations skipped
+        # _detect_git_setup returns False when git_dir is None
         self.assertEqual(mock_prepare_thread.call_count, 2)
-        mock_prepare_thread.assert_any_call(0, True)
-        mock_prepare_thread.assert_any_call(1, True)
+        mock_prepare_thread.assert_any_call(0, False)
+        mock_prepare_thread.assert_any_call(1, False)
+
+    @mock.patch.object(builder.Builder, '_prepare_thread')
+    @mock.patch.object(gitutil, 'prune_worktrees')
+    @mock.patch.object(gitutil, 'check_worktree_is_available',
+                       return_value=True)
+    @mock.patch.object(builderthread, 'mkdir')
+    def test_lazy_setup(self, _mock_mkdir, mock_check_worktree,
+                        mock_prune, mock_prepare_thread):
+        """Test lazy_thread_setup skips upfront thread preparation"""
+        self.builder._lazy_thread_setup = True
+        self.builder.prepare_working_space(4, True)
+
+        # Git setup type is detected so prepare_thread() can use it
+        # later, but no threads are prepared upfront
+        self.assertEqual(self.builder._setup_git, 'worktree')
+        mock_check_worktree.assert_called_once()
+        mock_prune.assert_called_once()
+        mock_prepare_thread.assert_not_called()
 
 
 class TestShowNotBuilt(unittest.TestCase):
@@ -394,7 +416,7 @@ class TestShowNotBuilt(unittest.TestCase):
         self.assertEqual(len(lines), 0)
 
     def test_some_boards_unknown(self):
-        """Test when some boards have OUTCOME_UNKNOWN (e.g. missing toolchain)"""
+        """Test when some boards have OUTCOME_UNKNOWN"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
             'board1': self._make_outcome(OUTCOME_OK),
@@ -430,7 +452,7 @@ class TestShowNotBuilt(unittest.TestCase):
         self.assertIn('board2', lines[0].text)
 
     def test_build_error_not_counted(self):
-        """Test that build errors (not toolchain) are not counted as 'not built'"""
+        """Test that build errors are not counted as 'not built'"""
         board_selected = {'board1': None, 'board2': None}
         board_dict = {
             'board1': self._make_outcome(OUTCOME_OK),
@@ -450,8 +472,9 @@ class TestShowNotBuilt(unittest.TestCase):
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
             'board1': self._make_outcome(OUTCOME_OK),
-            'board2': self._make_outcome(OUTCOME_ERROR,
-                                         ['Tool chain error for arm: not found']),
+            'board2': self._make_outcome(
+                OUTCOME_ERROR,
+                ['Tool chain error for arm: not found']),
             'board3': self._make_outcome(OUTCOME_ERROR,
                                          ['error: some build error']),
         }
@@ -468,7 +491,7 @@ class TestShowNotBuilt(unittest.TestCase):
         self.assertNotIn('board3', lines[0].text)
 
     def test_board_not_in_dict(self):
-        """Test that boards missing from board_dict are counted as 'not built'"""
+        """Test boards missing from board_dict count as 'not built'"""
         board_selected = {'board1': None, 'board2': None, 'board3': None}
         board_dict = {
             'board1': self._make_outcome(OUTCOME_OK),
@@ -487,7 +510,7 @@ class TestShowNotBuilt(unittest.TestCase):
 
 
 class TestPrepareOutputSpace(unittest.TestCase):
-    """Tests for Builder._prepare_output_space() and _get_output_space_removals()"""
+    """Tests for prepare_output_space() and _get_output_space_removals()"""
 
     def setUp(self):
         """Set up test fixtures"""
@@ -538,25 +561,25 @@ class TestPrepareOutputSpace(unittest.TestCase):
         self.assertEqual(result, ['/tmp/test/02_g1234567_old'])
 
     @mock.patch.object(builder.Builder, '_get_output_space_removals')
-    def test_prepare_output_space_nothing_to_remove(self, mock_get_removals):
-        """Test _prepare_output_space with nothing to remove"""
+    def testprepare_output_space_nothing_to_remove(self, mock_get_removals):
+        """Test prepare_output_space with nothing to remove"""
         mock_get_removals.return_value = []
         terminal.get_print_test_lines()  # Clear
 
-        self.builder._prepare_output_space()
+        self.builder.prepare_output_space()
 
         lines = terminal.get_print_test_lines()
         self.assertEqual(len(lines), 0)
 
     @mock.patch.object(shutil, 'rmtree')
     @mock.patch.object(builder.Builder, '_get_output_space_removals')
-    def test_prepare_output_space_removes_dirs(self, mock_get_removals,
+    def testprepare_output_space_removes_dirs(self, mock_get_removals,
                                                mock_rmtree):
-        """Test _prepare_output_space removes old directories"""
+        """Test prepare_output_space removes old directories"""
         mock_get_removals.return_value = ['/tmp/test/old1', '/tmp/test/old2']
         terminal.get_print_test_lines()  # Clear
 
-        self.builder._prepare_output_space()
+        self.builder.prepare_output_space()
 
         # Check rmtree was called for each directory
         self.assertEqual(mock_rmtree.call_count, 2)
@@ -692,7 +715,7 @@ class TestMake(unittest.TestCase):
         mock_run_one.return_value = mock_result
 
         # Simulate loop detection by setting _terminated during the call
-        def side_effect(*args, **kwargs):
+        def side_effect(*_args, **kwargs):
             # Simulate output_func being called with loop data
             output_func = kwargs.get('output_func')
             if output_func:
@@ -822,7 +845,7 @@ class TestPrintBuildSummary(unittest.TestCase):
         start_time = datetime(2024, 1, 1, 12, 0, 0)
         end_time = datetime(2024, 1, 1, 12, 0, 10)
         mock_datetime.now.return_value = end_time
-        mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+        mock_datetime.side_effect = datetime
 
         terminal.get_print_test_lines()  # Clear
         self.handler.print_build_summary(100, 0, 0, start_time, [])
@@ -839,7 +862,7 @@ class TestPrintBuildSummary(unittest.TestCase):
         start_time = datetime(2024, 1, 1, 12, 0, 0)
         end_time = datetime(2024, 1, 1, 12, 0, 10, 600000)  # 10.6 seconds
         mock_datetime.now.return_value = end_time
-        mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+        mock_datetime.side_effect = datetime
 
         terminal.get_print_test_lines()  # Clear
         self.handler.print_build_summary(100, 0, 0, start_time, [])
