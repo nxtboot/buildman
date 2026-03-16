@@ -22,13 +22,14 @@ from buildman import toolchain
 from buildman.builder import Builder
 from buildman.outcome import DisplayOptions
 from buildman.resulthandler import ResultHandler
-from patman import patchstream
 import qconfig
 from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 from u_boot_pylib.terminal import print_clear, tprint
+
+from patman import patchstream
 
 TEST_BUILDER = None
 
@@ -564,7 +565,8 @@ def run_builder(builder, commits, board_selected, display_options, args):
                                   args.threads, args.jobs))
 
     builder.set_display_options(
-        display_options, args.filter_dtb_warnings, args.filter_migration_warnings)
+        display_options, args.filter_dtb_warnings,
+        args.filter_migration_warnings)
     if args.summary:
         builder.commits = commits
         builder.result_handler.show_summary(
