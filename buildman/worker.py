@@ -516,8 +516,15 @@ def _cmd_configure(req, state):
     allow_missing, no_lto, etc.) and are applied to every subsequent
     build.
 
+    If the request includes a 'toolchains' dict mapping architecture
+    names to gcc paths, those are added to the worker's Toolchains
+    object. This allows the boss to control which cross-compilers the
+    worker uses, avoiding problems with stale entries in the worker's
+    own ~/.buildman config.
+
     Args:
         req (dict): Request with 'settings' dict containing build flags
+            and optional 'toolchains' dict of arch -> gcc path
         state (dict): Worker state, updated in place
 
     Returns:
@@ -525,7 +532,19 @@ def _cmd_configure(req, state):
     """
     settings = req.get('settings', {})
     state['settings'] = settings
-    _dbg(f'configure: {settings}')
+
+    tc_paths = req.get('toolchains', {})
+    if tc_paths:
+        toolchains = state['toolchains']
+        for arch, gcc in tc_paths.items():
+            gcc = os.path.expanduser(gcc)
+            toolchains.add(gcc, test=True, verbose=False,
+                           priority=toolchain_mod.PRIORITY_FULL_PREFIX,
+                           arch=arch)
+        _dbg(f'configure: {len(tc_paths)} toolchains, {settings}')
+    else:
+        _dbg(f'configure: {settings}')
+
     _send({'resp': 'configure_done'})
     return True
 
@@ -864,12 +883,11 @@ def run_worker(debug=False):
 
     nthreads = _get_nthreads()
 
-    # Scan for toolchains at startup so we can select the right
-    # cross-compiler for each board's architecture. The boss sets up
-    # the git repo and pushes source via SSH before starting us, so
-    # there is no 'setup' command — we are ready as soon as we start.
+    # Scan for toolchains but skip [toolchain-prefix] entries from the
+    # local config — those may contain stale paths that cause errors.
+    # The boss sends the toolchain paths it wants us to use in the
+    # 'configure' command, which override anything found here.
     toolchains = toolchain_mod.Toolchains()
-    toolchains.get_settings(show_warning=False)
     toolchains.scan(verbose=False, raise_on_error=False)
 
     _dbg(f'ready: {nthreads} threads')

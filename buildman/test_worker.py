@@ -257,6 +257,16 @@ class TestCmdConfigure(_ProtoTestBase):
         worker._cmd_configure({'settings': {}}, state)
         self.assertEqual(state['settings'], {})
 
+    def test_configure_with_toolchains(self):
+        """Test that configure adds toolchains sent by the boss"""
+        tc = mock.Mock()
+        state = {'toolchains': tc}
+        req = {'settings': {'no_lto': True},
+               'toolchains': {'arm': '~/gcc/arm-linux-gcc'}}
+        self.assertTrue(worker._cmd_configure(req, state))
+        tc.add.assert_called_once()
+        self.assert_resp('resp', 'configure_done')
+
 
 class TestRunWorker(_RunWorkerBase):
     """Test run_worker()"""

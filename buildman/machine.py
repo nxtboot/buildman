@@ -172,6 +172,52 @@ def _run_ssh(hostname, cmd, timeout=SSH_TIMEOUT, stdin_data=None):
     return result.stdout
 
 
+def _run_ssh_full(hostname, cmd, timeout=SSH_TIMEOUT, stdin_data=None):
+    """Run a command on a remote machine via SSH, returning stdout and stderr
+
+    Like _run_ssh() but returns both stdout and stderr so the caller can
+    inspect warnings printed to stderr even when the command succeeds.
+
+    Args:
+        hostname (str): SSH hostname (user@host or just host)
+        cmd (list of str): Command and arguments
+        timeout (int): Connection timeout in seconds
+        stdin_data (str or None): Data to send to the command's stdin
+
+    Returns:
+        tuple: (stdout, stderr) strings
+
+    Raises:
+        MachineError: if SSH connection fails or command returns non-zero
+    """
+    ssh_cmd = [
+        'ssh',
+        '-o', 'BatchMode=yes',
+        '-o', f'ConnectTimeout={timeout}',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        hostname,
+        '--',
+    ] + cmd
+    try:
+        result = command.run_pipe(
+            [ssh_cmd], capture=True, capture_stderr=True,
+            raise_on_error=False, stdin_data=stdin_data)
+    except command.CommandExc as exc:
+        raise MachineError(str(exc)) from exc
+
+    if result.return_code:
+        stderr = result.stderr.strip()
+        if stderr:
+            lines = [l for l in stderr.splitlines() if l.strip()]
+            msg = lines[-1] if lines else stderr
+            raise MachineError(f'SSH to {hostname}: {msg}')
+        raise MachineError(
+            f'SSH to {hostname} failed with code '
+            f'{result.return_code}')
+
+    return result.stdout, result.stderr
+
+
 def gcc_version(gcc_path):
     """Extract the gcc version directory from a toolchain path
 
@@ -548,6 +594,7 @@ class MachinePool:
         lock = threading.Lock()
         done = []
         failed = []
+        fetched_map = {}
         total = sum(len(v) for v in missing_map.values())
 
         def _fetch_one(mach, missing):
@@ -573,12 +620,10 @@ class MachinePool:
                         f'Fetching toolchains {len(done)}/{total}: '
                         f'{mach.name} {arch}')
             if fetched:
-                mach.probe_toolchains(buildman_path,
-                                      local_gcc=local_gcc)
-                missing -= fetched
-                if not missing:
-                    with lock:
-                        del missing_map[mach]
+                # Record what was fetched before the re-probe, so the
+                # missing_map update below still happens if the probe raises
+                fetched_map[mach] = fetched
+                mach.probe_toolchains(buildman_path, local_gcc=local_gcc)
 
         tout.progress(f'Fetching {total} toolchains on '
                       f'{len(missing_map)} machines')
@@ -590,6 +635,14 @@ class MachinePool:
         for t in threads:
             t.join()
         tout.clear_progress()
+
+        # Drop fetched archs from missing_map in the main thread. Keeping this
+        # off the worker threads makes it reliable (a re-probe that raises in a
+        # thread no longer loses it) and visible to coverage tooling
+        for mach, fetched in list(fetched_map.items()):
+            missing_map[mach] -= fetched
+            if not missing_map[mach]:
+                del missing_map[mach]
 
         # Report failures
         for msg in failed:
@@ -822,14 +875,23 @@ class Machine:
         if local_gcc:
             return self._probe_toolchains_from_boss(local_gcc)
         try:
-            result = _run_ssh(self.hostname,
-                              [buildman_path, '--list-tool-chains'])
+            stdout, stderr = _run_ssh_full(
+                self.hostname,
+                [buildman_path, '--list-tool-chains'])
         except MachineError as exc:
             self.toolchains = {}
             self.tc_error = str(exc)
             return self.toolchains
 
-        self.toolchains = _parse_toolchain_list(result)
+        self.toolchains = _parse_toolchain_list(stdout)
+
+        # Check for broken toolchain prefixes in the remote config.
+        # The error is printed to stdout by toolchain.scan().
+        errors = [l.strip() for l in stdout.splitlines()
+                  if 'No tool chain found' in l]
+        if errors:
+            self.tc_error = errors[0]
+
         return self.toolchains
 
     def _probe_toolchains_from_boss(self, local_gcc):

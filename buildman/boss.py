@@ -371,11 +371,12 @@ class RemoteWorker:  # pylint: disable=R0902
                 f'git push to {self.hostname} failed: {exc}') from exc
 
     def configure(self, settings):
-        """Send build settings to the worker
+        """Send build settings and toolchain paths to the worker
 
         Sends settings that affect how make is invoked (verbose, no_lto,
-        allow_missing, etc.). Must be called after start() and before
-        any build commands.
+        allow_missing, etc.) along with the toolchain paths the worker
+        should use. Must be called after start() and before any build
+        commands.
 
         Args:
             settings (dict): Build settings, e.g.:
@@ -390,7 +391,10 @@ class RemoteWorker:  # pylint: disable=R0902
         Raises:
             BossError: if the worker rejects the settings
         """
-        self._send({'cmd': 'configure', 'settings': settings})
+        msg = {'cmd': 'configure', 'settings': settings}
+        if self.toolchains:
+            msg['toolchains'] = self.toolchains
+        self._send(msg)
         resp = self._recv()
         if resp.get('resp') != 'configure_done':
             raise BossError(
