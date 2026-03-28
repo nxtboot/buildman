@@ -2727,10 +2727,16 @@ class Kconfig(object):
                 return (s, match.end())
 
             elif match.group() == "\\":
-                # Replace '\x' with 'x'. 'i' ends up pointing to the character
-                # after 'x', which allows macros to be canceled with '\$(foo)'.
+                # Replace '\x' with 'x' for characters that are meaningful
+                # escapes in Kconfig string literals: \\, \", \', and \$
+                # (to cancel macro expansion). Other \<char> sequences
+                # like \n are left as-is, so that the stored value
+                # round-trips correctly through escape().
                 i = match.end()
-                s = s[:match.start()] + s[i:]
+                if i < len(s) and s[i] in "\\\"'$":
+                    s = s[:match.start()] + s[i:]
+                else:
+                    i = match.end()
 
             elif match.group() == "$(":
                 # A macro call within the string
@@ -6176,23 +6182,25 @@ def split_expr(expr, op):
 
 def escape(s):
     r"""
-    Escapes the string 's' in the same fashion as is done for display in
-    Kconfig format and when writing strings to a .config file. " and \ are
-    replaced by \" and \\, respectively.
+    Escapes the string 's' for writing to a .config file. Only " is escaped
+    (to \"), matching the symmetric unescape() behaviour. Backslash sequences
+    like \\ and \n are left as-is, since unescape() preserves them and the C
+    Kconfig implementation does not process them.
     """
-    # \ must be escaped before " to avoid double escaping
-    return s.replace("\\", r"\\").replace('"', r'\"')
+    return s.replace('"', r'\"')
 
 
 def unescape(s):
     r"""
-    Unescapes the string 's'. \ followed by any character is replaced with just
-    that character. Used internally when reading .config files.
+    Unescapes the string 's'. \" is replaced with ". Other \<char> sequences,
+    including \\, are left as-is so that escape() can round-trip them
+    correctly. This matches the C Kconfig implementation which does not
+    unescape string values read from .config files.
     """
     return _unescape_sub(r"\1", s)
 
-# unescape() helper
-_unescape_sub = re.compile(r"\\(.)").sub
+# unescape() helper — only unescape \"
+_unescape_sub = re.compile(r'\\(")').sub
 
 
 def standard_kconfig(description=None):
