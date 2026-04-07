@@ -1442,6 +1442,11 @@ If there are both warnings and errors, errors win, so Buildman returns 100.
 The -y option is provided (for use with -s) to ignore the bountiful device-tree
 warnings. Similarly, -Y tells Buildman to ignore the migration warnings.
 
+When some boards cannot be built (e.g. because a toolchain is missing),
+Buildman can report which boards were skipped. Use ``--show-not-built`` to
+enable this. It is off by default since it adds noise when building series
+that only affect tools or a subset of architectures.
+
 Sometimes you might get an error in a thread that is not handled by Buildman,
 perhaps due to a failure of a tool that it calls. You might see the output, but
 then Buildman hangs. Failing to handle any eventuality is a bug in Buildman and

@@ -658,7 +658,8 @@ def _create_builder(state, num_threads, num_jobs):
     opts = DisplayOptions(
         show_errors=False, show_sizes=False, show_detail=False,
         show_bloat=False, show_config=False, show_environment=False,
-        show_unknown=False, ide=True, list_error_boards=False)
+        show_unknown=False, ide=True, list_error_boards=False,
+        show_not_built=False)
     result_handler = ResultHandler(col, opts)
 
     bldr = builder_mod.Builder(

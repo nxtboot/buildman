@@ -706,7 +706,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
         # Now show summary - should report boards not built
         terminal.get_print_test_lines()  # Clear
         self._run_control('-b', TEST_BRANCH, '-o', self._output_dir, '-s',
-                         clean_dir=False)
+                         '--show-not-built', clean_dir=False)
         lines = terminal.get_print_test_lines()
         text = '\n'.join(line.text for line in lines)
 

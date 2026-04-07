@@ -359,7 +359,8 @@ class Builder:
         self._opts = DisplayOptions(
             show_errors=True, show_sizes=False, show_detail=False,
             show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=True, ide=False, list_error_boards=False)
+            show_unknown=True, ide=False, list_error_boards=False,
+            show_not_built=False)
         self._filter_dtb_warnings = False
         self._filter_migration_warnings = False
 
