@@ -27,6 +27,7 @@ DisplayOptions = namedtuple('DisplayOptions', [
     'show_unknown',     # Show unknown boards in summary
     'ide',              # IDE mode - output to stderr
     'list_error_boards', # Include board list with error lines
+    'show_not_built',   # Show boards that were not built
 ])
 
 # Error line information for display

@@ -174,7 +174,8 @@ class ResultHandler:
         self._base_config = config
         self._base_environment = environment
 
-        self._show_not_built(board_selected, board_dict)
+        if self._opts.show_not_built:
+            self._show_not_built(board_selected, board_dict)
 
     def _get_error_lines(self):
         """Get the number of error lines output

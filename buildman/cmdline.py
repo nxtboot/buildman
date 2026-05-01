@@ -94,6 +94,9 @@ def add_upto_m(parser):
           default=False, help="Don't convert y to 1 in configs")
     parser.add_argument('-l', '--list-error-boards', action='store_true',
           default=False, help='Show a list of boards next to each error/warning')
+    parser.add_argument('--show-not-built', action='store_true',
+          default=False,
+          help='Show boards that were not built for each commit')
     parser.add_argument('-L', '--no-lto', action='store_true',
           default=False, help='Disable Link-time Optimisation (LTO) for builds')
     parser.add_argument('--list-tool-chains', action='store_true', default=False,

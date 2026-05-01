@@ -1108,7 +1108,8 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
         show_environment=args.show_environment,
         show_unknown=args.show_unknown,
         ide=args.ide,
-        list_error_boards=args.list_error_boards)
+        list_error_boards=args.list_error_boards,
+        show_not_built=args.show_not_built)
     result_handler = ResultHandler(col, display_options)
 
     # Create a new builder with the selected args

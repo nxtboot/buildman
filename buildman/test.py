@@ -200,7 +200,8 @@ class TestBuildBase(unittest.TestCase):
         self._opts = DisplayOptions(
             show_errors=False, show_sizes=False, show_detail=False,
             show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=False, ide=False, list_error_boards=False)
+            show_unknown=False, ide=False, list_error_boards=False,
+            show_not_built=False)
         self._result_handler = ResultHandler(self._col, self._opts)
 
         self.base_dir = tempfile.mkdtemp()
@@ -272,7 +273,8 @@ class TestBuildOutput(TestBuildBase):
         opts = DisplayOptions(
             show_errors=show_errors, show_sizes=False, show_detail=False,
             show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=False, ide=False, list_error_boards=list_error_boards)
+            show_unknown=False, ide=False, list_error_boards=list_error_boards,
+            show_not_built=False)
         build = builder.Builder(self.toolchains, self.base_dir, None, threads,
                                 2, self._col, ResultHandler(self._col, opts),
                                 checkout=False)
@@ -1233,7 +1235,8 @@ class TestBuildSummary(TestBuildBase):
         opts = DisplayOptions(
             show_errors=False, show_sizes=False, show_detail=False,
             show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=False, ide=False, list_error_boards=False)
+            show_unknown=False, ide=False, list_error_boards=False,
+            show_not_built=False)
         build = builder.Builder(self.toolchains, self.base_dir, None, 1,
                                 2, self._col, ResultHandler(self._col, opts),
                                 checkout=False)
@@ -1288,7 +1291,8 @@ class TestBuildSummary(TestBuildBase):
         opts = DisplayOptions(
             show_errors=False, show_sizes=False, show_detail=False,
             show_bloat=False, show_config=False, show_environment=False,
-            show_unknown=False, ide=False, list_error_boards=False)
+            show_unknown=False, ide=False, list_error_boards=False,
+            show_not_built=False)
         build = builder.Builder(self.toolchains, self.base_dir, None, 1,
                                 2, self._col, ResultHandler(self._col, opts),
                                 checkout=False)

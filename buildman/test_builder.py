@@ -24,7 +24,8 @@ from u_boot_pylib import terminal
 DEFAULT_OPTS = DisplayOptions(
     show_errors=False, show_sizes=False, show_detail=False,
     show_bloat=False, show_config=False, show_environment=False,
-    show_unknown=False, ide=False, list_error_boards=False)
+    show_unknown=False, ide=False, list_error_boards=False,
+    show_not_built=False)
 
 
 class TestPrintFuncSizeDetail(unittest.TestCase):
