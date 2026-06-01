@@ -28,7 +28,10 @@ DisplayOptions = namedtuple('DisplayOptions', [
     'ide',              # IDE mode - output to stderr
     'list_error_boards', # Include board list with error lines
     'show_not_built',   # Show boards that were not built
+    'show_lines',       # Show source-line footprint changes
 ])
+# show_lines defaults to False so existing construction sites need no change
+DisplayOptions.__new__.__defaults__ = (False,)
 
 # Error line information for display
 #   char: Character representation: '+': error, '-': fixed error, 'w+': warning,
@@ -58,12 +61,16 @@ class Outcome:
                     value: config value
         environment: Dictionary keyed by environment variable, Each
                  value is the value of environment variable.
+        lines: Dictionary keyed by source filename relative to the source
+                tree. Each value is a set of line numbers (ints) which
+                generated code in this build, as found from DWARF debug info.
     """
     def __init__(self, rc, err_lines, sizes, func_sizes, config,
-                 environment):
+                 environment, lines=None):
         self.rc = rc
         self.err_lines = err_lines
         self.sizes = sizes
         self.func_sizes = func_sizes
         self.config = config
         self.environment = environment
+        self.lines = lines if lines is not None else {}

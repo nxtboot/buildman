@@ -910,6 +910,59 @@ It is common when refactoring code for the rodata to decrease as the text size
 increases, and vice versa.
 
 
+Checking source lines
+---------------------
+
+Image size tells you how much code changed, but not which code. To see which
+source files and lines are actually compiled into a build, use --lines. This
+reads the DWARF debug info from the object files and records, for each build,
+the set of source lines that generated machine code. With -s, Buildman then
+reports the files and lines added or removed by each commit::
+
+    buildman -b my_branch --lines -s
+
+For each board whose footprint changed, this shows the number of lines and
+files added (+) and removed (-)::
+
+    01: Refactor the foo subsystem
+    sandbox: +12 -34 lines, +0 -1 files
+    rpi_3: +12 -34 lines, +0 -1 files
+
+Add -d to list each changed file, with '+' for a file newly compiled in, '-'
+for one no longer compiled in and '~' for one whose line set changed::
+
+    01: Refactor the foo subsystem
+    sandbox: +12 -34 lines, +0 -1 files
+        ~ drivers/foo/foo.c  +12 -22
+        - drivers/foo/foo_legacy.c  +0 -12
+
+This is useful for checking that a change does not alter the build footprint
+unexpectedly. It is more accurate than a preprocessor view from a tool such as
+unifdef, which cannot tell that an ``IS_ENABLED()`` block has been dropped from
+the build; the DWARF line table can, since the dropped code generates no
+machine code.
+
+Because an accurate footprint needs object files that hold real machine code,
+--lines forces a clean, freshly-configured, non-LTO build for each commit. It
+sets mrproper (to drop stale object files from the previous commit),
+force_reconfig (since Buildman builds incrementally and would otherwise carry
+the old config forward) and disables LTO (whose object files hold GIMPLE rather
+than machine code, with no usable line table). These builds are therefore
+slower than a normal incremental build.
+
+Use --lines-debug to additionally build with CONFIG_CC_OPTIMIZE_FOR_DEBUG, so
+the data matches what codman collects. Note that this may overflow
+size-constrained boards, since debug builds are larger.
+
+The scan reads the DWARF info with readelf, which takes a little time. To show
+how much, the build summary reports the total scan time and the average per
+build (summed across the builder threads, so it reflects total work done
+rather than wall-clock time added)::
+
+    Completed: 8 total built, duration 0:02:14, rate 0.06
+    --lines: scanned 8 builds in 12.4s (1.55s/build, summed across threads)
+
+
 .. _buildman_settings:
 
 The .buildman settings file

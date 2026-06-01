@@ -25,6 +25,7 @@ from buildman.outcome import (DisplayOptions, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
                               OUTCOME_UNKNOWN)
 from u_boot_pylib import command
+from u_boot_pylib import dwarf_lines
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
@@ -227,7 +228,7 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, build_target=None,
+                 dtc_skip=False, build_target=None, read_lines=False,
                  thread_class=builderthread.BuilderThread,
                  handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
@@ -327,6 +328,13 @@ class Builder:
         self.adjust_cfg = adjust_cfg
         self.allow_missing = allow_missing
         self.no_lto = no_lto
+        self.read_lines = read_lines
+        # Total time (seconds) spent scanning DWARF info for --lines, summed
+        # across builder threads, and how many builds were scanned. Guarded by
+        # _lines_lock since several threads update them at once
+        self._lines_time = 0.0
+        self._lines_count = 0
+        self._lines_lock = threading.Lock()
         self.reproducible_builds = reproducible_builds
         self.force_build = force_build
         self.force_build_failures = force_build_failures
@@ -469,6 +477,19 @@ class Builder:
     def result_handler(self):
         """Get the result handler for this builder"""
         return self._result_handler
+
+    def add_lines_time(self, seconds):
+        """Record time spent scanning DWARF info for --lines
+
+        Called from each builder thread after it scans a build, so it must be
+        thread-safe.
+
+        Args:
+            seconds (float): Time taken to scan one build
+        """
+        with self._lines_lock:
+            self._lines_time += seconds
+            self._lines_count += 1
 
     def _add_timestamp(self):
         """Add a new timestamp to the list and record the build period.
@@ -713,6 +734,21 @@ class Builder:
         return os.path.join(self.get_build_dir(commit_upto, target),
                             f"{elf_fname.replace('/', '-')}.sizes")
 
+    def get_lines_file(self, commit_upto, target):
+        """Get the name of the source-lines manifest for a commit number
+
+        This file records which source files and lines were compiled into the
+        build, as found from DWARF debug info. See get_build_outcome().
+
+        Args:
+            commit_upto (int): Commit number to use (0..self.count-1)
+            target (str): Target name
+
+        Returns:
+            str: Path to the lines file
+        """
+        return os.path.join(self.get_build_dir(commit_upto, target), 'lines')
+
     def get_objdump_file(self, commit_upto, target, elf_fname):
         """Get the name of the objdump file for a commit number and ELF file
 
@@ -786,6 +822,24 @@ class Builder:
                         name = 'static.' + name.split('.')[0]
                     sym[name] = sym.get(name, 0) + int(size, 16)
         return sym
+
+    @staticmethod
+    def _read_lines_file(fname):
+        """Read a source-lines manifest written by the build
+
+        Args:
+            fname (str): Filename to read
+
+        Returns:
+            dict: Keyed by source filename relative to the source tree, with
+                each value being a set of line numbers which generated code
+        """
+        lines = {}
+        with open(fname, 'r', encoding='utf-8') as fd:
+            for line in fd:
+                rel_path, _, ranges = line.partition(':')
+                lines[rel_path.strip()] = dwarf_lines.parse_ranges(ranges)
+        return lines
 
     def _process_environment(self, fname):
         """Read in a uboot.env file
@@ -869,7 +923,7 @@ class Builder:
         return rc, err_lines, sizes
 
     def get_build_outcome(self, commit_upto, target, read_func_sizes,
-                        read_config, read_environment):
+                        read_config, read_environment, read_lines=False):
         """Work out the outcome of a build.
 
         Args:
@@ -878,6 +932,7 @@ class Builder:
             read_func_sizes (bool): True to read function size information
             read_config (bool): True to read .config and autoconf.h files
             read_environment (bool): True to read uboot.env files
+            read_lines (bool): True to read the source-lines manifest
 
         Returns:
             Outcome: Outcome object
@@ -887,6 +942,7 @@ class Builder:
         func_sizes = {}
         config = {}
         environment = {}
+        lines = {}
         if os.path.exists(done_file):
             rc, err_lines, sizes = self._read_done_file(
                 commit_upto, target, done_file, sizes_file)
@@ -910,8 +966,13 @@ class Builder:
                 fname = os.path.join(output_dir, 'uboot.env')
                 environment = self._process_environment(fname)
 
+            if read_lines:
+                lines_file = self.get_lines_file(commit_upto, target)
+                if os.path.exists(lines_file):
+                    lines = self._read_lines_file(lines_file)
+
             return Outcome(rc, err_lines, sizes, func_sizes, config,
-                                   environment)
+                                   environment, lines)
 
         return Outcome(OUTCOME_UNKNOWN, [], {}, {}, {}, {})
 
@@ -972,7 +1033,7 @@ class Builder:
                     last_func = None
 
     def get_result_summary(self, boards_selected, commit_upto, read_func_sizes,
-                         read_config, read_environment):
+                         read_config, read_environment, read_lines=False):
         """Calculate a summary of the results of building a commit.
 
         Args:
@@ -1013,7 +1074,7 @@ class Builder:
         for brd in boards_selected.values():
             outcome = self.get_build_outcome(commit_upto, brd.target,
                                            read_func_sizes, read_config,
-                                           read_environment)
+                                           read_environment, read_lines)
             board_dict[brd.target] = outcome
             self._categorise_err_lines(outcome.err_lines, brd,
                                        err_lines_summary, err_lines_boards,
@@ -1044,6 +1105,8 @@ class Builder:
         count = (self.commit_count + self.step - 1) // self.step
         self.count = len(board_selected) * count
         self.upto = self._warned = self.fail = 0
+        self._lines_time = 0.0
+        self._lines_count = 0
         self.timestamps = collections.deque()
 
     def get_thread_dir(self, thread_num):
@@ -1326,4 +1389,5 @@ class Builder:
         """
         self._result_handler.print_build_summary(
             self.count, self._already_done, self.kconfig_reconfig,
-            self.start_time, self.thread_exceptions)
+            self.start_time, self.thread_exceptions,
+            self._lines_time, self._lines_count)

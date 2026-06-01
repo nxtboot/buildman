@@ -157,6 +157,11 @@ class ResultHandler:
                 board_selected, board_dict, self._base_board_dict,
                 self._opts.show_detail, self._opts.show_bloat)
 
+        if self._opts.show_lines:
+            self._print_lines_summary(
+                board_selected, board_dict, self._base_board_dict,
+                self._opts.show_detail)
+
         if self._opts.show_environment and self._base_environment:
             self._show_environment_changes(
                 board_selected, board_dict, environment, self._base_environment)
@@ -185,6 +190,108 @@ class ResultHandler:
         """
         return self._error_lines
 
+    def _calc_lines_changes(self, board_selected, board_dict, base_board_dict):
+        """Work out which source files and lines changed in the build.
+
+        For each board, compares the set of compiled source lines with the
+        previous commit's set. A board is only included if its footprint
+        changed. Boards with no baseline (e.g. the first commit, or a build
+        that failed) are skipped, since there is nothing to compare against.
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            base_board_dict (dict): Dict of base board outcomes
+
+        Returns:
+            list of dict: One entry per changed board, each with keys:
+                target, files_added, files_removed, lines_added,
+                lines_removed, and details (a list of (char, rel_path, added,
+                removed) tuples, char being '+' added, '-' removed, '~'
+                changed)
+        """
+        results = []
+        for target in sorted(board_dict):
+            if target not in board_selected:
+                continue
+            base = base_board_dict.get(target)
+            old = base.lines if base else {}
+            new = board_dict[target].lines
+            # Need both a baseline and a current build to form a diff
+            if not old or not new:
+                continue
+
+            files_added = files_removed = 0
+            lines_added = lines_removed = 0
+            details = []
+            for rel in sorted(set(old) | set(new)):
+                old_lines = old.get(rel, set())
+                new_lines = new.get(rel, set())
+                if old_lines == new_lines:
+                    continue
+                added = len(new_lines - old_lines)
+                removed = len(old_lines - new_lines)
+                if not old_lines:
+                    char = '+'
+                    files_added += 1
+                elif not new_lines:
+                    char = '-'
+                    files_removed += 1
+                else:
+                    char = '~'
+                lines_added += added
+                lines_removed += removed
+                details.append((char, rel, added, removed))
+
+            if details:
+                results.append({
+                    'target': target,
+                    'files_added': files_added,
+                    'files_removed': files_removed,
+                    'lines_added': lines_added,
+                    'lines_removed': lines_removed,
+                    'details': details,
+                })
+        return results
+
+    def _print_lines_summary(self, board_selected, board_dict, base_board_dict,
+                             show_detail):
+        """Print a summary of source-line footprint changes.
+
+        Shows one line per board whose set of compiled source lines changed,
+        with the number of files and lines added and removed. With show_detail,
+        also lists each changed file.
+
+        Args:
+            board_selected (dict): Dict containing boards to summarise, keyed
+                by board.target
+            board_dict (dict): Dict containing boards for which we built this
+                commit, keyed by board.target. The value is an Outcome object.
+            base_board_dict (dict): Dict of base board outcomes
+            show_detail (bool): Show each changed file
+        """
+        def fmt(added, removed):
+            return (self._col.build(self._col.RED, f'+{added}') + ' ' +
+                    self._col.build(self._col.GREEN, f'-{removed}'))
+
+        results = self._calc_lines_changes(board_selected, board_dict,
+                                           base_board_dict)
+        for res in results:
+            tprint(f"{res['target']}: "
+                   f"{fmt(res['lines_added'], res['lines_removed'])} lines, "
+                   f"{fmt(res['files_added'], res['files_removed'])} files")
+            if show_detail:
+                for char, rel, added, removed in res['details']:
+                    if char == '+':
+                        name = self._col.build(self._col.RED, f'+ {rel}')
+                    elif char == '-':
+                        name = self._col.build(self._col.GREEN, f'- {rel}')
+                    else:
+                        name = f'~ {rel}'
+                    tprint(f'    {name}  {fmt(added, removed)}')
+
     def produce_result_summary(self, commit_upto, commits, board_selected):
         """Produce a summary of the results for a single commit
 
@@ -196,7 +303,8 @@ class ResultHandler:
         (board_dict, err_lines, err_line_boards, warn_lines,
          warn_line_boards, config, environment) = self._result_getter(
                 board_selected, commit_upto, self._opts.show_bloat,
-                self._opts.show_config, self._opts.show_environment)
+                self._opts.show_config, self._opts.show_environment,
+                self._opts.show_lines)
         if commits:
             msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self._col.BLUE)
@@ -227,7 +335,8 @@ class ResultHandler:
             tprint('(no errors to report)', colour=self._col.GREEN)
 
     def print_build_summary(self, count, already_done, kconfig_reconfig,
-                            start_time, thread_exceptions):
+                            start_time, thread_exceptions, lines_time=0.0,
+                            lines_count=0):
         """Print a summary of the build results
 
         Show the number of boards built, how many were already done, duration
@@ -239,6 +348,9 @@ class ResultHandler:
             kconfig_reconfig (int): Number of builds triggered by Kconfig changes
             start_time (datetime): When the build started
             thread_exceptions (list): List of thread exceptions that occurred
+            lines_time (float): Total time (seconds) spent scanning DWARF info
+                for --lines, summed across builder threads
+            lines_count (int): Number of builds scanned for --lines
         """
         tprint()
 
@@ -260,6 +372,11 @@ class ResultHandler:
             rate = float(count) / duration.total_seconds()
             msg += f', duration {duration}, rate {rate:1.2f}'
         tprint(msg)
+        if lines_count:
+            avg = lines_time / lines_count
+            tprint(f'--lines: scanned {lines_count} builds in '
+                   f'{lines_time:.1f}s ({avg:.2f}s/build, summed across '
+                   f'threads)')
         if thread_exceptions:
             tprint(
                 f'Failed: {len(thread_exceptions)} thread exceptions',

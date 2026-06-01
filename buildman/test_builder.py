@@ -9,6 +9,7 @@
 from datetime import datetime
 import os
 import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -839,6 +840,26 @@ class TestPrintBuildSummary(unittest.TestCase):
         self.assertEqual(len(lines), 3)
         self.assertIn('Failed: 2 thread exceptions', lines[2].text)
 
+    def test_lines_timing(self):
+        """Test --lines scan time is reported when builds were scanned"""
+        terminal.get_print_test_lines()  # Clear
+        self.handler.print_build_summary(4, 0, 0, self.start_time, [],
+                                         lines_time=6.0, lines_count=4)
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('--lines: scanned 4 builds in 6.0s', lines[2].text)
+        self.assertIn('1.50s/build', lines[2].text)
+
+    def test_no_lines_timing(self):
+        """Test no --lines line is shown when nothing was scanned"""
+        terminal.get_print_test_lines()  # Clear
+        self.handler.print_build_summary(4, 0, 0, self.start_time, [])
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(2, len(lines))
+        for line in lines:
+            self.assertNotIn('--lines', line.text)
+
     @mock.patch('buildman.resulthandler.datetime')
     def test_duration_and_rate(self, mock_datetime):
         """Test message includes duration and rate for long builds"""
@@ -872,6 +893,69 @@ class TestPrintBuildSummary(unittest.TestCase):
         # Duration should be rounded up to 11 seconds
         self.assertIn('0:00:11', lines[1].text)
 
+
+
+class TestLines(unittest.TestCase):
+    """Tests for the --lines source-line footprint summary"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    @staticmethod
+    def _make_outcome(lines):
+        """Create a mock build outcome carrying a set of compiled lines"""
+        outcome = mock.Mock()
+        outcome.lines = lines
+        return outcome
+
+    def test_lines_summary(self):
+        """A board's footprint change is summarised, with per-file detail"""
+        base = {'board1': self._make_outcome({'a.c': {1, 2, 3}, 'gone.c': {5, 6}})}
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3, 4},
+                                               'new.c': {10}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, base,
+                                          show_detail=True)
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('board1: +2 -2 lines, +1 -1 files', out)
+        self.assertIn('~ a.c', out)
+        self.assertIn('- gone.c', out)
+        self.assertIn('+ new.c', out)
+
+    def test_lines_summary_unchanged(self):
+        """A board whose compiled footprint is unchanged is not shown"""
+        base = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, base,
+                                          show_detail=True)
+        self.assertEqual([], terminal.get_print_test_lines())
+
+    def test_lines_summary_needs_baseline(self):
+        """A board with no baseline build is skipped, not reported"""
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, {},
+                                          show_detail=True)
+        self.assertEqual([], terminal.get_print_test_lines())
+
+    def test_read_lines_file(self):
+        """A source-lines manifest is read back into per-file line sets"""
+        with tempfile.NamedTemporaryFile('w', delete=False) as fd:
+            fd.write('cmd/cat.c: 10-12,20\n')
+            fd.write('lib/foo.c: 5\n')
+            fname = fd.name
+        try:
+            lines = builder.Builder._read_lines_file(fname)
+        finally:
+            os.remove(fname)
+        self.assertEqual({'cmd/cat.c': {10, 11, 12, 20}, 'lib/foo.c': {5}},
+                         lines)
 
 if __name__ == '__main__':
     unittest.main()

@@ -1109,8 +1109,24 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
         show_unknown=args.show_unknown,
         ide=args.ide,
         list_error_boards=args.list_error_boards,
-        show_not_built=args.show_not_built)
+        show_not_built=args.show_not_built,
+        show_lines=args.lines)
     result_handler = ResultHandler(col, display_options)
+
+    # A correct per-commit footprint needs a clean, freshly-configured build:
+    # mrproper removes stale object files from a previous commit (which the
+    # DWARF scan would otherwise pick up) and force_reconfig picks up Kconfig
+    # changes, since buildman builds incrementally and would otherwise carry
+    # the old config forward. LTO is disabled too, since the object files must
+    # hold machine code, not GIMPLE. When asked to match codman's data, also
+    # build with CC_OPTIMIZE_FOR_DEBUG
+    if args.lines:
+        args.no_lto = True
+        args.mrproper = True
+        args.force_reconfig = True
+        if args.lines_debug:
+            args.adjust_cfg = list(args.adjust_cfg or []) + \
+                ['CC_OPTIMIZE_FOR_DEBUG']
 
     # Create a new builder with the selected args
     builder = Builder(toolchains, output_dir, git_dir,
@@ -1138,7 +1154,8 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
             kconfig_check = args.kconfig_check,
             force_reconfig = args.force_reconfig, in_tree = args.in_tree,
             force_config_on_failure=not args.quick, make_func=make_func,
-            dtc_skip=args.dtc_skip, build_target=args.target)
+            dtc_skip=args.dtc_skip, build_target=args.target,
+            read_lines=args.lines)
     result_handler.set_builder(builder)
 
     TEST_BUILDER = builder
