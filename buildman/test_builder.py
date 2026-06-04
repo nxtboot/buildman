@@ -957,5 +957,86 @@ class TestLines(unittest.TestCase):
         self.assertEqual({'cmd/cat.c': {10, 11, 12, 20}, 'lib/foo.c': {5}},
                          lines)
 
+
+class TestLinesCode(unittest.TestCase):
+    """Tests for --lines-code content-aware line diffing"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def _diff(self, base_src, cur_src, old_lines, new_lines):
+        """Run _diff_compiled() with source served from memory, not git"""
+        srcs = {'base': base_src, 'cur': cur_src}
+        self.handler._read_source = lambda commit_hash, rel: srcs[commit_hash]
+        base_commit = mock.Mock(hash='base') if base_src is not None else None
+        commit = mock.Mock(hash='cur') if cur_src is not None else None
+        return self.handler._diff_compiled(base_commit, commit, 'f.c',
+                                           old_lines, new_lines)
+
+    def test_diff_renumbered(self):
+        """A compiled line that only moved is not reported as changed"""
+        # A comment inserted at the top renumbers the compiled lines
+        added, removed = self._diff(
+            ['int a;', 'int b;', 'int c;'],
+            ['/* new */', 'int a;', 'int b;', 'int c;'],
+            {2, 3}, {3, 4})
+        self.assertEqual(([], []), (added, removed))
+
+    def test_diff_line_removed(self):
+        """A compiled line whose code is deleted is reported as removed"""
+        added, removed = self._diff(
+            ['a();', 'b();', 'c();'], ['a();', 'c();'], {1, 2, 3}, {1, 2})
+        self.assertEqual([], added)
+        self.assertEqual([(2, 'b();')], removed)
+
+    def test_diff_line_added(self):
+        """A newly-compiled line is reported as added, with its source"""
+        added, removed = self._diff(
+            ['a();', 'c();'], ['a();', 'b();', 'c();'], {1, 2}, {1, 2, 3})
+        self.assertEqual([(2, 'b();')], added)
+        self.assertEqual([], removed)
+
+    def test_diff_toggled_without_source_change(self):
+        """A line compiled out with no source edit is still reported"""
+        added, removed = self._diff(
+            ['a();', 'b();'], ['a();', 'b();'], {1, 2}, {1})
+        self.assertEqual([], added)
+        self.assertEqual([(2, 'b();')], removed)
+
+    def test_diff_file_added(self):
+        """When the file is new there is no old source, so all lines added"""
+        added, removed = self._diff(None, ['a();', 'b();'], set(), {1, 2})
+        self.assertEqual([(1, 'a();'), (2, 'b();')], added)
+        self.assertEqual([], removed)
+
+    def test_diff_file_removed(self):
+        """When the file is gone there is no new source, so all lines removed"""
+        added, removed = self._diff(['a();', 'b();'], None, {1, 2}, set())
+        self.assertEqual([], added)
+        self.assertEqual([(1, 'a();'), (2, 'b();')], removed)
+
+    def test_print_lines_code(self):
+        """The source of added and removed lines is shown, removed first"""
+        self.handler._print_lines_code([(4, 'added();')], [(2, 'removed();')])
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('-    2 removed();', out)
+        self.assertIn('+    4 added();', out)
+        self.assertLess(out.index('removed();'), out.index('added();'))
+
+    def test_print_lines_code_capped(self):
+        """Output is capped, with a count of the remaining lines"""
+        added = [(num, f'line{num}();') for num in range(100)]
+        self.handler._print_lines_code(added, [])
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('... and 50 more lines', out)
+
 if __name__ == '__main__':
     unittest.main()

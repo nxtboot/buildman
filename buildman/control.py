@@ -1099,6 +1099,9 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
 
     # Create colour, display options and result handler objects
     col = terminal.Color()
+    # Showing the changed source code needs the per-line data
+    if args.lines_code:
+        args.lines = True
     display_options = DisplayOptions(
         show_errors=args.show_errors,
         show_sizes=args.show_sizes,
@@ -1110,7 +1113,8 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
         ide=args.ide,
         list_error_boards=args.list_error_boards,
         show_not_built=args.show_not_built,
-        show_lines=args.lines)
+        show_lines=args.lines,
+        show_lines_code=args.lines_code)
     result_handler = ResultHandler(col, display_options)
 
     # A correct per-commit footprint needs a clean, freshly-configured build:

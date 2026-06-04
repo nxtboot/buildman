@@ -29,9 +29,10 @@ DisplayOptions = namedtuple('DisplayOptions', [
     'list_error_boards', # Include board list with error lines
     'show_not_built',   # Show boards that were not built
     'show_lines',       # Show source-line footprint changes
+    'show_lines_code',  # Show the source code of changed lines
 ])
-# show_lines defaults to False so existing construction sites need no change
-DisplayOptions.__new__.__defaults__ = (False,)
+# These default to False so existing construction sites need no change
+DisplayOptions.__new__.__defaults__ = (False, False)
 
 # Error line information for display
 #   char: Character representation: '+': error, '-': fixed error, 'w+': warning,

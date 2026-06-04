@@ -7,11 +7,13 @@
 """Result writer for buildman build results"""
 
 from datetime import datetime, timedelta
+import difflib
 import sys
 
 from buildman.outcome import (BoardStatus, ErrLine, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
                               OUTCOME_UNKNOWN)
+from u_boot_pylib import command
 from u_boot_pylib.terminal import tprint
 
 
@@ -99,11 +101,13 @@ class ResultHandler:
         self._base_warn_line_boards = {}
         self._base_config = None
         self._base_environment = None
+        self._base_commit = None
+        self._source_cache = {}
         self._error_lines = 0
 
     def _print_result_summary(self, board_selected, board_dict, err_lines,
                              err_line_boards, warn_lines, warn_line_boards,
-                             config, environment):
+                             config, environment, commit=None):
         """Compare results with the base results and display delta.
 
         Only boards mentioned in board_selected will be considered. This
@@ -160,7 +164,7 @@ class ResultHandler:
         if self._opts.show_lines:
             self._print_lines_summary(
                 board_selected, board_dict, self._base_board_dict,
-                self._opts.show_detail)
+                self._opts.show_detail, commit, self._opts.show_lines_code)
 
         if self._opts.show_environment and self._base_environment:
             self._show_environment_changes(
@@ -172,6 +176,7 @@ class ResultHandler:
 
         # Save our updated information for the next call to this function
         self._base_board_dict = board_dict
+        self._base_commit = commit
         self._base_err_lines = err_lines
         self._base_warn_lines = warn_lines
         self._base_err_line_boards = err_line_boards
@@ -190,7 +195,8 @@ class ResultHandler:
         """
         return self._error_lines
 
-    def _calc_lines_changes(self, board_selected, board_dict, base_board_dict):
+    def _calc_lines_changes(self, board_selected, board_dict, base_board_dict,
+                            base_commit=None, commit=None):
         """Work out which source files and lines changed in the build.
 
         For each board, compares the set of compiled source lines with the
@@ -198,19 +204,27 @@ class ResultHandler:
         changed. Boards with no baseline (e.g. the first commit, or a build
         that failed) are skipped, since there is nothing to compare against.
 
+        The comparison is content-aware: where a source file was itself edited
+        between the two commits, the two versions are aligned (see
+        _diff_compiled) so that a compiled line which merely moved is not
+        reported - only code that genuinely entered or left the build.
+
         Args:
             board_selected (dict): Dict containing boards to summarise, keyed
                 by board.target
             board_dict (dict): Dict containing boards for which we built this
                 commit, keyed by board.target. The value is an Outcome object.
             base_board_dict (dict): Dict of base board outcomes
+            base_commit (Commit): The previous commit, for reading old source
+            commit (Commit): The commit being summarised, for reading source
 
         Returns:
             list of dict: One entry per changed board, each with keys:
                 target, files_added, files_removed, lines_added,
-                lines_removed, and details (a list of (char, rel_path, added,
-                removed) tuples, char being '+' added, '-' removed, '~'
-                changed)
+                lines_removed, and details (a list of (char, rel_path,
+                added, removed) tuples, where added and removed are lists of
+                (line_number, text) for the lines added to and removed from
+                the build, and char is '+' added, '-' removed, '~' changed)
         """
         results = []
         for target in sorted(board_dict):
@@ -231,8 +245,12 @@ class ResultHandler:
                 new_lines = new.get(rel, set())
                 if old_lines == new_lines:
                     continue
-                added = len(new_lines - old_lines)
-                removed = len(old_lines - new_lines)
+                added, removed = self._diff_compiled(
+                    base_commit, commit, rel, old_lines, new_lines)
+                # Nothing real changed - just line numbers shifting because the
+                # file was edited elsewhere
+                if not added and not removed:
+                    continue
                 if not old_lines:
                     char = '+'
                     files_added += 1
@@ -241,8 +259,8 @@ class ResultHandler:
                     files_removed += 1
                 else:
                     char = '~'
-                lines_added += added
-                lines_removed += removed
+                lines_added += len(added)
+                lines_removed += len(removed)
                 details.append((char, rel, added, removed))
 
             if details:
@@ -256,13 +274,114 @@ class ResultHandler:
                 })
         return results
 
+    def _read_source(self, commit_hash, rel_path):
+        """Read a source file as it was at a particular commit (cached).
+
+        Args:
+            commit_hash (str): Commit hash to read the file at
+            rel_path (str): Path of the file, relative to the source tree
+
+        Returns:
+            list of str: The lines of the file, or None if it cannot be read
+        """
+        key = (commit_hash, rel_path)
+        if key not in self._source_cache:
+            result = command.run_one(
+                'git', 'show', f'{commit_hash}:{rel_path}', capture=True,
+                capture_stderr=True, raise_on_error=False)
+            self._source_cache[key] = (
+                None if result.return_code else result.stdout.splitlines())
+        return self._source_cache[key]
+
+    def _diff_compiled(self, base_commit, commit, rel, old_lines, new_lines):
+        """Work out which compiled lines genuinely entered/left the build.
+
+        The previous and current versions of the file are aligned with difflib,
+        so that a compiled line which merely moved (same code, new number)
+        because the file was edited is not reported.
+
+        Args:
+            base_commit (Commit): Previous commit, or None
+            commit (Commit): Current commit, or None
+            rel (str): Source file path, relative to the source tree
+            old_lines (set): Line numbers compiled in the previous commit
+            new_lines (set): Line numbers compiled in the current commit
+
+        Returns:
+            tuple: (added, removed), each a list of (line_number, text). For
+                added, line_number indexes the current commit; for removed, the
+                previous one. Falls back to a plain line-number set difference
+                (with empty text) if either source cannot be read, e.g. a file
+                added or deleted between the commits.
+        """
+        base_src = (self._read_source(base_commit.hash, rel)
+                    if base_commit else None)
+        cur_src = self._read_source(commit.hash, rel) if commit else None
+
+        def text_at(src, num):
+            return src[num - 1] if src and 1 <= num <= len(src) else ''
+
+        # If a file was added or deleted (or there is no git), there is nothing
+        # to align: just take the line-number difference, with text from
+        # whichever version exists
+        if base_src is None or cur_src is None:
+            added = [(num, text_at(cur_src, num))
+                     for num in sorted(new_lines - old_lines)]
+            removed = [(num, text_at(base_src, num))
+                       for num in sorted(old_lines - new_lines)]
+            return added, removed
+
+        added = []
+        removed = []
+        matcher = difflib.SequenceMatcher(a=base_src, b=cur_src,
+                                          autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                # Context: base line i1+off lines up with current line j1+off,
+                # so a compiled line is only a change if it toggled state
+                for off in range(i2 - i1):
+                    oln, nln = i1 + off + 1, j1 + off + 1
+                    in_old, in_new = oln in old_lines, nln in new_lines
+                    if in_old and not in_new:
+                        removed.append((oln, base_src[oln - 1]))
+                    elif in_new and not in_old:
+                        added.append((nln, cur_src[nln - 1]))
+            else:
+                # replace/delete: any compiled old lines have genuinely gone
+                for oln in range(i1 + 1, i2 + 1):
+                    if oln in old_lines:
+                        removed.append((oln, base_src[oln - 1]))
+                # replace/insert: any compiled new lines are genuinely new
+                for nln in range(j1 + 1, j2 + 1):
+                    if nln in new_lines:
+                        added.append((nln, cur_src[nln - 1]))
+        return sorted(added), sorted(removed)
+
+    def _print_lines_code(self, added, removed):
+        """Show the source of the lines added to / removed from the build.
+
+        Args:
+            added (list): (line_number, text) tuples newly compiled
+            removed (list): (line_number, text) tuples no longer compiled
+        """
+        marks = ([(num, '-', self._col.GREEN, text) for num, text in removed] +
+                 [(num, '+', self._col.RED, text) for num, text in added])
+        # Removed lines (previous-commit numbering) first, then added
+        marks.sort(key=lambda mark: (mark[1] == '+', mark[0]))
+        limit = 50
+        for num, sign, colour, text in marks[:limit]:
+            tprint(self._col.build(colour, f'        {sign}{num:5d} {text}'))
+        if len(marks) > limit:
+            tprint(f'        ... and {len(marks) - limit} more lines')
+
     def _print_lines_summary(self, board_selected, board_dict, base_board_dict,
-                             show_detail):
+                             show_detail, commit=None, show_code=False):
         """Print a summary of source-line footprint changes.
 
         Shows one line per board whose set of compiled source lines changed,
-        with the number of files and lines added and removed. With show_detail,
-        also lists each changed file.
+        with the number of files and lines added and removed. With show_detail
+        (or show_code) it also lists each changed file, and with show_code it
+        prints the source of each added/removed line, read from the commit.
 
         Args:
             board_selected (dict): Dict containing boards to summarise, keyed
@@ -271,18 +390,22 @@ class ResultHandler:
                 commit, keyed by board.target. The value is an Outcome object.
             base_board_dict (dict): Dict of base board outcomes
             show_detail (bool): Show each changed file
+            commit (Commit): The commit being summarised, used to read source
+                for show_code, or None
+            show_code (bool): Show the source code of each changed line
         """
         def fmt(added, removed):
             return (self._col.build(self._col.RED, f'+{added}') + ' ' +
                     self._col.build(self._col.GREEN, f'-{removed}'))
 
         results = self._calc_lines_changes(board_selected, board_dict,
-                                           base_board_dict)
+                                           base_board_dict, self._base_commit,
+                                           commit)
         for res in results:
             tprint(f"{res['target']}: "
                    f"{fmt(res['lines_added'], res['lines_removed'])} lines, "
                    f"{fmt(res['files_added'], res['files_removed'])} files")
-            if show_detail:
+            if show_detail or show_code:
                 for char, rel, added, removed in res['details']:
                     if char == '+':
                         name = self._col.build(self._col.RED, f'+ {rel}')
@@ -290,7 +413,9 @@ class ResultHandler:
                         name = self._col.build(self._col.GREEN, f'- {rel}')
                     else:
                         name = f'~ {rel}'
-                    tprint(f'    {name}  {fmt(added, removed)}')
+                    tprint(f'    {name}  {fmt(len(added), len(removed))}')
+                    if show_code:
+                        self._print_lines_code(added, removed)
 
     def produce_result_summary(self, commit_upto, commits, board_selected):
         """Produce a summary of the results for a single commit
@@ -312,7 +437,8 @@ class ResultHandler:
             board_selected, board_dict,
             err_lines if self._opts.show_errors else [], err_line_boards,
             warn_lines if self._opts.show_errors else [], warn_line_boards,
-            config, environment)
+            config, environment,
+            commits[commit_upto] if commits else None)
 
     def show_summary(self, commits, board_selected, step):
         """Show a build summary for U-Boot for a given board list.

@@ -190,6 +190,9 @@ def add_after_m(parser):
     parser.add_argument('--lines-debug', action='store_true', default=False,
           help='With --lines, build with CC_OPTIMIZE_FOR_DEBUG to match '
                "codman's data (may overflow size-constrained boards)")
+    parser.add_argument('--lines-code', action='store_true', default=False,
+          help='With -s, show the source code of the lines added/removed '
+               'from the build by each commit (implies --lines)')
     parser.add_argument('--step', type=int,
           default=1, help='Only build every n commits (0=just first and last)')
     if HAS_TESTS:
