@@ -9,6 +9,7 @@
 from datetime import datetime
 import os
 import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -839,6 +840,26 @@ class TestPrintBuildSummary(unittest.TestCase):
         self.assertEqual(len(lines), 3)
         self.assertIn('Failed: 2 thread exceptions', lines[2].text)
 
+    def test_lines_timing(self):
+        """Test --lines scan time is reported when builds were scanned"""
+        terminal.get_print_test_lines()  # Clear
+        self.handler.print_build_summary(4, 0, 0, self.start_time, [],
+                                         lines_time=6.0, lines_count=4)
+        lines = terminal.get_print_test_lines()
+
+        self.assertIn('--lines: scanned 4 builds in 6.0s', lines[2].text)
+        self.assertIn('1.50s/build', lines[2].text)
+
+    def test_no_lines_timing(self):
+        """Test no --lines line is shown when nothing was scanned"""
+        terminal.get_print_test_lines()  # Clear
+        self.handler.print_build_summary(4, 0, 0, self.start_time, [])
+        lines = terminal.get_print_test_lines()
+
+        self.assertEqual(2, len(lines))
+        for line in lines:
+            self.assertNotIn('--lines', line.text)
+
     @mock.patch('buildman.resulthandler.datetime')
     def test_duration_and_rate(self, mock_datetime):
         """Test message includes duration and rate for long builds"""
@@ -872,6 +893,150 @@ class TestPrintBuildSummary(unittest.TestCase):
         # Duration should be rounded up to 11 seconds
         self.assertIn('0:00:11', lines[1].text)
 
+
+
+class TestLines(unittest.TestCase):
+    """Tests for the --lines source-line footprint summary"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    @staticmethod
+    def _make_outcome(lines):
+        """Create a mock build outcome carrying a set of compiled lines"""
+        outcome = mock.Mock()
+        outcome.lines = lines
+        return outcome
+
+    def test_lines_summary(self):
+        """A board's footprint change is summarised, with per-file detail"""
+        base = {'board1': self._make_outcome({'a.c': {1, 2, 3}, 'gone.c': {5, 6}})}
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3, 4},
+                                               'new.c': {10}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, base,
+                                          show_detail=True)
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('board1: +2 -2 lines, +1 -1 files', out)
+        self.assertIn('~ a.c', out)
+        self.assertIn('- gone.c', out)
+        self.assertIn('+ new.c', out)
+
+    def test_lines_summary_unchanged(self):
+        """A board whose compiled footprint is unchanged is not shown"""
+        base = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, base,
+                                          show_detail=True)
+        self.assertEqual([], terminal.get_print_test_lines())
+
+    def test_lines_summary_needs_baseline(self):
+        """A board with no baseline build is skipped, not reported"""
+        board_dict = {'board1': self._make_outcome({'a.c': {1, 2, 3}})}
+        self.handler._print_lines_summary({'board1': None}, board_dict, {},
+                                          show_detail=True)
+        self.assertEqual([], terminal.get_print_test_lines())
+
+    def test_read_lines_file(self):
+        """A source-lines manifest is read back into per-file line sets"""
+        with tempfile.NamedTemporaryFile('w', delete=False) as fd:
+            fd.write('cmd/cat.c: 10-12,20\n')
+            fd.write('lib/foo.c: 5\n')
+            fname = fd.name
+        try:
+            lines = builder.Builder._read_lines_file(fname)
+        finally:
+            os.remove(fname)
+        self.assertEqual({'cmd/cat.c': {10, 11, 12, 20}, 'lib/foo.c': {5}},
+                         lines)
+
+
+class TestLinesCode(unittest.TestCase):
+    """Tests for --lines-code content-aware line diffing"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def _diff(self, base_src, cur_src, old_lines, new_lines):
+        """Run _diff_compiled() with source served from memory, not git"""
+        srcs = {'base': base_src, 'cur': cur_src}
+        self.handler._read_source = lambda commit_hash, rel: srcs[commit_hash]
+        base_commit = mock.Mock(hash='base') if base_src is not None else None
+        commit = mock.Mock(hash='cur') if cur_src is not None else None
+        return self.handler._diff_compiled(base_commit, commit, 'f.c',
+                                           old_lines, new_lines)
+
+    def test_diff_renumbered(self):
+        """A compiled line that only moved is not reported as changed"""
+        # A comment inserted at the top renumbers the compiled lines
+        added, removed = self._diff(
+            ['int a;', 'int b;', 'int c;'],
+            ['/* new */', 'int a;', 'int b;', 'int c;'],
+            {2, 3}, {3, 4})
+        self.assertEqual(([], []), (added, removed))
+
+    def test_diff_line_removed(self):
+        """A compiled line whose code is deleted is reported as removed"""
+        added, removed = self._diff(
+            ['a();', 'b();', 'c();'], ['a();', 'c();'], {1, 2, 3}, {1, 2})
+        self.assertEqual([], added)
+        self.assertEqual([(2, 'b();')], removed)
+
+    def test_diff_line_added(self):
+        """A newly-compiled line is reported as added, with its source"""
+        added, removed = self._diff(
+            ['a();', 'c();'], ['a();', 'b();', 'c();'], {1, 2}, {1, 2, 3})
+        self.assertEqual([(2, 'b();')], added)
+        self.assertEqual([], removed)
+
+    def test_diff_toggled_without_source_change(self):
+        """A line compiled out with no source edit is still reported"""
+        added, removed = self._diff(
+            ['a();', 'b();'], ['a();', 'b();'], {1, 2}, {1})
+        self.assertEqual([], added)
+        self.assertEqual([(2, 'b();')], removed)
+
+    def test_diff_file_added(self):
+        """When the file is new there is no old source, so all lines added"""
+        added, removed = self._diff(None, ['a();', 'b();'], set(), {1, 2})
+        self.assertEqual([(1, 'a();'), (2, 'b();')], added)
+        self.assertEqual([], removed)
+
+    def test_diff_file_removed(self):
+        """When the file is gone there is no new source, so all lines removed"""
+        added, removed = self._diff(['a();', 'b();'], None, {1, 2}, set())
+        self.assertEqual([], added)
+        self.assertEqual([(1, 'a();'), (2, 'b();')], removed)
+
+    def test_print_lines_code(self):
+        """The source of added and removed lines is shown, removed first"""
+        self.handler._print_lines_code([(4, 'added();')], [(2, 'removed();')])
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('-    2 removed();', out)
+        self.assertIn('+    4 added();', out)
+        self.assertLess(out.index('removed();'), out.index('added();'))
+
+    def test_print_lines_code_capped(self):
+        """Output is capped, with a count of the remaining lines"""
+        added = [(num, f'line{num}();') for num in range(100)]
+        self.handler._print_lines_code(added, [])
+        out = '\n'.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('... and 50 more lines', out)
 
 if __name__ == '__main__':
     unittest.main()

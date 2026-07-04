@@ -15,9 +15,11 @@ import io
 import os
 import shutil
 import threading
+import time
 
 from buildman import cfgutil
 from u_boot_pylib import command
+from u_boot_pylib import dwarf_lines
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
 
@@ -597,6 +599,7 @@ class BuilderThread(threading.Thread):
                     result.stderr += errs
                     result.return_code = 1
         result.stderr = result.stderr.replace(setup.src_dir + '/', '')
+        result.src_dir = setup.src_dir
         if self.builder.verbose_build:
             result.stdout = config_out.getvalue() + result.stdout
         result.cmd_list = cmd_list
@@ -848,6 +851,52 @@ class BuilderThread(threading.Thread):
                             result.brd.target)
             with open(sizes, 'w', encoding='utf-8') as outf:
                 print('\n'.join(lines), file=outf)
+
+        # Record which source lines were compiled into this build, while the
+        # object files are still present in the build directory. Only do this
+        # for a successful build, since a failed one has incomplete objects
+        if self.builder.read_lines and result.return_code == 0:
+            self._write_lines_file(result)
+
+    def _write_lines_file(self, result):
+        """Write the source-lines manifest for a build.
+
+        Reads the DWARF line tables from the object files in the build
+        directory to find which source lines generated code, and writes a
+        compact manifest keyed by source filename relative to the source tree.
+        Only files within the source tree are recorded, so the manifest is
+        repo-relative and stable across build directories.
+
+        Args:
+            result (CommandResult): Result containing build information
+        """
+        start = time.monotonic()
+        src_dir = result.src_dir
+        # Parallelise with threads: we are inside a daemon builder thread,
+        # which cannot start worker processes, but threads are fine and the
+        # work is dominated by the readelf subprocess
+        jobs = self.builder.num_jobs or 4
+        line_map, _ = dwarf_lines.extract_lines(result.out_dir, src_dir,
+                                                jobs=jobs, use_threads=True)
+        out = []
+        for abs_path, used in line_map.items():
+            rel_path = os.path.relpath(abs_path, src_dir)
+            if rel_path.startswith('..') or os.path.isabs(rel_path):
+                continue
+            ranges = dwarf_lines.lines_to_ranges(used)
+            out.append((rel_path, dwarf_lines.format_ranges(ranges)))
+
+        fname = self.builder.get_lines_file(result.commit_upto,
+                                            result.brd.target)
+        with open(fname, 'w', encoding='utf-8') as outf:
+            for rel_path, ranges in sorted(out):
+                print(f'{rel_path}: {ranges}', file=outf)
+
+        # Record how long the scan took, so buildman can report the extra time
+        # spent on --lines. Several builder threads update this concurrently,
+        # so hold the lock; the times are summed across threads and so reflect
+        # total work done, not wall-clock added
+        self.builder.add_lines_time(time.monotonic() - start)
 
     def _write_result(self, result, keep_outputs, work_in_output):
         """Write a built result to the output directory.
