@@ -1596,6 +1596,10 @@ Each entry is either a bare hostname (used as both the name and SSH target) or
 a ``name = hostname`` pair. The machines must be accessible via SSH without a
 password (use ``ssh-agent`` or key-based authentication).
 
+The ``~/.buildman`` config files on the remote machines are ignored. The boss
+determines which toolchains to use and sends the paths to each worker, so
+toolchain configuration only needs to be set up on the boss machine.
+
 Per-machine settings can be added in ``[machine:<name>]`` sections::
 
     [machine:ruru]
