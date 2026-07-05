@@ -858,17 +858,23 @@ class BuilderThread(threading.Thread):
         if self.builder.read_lines and result.return_code == 0:
             self._write_lines_file(result)
 
-    def _write_lines_file(self, result):
-        """Write the source-lines manifest for a build.
+    def _scan_lines(self, result):
+        """Scan DWARF info and build the source-lines manifest for a build.
 
         Reads the DWARF line tables from the object files in the build
-        directory to find which source lines generated code, and writes a
+        directory to find which source lines generated code, and returns a
         compact manifest keyed by source filename relative to the source tree.
         Only files within the source tree are recorded, so the manifest is
-        repo-relative and stable across build directories.
+        repo-relative and stable across build directories. This is shared by
+        the local path (which writes it to a file) and the distributed worker
+        (which sends it to the boss), so it returns the manifest as text
+        rather than writing it out itself.
 
         Args:
             result (CommandResult): Result containing build information
+
+        Returns:
+            str: Manifest text, one 'rel_path: ranges' line per source file
         """
         start = time.monotonic()
         src_dir = result.src_dir
@@ -886,17 +892,23 @@ class BuilderThread(threading.Thread):
             ranges = dwarf_lines.lines_to_ranges(used)
             out.append((rel_path, dwarf_lines.format_ranges(ranges)))
 
-        fname = self.builder.get_lines_file(result.commit_upto,
-                                            result.brd.target)
-        with open(fname, 'w', encoding='utf-8') as outf:
-            for rel_path, ranges in sorted(out):
-                print(f'{rel_path}: {ranges}', file=outf)
-
         # Record how long the scan took, so buildman can report the extra time
         # spent on --lines. Several builder threads update this concurrently,
         # so hold the lock; the times are summed across threads and so reflect
         # total work done, not wall-clock added
         self.builder.add_lines_time(time.monotonic() - start)
+        return ''.join(f'{rel_path}: {ranges}\n'
+                       for rel_path, ranges in sorted(out))
+
+    def _write_lines_file(self, result):
+        """Write the source-lines manifest for a build.
+
+        Args:
+            result (CommandResult): Result containing build information
+        """
+        fname = self.builder.get_lines_file(result.commit_upto,
+                                            result.brd.target)
+        tools.write_file(fname, self._scan_lines(result), binary=False)
 
     def _write_result(self, result, keep_outputs, work_in_output):
         """Write a built result to the output directory.

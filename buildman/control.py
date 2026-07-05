@@ -592,7 +592,7 @@ def _collect_worker_settings(args):
         'verbose_build', 'allow_missing', 'no_lto',
         'reproducible_builds', 'warnings_as_errors',
         'mrproper', 'fallback_mrproper', 'config_only',
-        'force_build', 'kconfig_check',
+        'force_build', 'kconfig_check', 'force_reconfig', 'lines',
     ]
     for name in flag_names:
         val = getattr(args, name, None)

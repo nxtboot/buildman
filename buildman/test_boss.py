@@ -583,6 +583,32 @@ class TestWriteRemoteResult(unittest.TestCase):
                                 binary=False),
                 '  12345    1234     567   14146    374a')
 
+    def test_with_lines(self):
+        """Test writing a result with a --lines source manifest"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            build_dir = os.path.join(tmpdir, 'sandbox')
+            builder = mock.Mock()
+            builder.get_build_dir.return_value = build_dir
+
+            manifest = 'common/board_f.c: 1-9\nlib/vsprintf.c: 20-24\n'
+            resp = {
+                'resp': 'build_result',
+                'board': 'sandbox',
+                'commit_upto': 0,
+                'return_code': 0,
+                'stderr': '',
+                'stdout': '',
+                'lines': manifest,
+            }
+            boss._write_remote_result(builder, resp, {}, 'host1')
+
+            # The boss writes the manifest verbatim to the 'lines' file, where
+            # _read_lines_file() picks it up when showing --lines
+            self.assertEqual(
+                tools.read_file(os.path.join(build_dir, 'lines'),
+                                binary=False),
+                manifest)
+
 
 class FakeMachineInfo:  # pylint: disable=R0903
     """Fake machine info for testing"""

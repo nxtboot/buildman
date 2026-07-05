@@ -167,7 +167,7 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
         board (str): Board target name
         commit_upto (int): Commit number
         return_code (int): Build return code
-        **kwargs: Optional keys: stderr, stdout, sizes
+        **kwargs: Optional keys: stderr, stdout, sizes, lines
     """
     result = {
         'resp': 'build_result',
@@ -181,6 +181,9 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
     sizes = kwargs.get('sizes')
     if sizes:
         result['sizes'] = sizes
+    lines = kwargs.get('lines')
+    if lines:
+        result['lines'] = lines
     _send(result)
 
 
@@ -443,12 +446,18 @@ class _WorkerBuilderThread(builderthread.BuilderThread):
     def _send_result(self, result):
         """Send the build result to the boss over the SSH protocol"""
         sizes = {}
+        lines = ''
         if result.out_dir and result.return_code == 0:
             sizes = _get_sizes(result.out_dir)
+            # Scan the DWARF line info while the object files are still
+            # present, since _write_result() is a no-op on the worker and so
+            # never writes the manifest. The boss writes it to the build dir
+            if self.builder.read_lines:
+                lines = self._scan_lines(result)
         _send_build_result(
             result.brd.target, result.commit_upto, result.return_code,
             stderr=result.stderr or '', stdout=result.stdout or '',
-            sizes=sizes)
+            sizes=sizes, lines=lines)
 
     def _checkout(self, commit_upto, work_dir):
         """Check out a commit using subprocess to avoid select() FD limit
@@ -702,6 +711,8 @@ def _create_builder(state, num_threads, num_jobs):
         reproducible_builds=settings.get('reproducible_builds', False),
         force_config_on_failure=True,
         kconfig_check=settings.get('kconfig_check', True),
+        force_reconfig=settings.get('force_reconfig', False),
+        read_lines=settings.get('lines', False),
     )
     result_handler.set_builder(bldr)
     return bldr

@@ -387,6 +387,8 @@ class RemoteWorker:  # pylint: disable=R0902
                 warnings_as_errors (bool): Pass KCFLAGS=-Werror
                 mrproper (bool): Run make mrproper before config
                 fallback_mrproper (bool): Retry with mrproper on failure
+                force_reconfig (bool): Reconfigure even if unchanged
+                lines (bool): Scan DWARF info for the --lines manifest
 
         Raises:
             BossError: if the worker rejects the settings
@@ -689,6 +691,14 @@ def _write_remote_result(builder, resp, board_selected, hostname):
         if raw.strip():
             tools.write_file(os.path.join(build_dir, 'sizes'),
                 raw, binary=False)
+
+    # Write the source-lines manifest (--lines) so the boss can show which
+    # source lines each commit compiled in. The worker scans its own DWARF
+    # info, since the object files only exist on the machine that built them
+    lines = resp.get('lines', '')
+    if lines.strip():
+        tools.write_file(os.path.join(build_dir, 'lines'), lines,
+                         binary=False)
 
     # Update the builder's progress display
     brd = board_selected.get(board)

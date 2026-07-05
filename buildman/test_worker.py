@@ -420,6 +420,7 @@ class TestWorkerBuilderThread(_ProtoTestBase):
     def test_send_result(self):
         """Test that _send_result sends a build_result message"""
         thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=False)
         result = mock.Mock(
             brd=mock.Mock(target='sandbox'),
             commit_upto=0, return_code=0,
@@ -427,6 +428,19 @@ class TestWorkerBuilderThread(_ProtoTestBase):
         thread._send_result(result)
         self.assert_resp('resp', 'build_result')
         self.assert_resp('board', 'sandbox')
+
+    def test_send_result_lines(self):
+        """Test that _send_result includes the --lines manifest"""
+        thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=True)
+        result = mock.Mock(
+            brd=mock.Mock(target='sandbox'),
+            commit_upto=0, return_code=0,
+            stderr='', stdout='', out_dir='/nonexistent')
+        with mock.patch.object(thread, '_scan_lines',
+                               return_value='common/board_f.c: 1-9\n'):
+            thread._send_result(result)
+        self.assert_resp('lines', 'common/board_f.c: 1-9\n')
 
     def test_run_job_sends_heartbeat(self):
         """Test run_job sends heartbeat"""
