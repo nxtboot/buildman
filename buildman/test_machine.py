@@ -780,6 +780,58 @@ class TestMachinePoolExtended(unittest.TestCase):
         with terminal.capture():
             pool.print_summary(local_archs={'arm', 'sandbox'})
 
+    def test_tool_drift_notes(self):
+        """Test that differing host tool versions are reported"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+        pool.machines[0].info.tools = {'dtc': 'DTC 1.6.1',
+                                       'swig': 'SWIG 4.0.2'}
+        pool.machines[1].info.tools = {'dtc': 'DTC 1.7.0',
+                                       'swig': 'SWIG 4.0.2'}
+
+        notes = pool._tool_drift_notes()
+
+        # dtc differs and is reported; swig matches and is not
+        self.assertEqual(len(notes), 1)
+        self.assertIn('dtc', notes[0])
+        self.assertIn('DTC 1.6.1 (host1)', notes[0])
+        self.assertIn('DTC 1.7.0 (host2)', notes[0])
+
+    def test_tool_drift_notes_agree(self):
+        """Test no note when tool versions agree"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+            mach.info.tools = {'dtc': 'DTC 1.6.1'}
+        self.assertEqual(pool._tool_drift_notes(), [])
+
+    def test_print_summary_tool_drift(self):
+        """Test print_summary shows a drift warning when versions differ"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+        pool.machines[0].info.tools = {'dtc': 'DTC 1.6.1'}
+        pool.machines[1].info.tools = {'dtc': 'DTC 1.7.0'}
+        with terminal.capture() as (stdout, _):
+            pool.print_summary()
+        self.assertIn('Host tool version drift', stdout.getvalue())
+        self.assertIn('DTC 1.7.0', stdout.getvalue())
+
+    @mock.patch('buildman.machine._run_ssh')
+    def test_probe_parses_tools(self, mock_ssh):
+        """Test that probe records host tool versions"""
+        mock_ssh.return_value = json.dumps({
+            **MACHINE_INFO, 'tools': {'dtc': 'DTC 1.6.1'}})
+        bsettings.add_file('[machines]\nhost1\n')
+        pool = machine.MachinePool()
+        with terminal.capture():
+            pool.probe_all()
+        self.assertEqual(pool.machines[0].info.tools, {'dtc': 'DTC 1.6.1'})
+
     @mock.patch('buildman.machine._run_ssh')
     def test_check_toolchains_version_mismatch(self, mock_ssh):
         """Test version mismatch detection in check_toolchains"""

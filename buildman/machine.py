@@ -73,6 +73,23 @@ def get_bogomips():
         pass
     return 0.0
 
+def get_tool_ver(cmd, arg):
+    try:
+        out = subprocess.run([cmd, arg], capture_output=True, text=True)
+        text = (out.stdout + out.stderr).strip()
+        return text.splitlines()[0] if text else ''
+    except (OSError, ValueError):
+        return ''
+
+def get_tools():
+    # Host tools whose version affects generated code (dtc) or the build
+    # (swig, python), so drift between machines can be spotted
+    return {
+        'dtc': get_tool_ver('dtc', '--version'),
+        'swig': get_tool_ver('swig', '-version'),
+        'python': get_tool_ver('python3', '--version'),
+    }
+
 print(json.dumps({
     'arch': platform.machine(),
     'cpus': get_cpus(),
@@ -81,6 +98,7 @@ print(json.dumps({
     'load_1m': get_load(),
     'mem_avail_mb': get_mem_avail_mb(),
     'disk_avail_mb': get_disk_avail_mb(),
+    'tools': get_tools(),
 }))
 '''
 
@@ -112,6 +130,8 @@ class MachineInfo:
         load (float): 1-minute load average
         mem_avail_mb (int): Available memory in MB
         disk_avail_mb (int): Available disk space in MB
+        tools (dict): Host tool version strings, keyed by 'dtc', 'swig'
+            and 'python'
     """
     arch: str = ''
     cpus: int = 0
@@ -120,6 +140,7 @@ class MachineInfo:
     load: float = 0.0
     mem_avail_mb: int = 0
     disk_avail_mb: int = 0
+    tools: dict = dataclasses.field(default_factory=dict)
 
 
 class MachineError(Exception):
@@ -767,6 +788,39 @@ class MachinePool:
             for note in notes:
                 print(note)
 
+        tool_notes = self._tool_drift_notes()
+        if tool_notes:
+            print()
+            print('Host tool version drift (may cause per-machine '
+                  'differences):')
+            for note in tool_notes:
+                print(note)
+
+    def _tool_drift_notes(self):
+        """Return notes about host-tool version drift across machines
+
+        A differing dtc, swig or python version can make a board build
+        differently, or fail on only one machine, so warn when the
+        available machines do not all report the same version.
+
+        Returns:
+            list of str: One note per tool whose version differs, or []
+        """
+        notes = []
+        for tool in ('dtc', 'swig', 'python'):
+            by_ver = {}
+            for mach in self.machines:
+                if not mach.avail:
+                    continue
+                ver = mach.info.tools.get(tool, '')
+                if ver:
+                    by_ver.setdefault(ver, []).append(mach.name)
+            if len(by_ver) > 1:
+                parts = [f'{ver} ({", ".join(names)})'
+                         for ver, names in sorted(by_ver.items())]
+                notes.append(f'  {tool}: {"; ".join(parts)}')
+        return notes
+
 
 class Machine:
     """Represents a remote (or local) build machine
@@ -829,6 +883,7 @@ class Machine:
             load=info.get('load_1m', 0.0),
             mem_avail_mb=info.get('mem_avail_mb', 0),
             disk_avail_mb=info.get('disk_avail_mb', 0),
+            tools=info.get('tools', {}),
         )
 
         # Check whether the machine is too busy or low on resources
