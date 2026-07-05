@@ -17,6 +17,31 @@ from u_boot_pylib import command
 from u_boot_pylib.terminal import tprint
 
 
+# Substrings that mark a build message as caused by a missing external blob
+# (proprietary firmware absent from the tree) rather than a code problem.
+# These are expected in a blobless environment and are shown separately in
+# the summary so they do not obscure genuine breakage
+BLOB_MISSING_SIGNATURES = (
+    'some images are invalid',
+    'missing external blob',
+    'faked external blob',
+    'faked blob',
+)
+
+
+def is_blob_missing_line(line):
+    """Return True if an error/warning line is about a missing external blob
+
+    Args:
+        line (str): The error or warning text
+
+    Returns:
+        bool: True if the line matches a known missing-blob message
+    """
+    low = line.lower()
+    return any(sig in low for sig in BLOB_MISSING_SIGNATURES)
+
+
 class ResultHandler:
     """Handles display of build size results and summaries
 
@@ -866,11 +891,39 @@ class ResultHandler:
         for arch, target_list in arch_list.items():
             tprint(f'{arch:>10s}: {target_list}')
             error_lines += 1
+        # Separate missing-blob messages so genuine breakage is not buried
+        # under output that is expected in a blobless environment
+        worse_err, blob_err = self._split_blob_lines(worse_err)
+        worse_warn, blob_warn = self._split_blob_lines(worse_warn)
+
         error_lines += self._output_err_lines(better_err, colour=self._col.GREEN)
         error_lines += self._output_err_lines(worse_err, colour=self._col.RED)
         error_lines += self._output_err_lines(better_warn, colour=self._col.CYAN)
         error_lines += self._output_err_lines(worse_warn, colour=self._col.YELLOW)
+
+        blob_lines = blob_err + blob_warn
+        if blob_lines:
+            tprint('Missing external blobs (expected in a blobless build):',
+                   colour=self._col.MAGENTA)
+            error_lines += self._output_err_lines(
+                blob_lines, colour=self._col.MAGENTA)
         return error_lines
+
+    @staticmethod
+    def _split_blob_lines(err_lines):
+        """Split error/warning lines into real and missing-blob groups
+
+        Args:
+            err_lines (list of ErrLine): Lines to split
+
+        Returns:
+            tuple: (real, blob) lists of ErrLine, where blob holds the
+                missing-blob messages and real holds everything else
+        """
+        real, blob = [], []
+        for line in err_lines:
+            (blob if is_blob_missing_line(line.errline) else real).append(line)
+        return real, blob
 
     @staticmethod
     def _print_ide_output(board_selected, board_dict):

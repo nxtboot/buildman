@@ -15,9 +15,9 @@ from unittest import mock
 
 from buildman import builder
 from buildman import builderthread
-from buildman.outcome import (DisplayOptions, OUTCOME_OK,
-                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
-from buildman.resulthandler import ResultHandler
+from buildman.outcome import (BoardStatus, DisplayOptions, ErrLine,
+                              OUTCOME_OK, OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.resulthandler import ResultHandler, is_blob_missing_line
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
@@ -1068,6 +1068,53 @@ class TestConfigFileMap(unittest.TestCase):
         """A directory with no config files maps to nothing"""
         with tempfile.TemporaryDirectory() as out_dir:
             self.assertEqual(builderthread.config_file_map(out_dir), {})
+
+
+class TestBlobMissing(unittest.TestCase):
+    """Tests for separating missing-blob output from real breakage"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def test_is_blob_missing_line(self):
+        """Missing-blob messages are recognised; real errors are not"""
+        self.assertTrue(is_blob_missing_line('Some images are invalid'))
+        self.assertTrue(is_blob_missing_line(
+            "Image 'main' is missing external blobs and is non-functional"))
+        self.assertFalse(is_blob_missing_line("error: 'foo' undeclared"))
+
+    def test_split(self):
+        """Blob lines are split out, others kept"""
+        real = ErrLine('+', [], 'error: undefined reference')
+        blob = ErrLine('w+', [], 'Some images are invalid')
+        keep, drop = self.handler._split_blob_lines([real, blob])
+        self.assertEqual(keep, [real])
+        self.assertEqual(drop, [blob])
+
+    def test_display_separates_blobs(self):
+        """Blob lines print under their own heading, after real errors"""
+        empty = BoardStatus([], [], [], [], [])
+        real = ErrLine('+', [], 'error: undefined reference to bar')
+        blob = ErrLine('+', [], "Image is missing external blobs")
+        self.handler._display_arch_results(
+            {}, empty, [], [real, blob], [], [], False)
+        out = '\n'.join(line.text
+                        for line in terminal.get_print_test_lines())
+        self.assertIn('undefined reference to bar', out)
+        self.assertIn('Missing external blobs', out)
+        # Real error comes first, then the blob heading, then the blob line
+        self.assertLess(out.index('undefined reference to bar'),
+                        out.index('Missing external blobs'))
+        self.assertLess(out.index('Missing external blobs'),
+                        out.index('Image is missing external blobs'))
 
 if __name__ == '__main__':
     unittest.main()
