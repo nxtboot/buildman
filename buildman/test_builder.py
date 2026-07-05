@@ -1116,5 +1116,54 @@ class TestBlobMissing(unittest.TestCase):
         self.assertLess(out.index('Missing external blobs'),
                         out.index('Image is missing external blobs'))
 
+
+class TestFlakeDetection(unittest.TestCase):
+    """Tests for _report_flakes() cross-commit flake detection"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def _run(self, history, boards):
+        """Run _report_flakes() with a given outcome history"""
+        self.handler._history = history
+        self.handler._report_flakes({brd: None for brd in boards})
+        return '\n'.join(line.text
+                         for line in terminal.get_print_test_lines())
+
+    def test_regression_not_flagged(self):
+        """A board that fails and stays failed is a real regression"""
+        hist = {0: {'a': (OUTCOME_OK, False)},
+                1: {'a': (OUTCOME_ERROR, False)},
+                2: {'a': (OUTCOME_ERROR, False)}}
+        self.assertEqual(self._run(hist, ['a']), '')
+
+    def test_flake_flagged(self):
+        """A board that fails then recovers is flagged as a likely flake"""
+        hist = {0: {'b': (OUTCOME_OK, False)},
+                1: {'b': (OUTCOME_ERROR, False)},
+                2: {'b': (OUTCOME_OK, False)}}
+        out = self._run(hist, ['b'])
+        self.assertIn('Likely flakes', out)
+        self.assertIn('b', out)
+
+    def test_blob_failure_ignored(self):
+        """A missing-blob failure that clears is not treated as a flake"""
+        hist = {0: {'c': (OUTCOME_OK, False)},
+                1: {'c': (OUTCOME_ERROR, True)},
+                2: {'c': (OUTCOME_OK, False)}}
+        self.assertEqual(self._run(hist, ['c']), '')
+
+    def test_single_commit_no_report(self):
+        """One commit is not enough to tell a flake from a regression"""
+        hist = {0: {'a': (OUTCOME_ERROR, False)}}
+        self.assertEqual(self._run(hist, ['a']), '')
+
 if __name__ == '__main__':
     unittest.main()
