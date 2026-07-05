@@ -905,7 +905,16 @@ class TestDoWorker(unittest.TestCase):
     def test_start(self, _grp, _pid, _setpgrp, mock_run):
         """Test do_worker sets process group and runs"""
         self.assertEqual(worker.do_worker(debug=False), 0)
-        mock_run.assert_called_once_with(False)
+        mock_run.assert_called_once_with(False, '.')
+
+    @mock.patch('buildman.worker.run_worker', return_value=0)
+    @mock.patch('os.setpgrp')
+    @mock.patch('os.getpid', return_value=100)
+    @mock.patch('os.getpgrp', return_value=100)
+    def test_start_git_dir(self, _grp, _pid, _setpgrp, mock_run):
+        """Test do_worker passes the source tree through to run_worker"""
+        self.assertEqual(worker.do_worker(False, '/tmp/bm-src'), 0)
+        mock_run.assert_called_once_with(False, '/tmp/bm-src')
 
     @mock.patch('buildman.worker.run_worker', return_value=0)
     @mock.patch('os.setpgrp', side_effect=OSError('not allowed'))

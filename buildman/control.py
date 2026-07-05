@@ -1020,7 +1020,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     # Handle --worker: run in worker mode for distributed builds
     if args.worker:
         from buildman import worker  # pylint: disable=C0415
-        return worker.do_worker(args.debug)
+        return worker.do_worker(args.debug, args.git)
 
     # Handle --kill-workers: kill stale workers and exit
     if args.kill_workers:

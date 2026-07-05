@@ -858,7 +858,7 @@ def _cmd_quit(state):
     _kill_group()
 
 
-def run_worker(debug=False):
+def run_worker(debug=False, git_dir='.'):
     """Main worker loop
 
     Reads JSON commands from stdin and dispatches them. Sends responses
@@ -867,6 +867,8 @@ def run_worker(debug=False):
 
     Args:
         debug (bool): True to print debug messages to stderr
+        git_dir (str): Path to the source tree to build (the boss passes
+            this with -g so it need not match the process's cwd)
 
     Returns:
         int: 0 on success, non-zero on error
@@ -906,7 +908,7 @@ def run_worker(debug=False):
 
     stop_event = threading.Event()
     state = {
-        'work_dir': os.getcwd(),
+        'work_dir': os.path.realpath(git_dir),
         'nthreads': nthreads,
         'toolchains': toolchains,
         'stop': stop_event,
@@ -990,11 +992,12 @@ def _dispatch_commands(cmd_queue, eof_sentinel, state):
     return 1
 
 
-def do_worker(debug=False):
+def do_worker(debug=False, git_dir='.'):
     """Entry point for 'buildman --worker'
 
     Args:
         debug (bool): True to print debug messages to stderr
+        git_dir (str): Path to the source tree to build
 
     Returns:
         int: 0 on success
@@ -1012,4 +1015,4 @@ def do_worker(debug=False):
     except OSError:
         pass
     _is_group_leader = os.getpid() == os.getpgrp()
-    return run_worker(debug)
+    return run_worker(debug, git_dir)
