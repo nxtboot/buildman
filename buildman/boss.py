@@ -734,6 +734,12 @@ def _write_remote_result(builder, resp, board_selected, hostname):
     tools.write_file(os.path.join(build_dir, 'log'),
         resp.get('stdout', ''), binary=False)
 
+    # Record which worker built this board, so a failure that only happens on
+    # one machine (e.g. from a differing dtc or host toolchain) can be traced
+    if hostname:
+        tools.write_file(os.path.join(build_dir, 'host'),
+            f'{hostname}\n', binary=False)
+
     sizes = resp.get('sizes', {})
     if sizes.get('raw'):
         # Strip any header line (starts with 'text') in case the worker

@@ -650,6 +650,28 @@ class TestWriteRemoteResult(unittest.TestCase):
                                 binary=False),
                 manifest)
 
+    def test_records_host(self):
+        """Test that the building worker's hostname is recorded"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            build_dir = os.path.join(tmpdir, 'sandbox')
+            builder = mock.Mock()
+            builder.get_build_dir.return_value = build_dir
+
+            resp = {
+                'resp': 'build_result',
+                'board': 'sandbox',
+                'commit_upto': 0,
+                'return_code': 0,
+                'stderr': '',
+                'stdout': '',
+            }
+            boss._write_remote_result(builder, resp, {}, 'ruru')
+
+            self.assertEqual(
+                tools.read_file(os.path.join(build_dir, 'host'),
+                                binary=False),
+                'ruru\n')
+
     def test_with_config(self):
         """Test writing the config files returned for a failed board"""
         with tempfile.TemporaryDirectory() as tmpdir:
