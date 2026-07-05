@@ -796,9 +796,10 @@ def run_builder(builder, commits, board_selected, display_options, args):
 
     if not args.ide:
         commit_count = count_build_commits(commits, args.step)
-        tprint(get_action_summary(args.summary, commit_count,
-                                  board_selected, args.threads,
-                                  args.jobs, no_local=args.no_local))
+        if not args.no_local:
+            tprint(get_action_summary(args.summary, commit_count,
+                                      board_selected, args.threads,
+                                      args.jobs))
 
     builder.set_display_options(
         display_options, args.filter_dtb_warnings,
