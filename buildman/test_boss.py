@@ -196,11 +196,16 @@ class TestRemoteWorkerStart(unittest.TestCase):
         w = _start_worker('myhost', mock_popen, proc)
         self.assertEqual(w.nthreads, 8)
 
-        # Check SSH command runs from pushed tree
+        # Check SSH command runs the worker from the copied tool, with cwd
+        # still at the source work_dir
         cmd = mock_popen.call_args[0][0]
         self.assertIn('ssh', cmd)
         self.assertIn('myhost', cmd)
         self.assertIn('--worker', cmd[-1])
+        self.assertIn('/tmp/bm-worker-123/.tool/buildman/main.py', cmd[-1])
+        self.assertIn('cd /tmp/bm-worker-123 ', cmd[-1])
+        # The worker is told the source tree explicitly with -g
+        self.assertIn('-g /tmp/bm-worker-123', cmd[-1])
 
     @mock.patch('subprocess.Popen')
     def test_start_not_ready(self, mock_popen):
@@ -305,6 +310,42 @@ class TestRemoteWorkerPush(unittest.TestCase):
         with self.assertRaises(boss.BossError) as ctx:
             w.push_source('/tmp/repo', 'HEAD:refs/heads/work')
         self.assertIn('git push', str(ctx.exception))
+
+    @mock.patch('buildman.boss.command.run_pipe')
+    def test_push_tool_success(self, mock_pipe):
+        """Test copying the boss's own buildman tool to the worker"""
+        mock_pipe.return_value = mock.Mock(return_code=0)
+        w = boss.RemoteWorker('host1')
+        w.tool_dir = '/tmp/bm-worker-123/.tool'
+
+        w.push_tool()
+
+        # The pipeline is 'tar -c ... | ssh host tar -x ...'
+        tar_cmd, ssh_cmd = mock_pipe.call_args[0][0]
+        self.assertEqual(tar_cmd[0], 'tar')
+        for item in ('buildman', 'u_boot_pylib', 'patman', 'qconfig.py'):
+            self.assertIn(item, tar_cmd)
+        self.assertIn('host1', ssh_cmd)
+        self.assertIn('/tmp/bm-worker-123/.tool', ssh_cmd[-1])
+
+    def test_push_tool_no_init(self):
+        """Test push_tool without init_git raises error"""
+        w = boss.RemoteWorker('host1')
+        with self.assertRaises(boss.BossError) as ctx:
+            w.push_tool()
+        self.assertIn('call init_git', str(ctx.exception))
+
+    @mock.patch('buildman.boss.command.run_pipe')
+    def test_push_tool_failure(self, mock_pipe):
+        """Test push_tool transfer failure"""
+        mock_pipe.side_effect = command.CommandExc(
+            'tar failed', command.CommandResult())
+        w = boss.RemoteWorker('host1')
+        w.tool_dir = '/tmp/bm/.tool'
+
+        with self.assertRaises(boss.BossError) as ctx:
+            w.push_tool()
+        self.assertIn('push tool', str(ctx.exception))
 
 
 class TestRemoteWorkerBuildBoards(unittest.TestCase):
@@ -2054,6 +2095,7 @@ class TestStartDebug(unittest.TestCase):
         wrk._work_dir = '/tmp/bm'
         wrk._git_dir = '/tmp/bm/.git'
         wrk.work_dir = '/tmp/bm'
+        wrk.tool_dir = '/tmp/bm/.tool'
         wrk.timeout = 10
 
         wrk.start(debug=True)

@@ -1668,10 +1668,14 @@ buildman on the remote machines, if it is not in the default ``PATH``::
     buildman --dist --machines-buildman-path /opt/tools/buildman arm
 
 The distributed build protocol uses JSON messages over SSH stdin/stdout.
-The boss pushes the local source tree to each worker via ``git push``, so
-workers always build with the same code as the boss. Build results (return
-codes, stdout, stderr, sizes) are streamed back and written into the same
-output directory structure as local builds.
+The boss pushes the source tree under test to each worker via ``git push``,
+and separately copies its own buildman (the running tool, including any
+uncommitted changes) to a directory on each worker. Workers run that copied
+buildman rather than whatever version happens to be in the tree under test,
+so they always match the boss even when building an older branch whose
+in-tree buildman differs, or one that has no buildman at all. Build results
+(return codes, stdout, stderr, sizes) are streamed back and written into the
+same output directory structure as local builds.
 
 Per-worker log files are written to the output directory as
 ``worker-<hostname>.log`` for debugging protocol issues.

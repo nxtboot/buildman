@@ -39,6 +39,15 @@ SSH_OPTS = [
     '-o', 'StrictHostKeyChecking=accept-new',
 ]
 
+# The boss ships its own buildman source to each worker, so the worker runs
+# the same tool version as the boss rather than whatever buildman (if any)
+# happens to be committed in the tree under test. _TOOLS_DIR is the directory
+# holding the running buildman, and _TOOL_ITEMS lists the packages and modules
+# the worker imports at startup (main.py -> control -> ...), copied so they
+# land directly in the worker's tool directory
+_TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+_TOOL_ITEMS = ['buildman', 'u_boot_pylib', 'patman', 'qconfig.py']
+
 # Per-build timeout in seconds. If a worker doesn't respond within this
 # time, the boss assumes the worker is dead or hung and stops using it.
 BUILD_TIMEOUT = 300
@@ -135,16 +144,20 @@ class RemoteWorker:  # pylint: disable=R0902
 
     The startup sequence is:
         1. init_git() - create a bare git repo on the remote via one-shot SSH
-        2. push_source() - git push the local tree to the remote repo
-        3. start() - launch the worker from the pushed tree
+        2. push_source() - git push the tree under test to the remote repo
+        3. push_tool() - copy the boss's own buildman source to the remote
+        4. start() - launch the worker from the copied tool
 
-    This ensures the worker runs the same version of buildman as the boss.
+    The worker runs buildman from the copied tool rather than the tree under
+    test, so it always uses the same version as the boss even when that tree
+    has an old buildman, or none at all.
 
     Attributes:
         hostname (str): SSH hostname (user@host or just host)
         nthreads (int): Number of build threads the worker reported
         git_dir (str): Path to the worker's git directory
         work_dir (str): Path to the worker's work directory
+        tool_dir (str): Path to the copied buildman tool on the worker
     """
 
     def __init__(self, hostname, timeout=10, name=None):
@@ -164,6 +177,7 @@ class RemoteWorker:  # pylint: disable=R0902
         self.bogomips = 0.0
         self.git_dir = ''
         self.work_dir = ''
+        self.tool_dir = ''
         self.toolchains = {}
         self.closing = False
         self.bytes_sent = 0
@@ -212,13 +226,16 @@ class RemoteWorker:  # pylint: disable=R0902
             raise WorkerBusy(f'{self.hostname} is busy (locked)')
         self.work_dir = last_line
         self.git_dir = os.path.join(self.work_dir, '.git')
+        # Keep the tool inside work_dir (an untracked dir git checkout leaves
+        # alone) so it is removed together with work_dir on cleanup
+        self.tool_dir = os.path.join(self.work_dir, '.tool')
 
     def start(self, debug=False):
-        """Start the worker from the pushed source tree
+        """Start the worker from the copied tool
 
-        Launches the worker using the buildman from the pushed git tree.
-        The source must already have been pushed via init_git() and
-        push_source().
+        Launches the worker from the buildman copied by push_tool(), which
+        must have been called after init_git() and push_source(). The worker
+        builds the source pushed to work_dir but runs the boss's own tool.
 
         A background thread forwards the worker's stderr to the boss's
         stderr, prefixed with the machine name, so that debug messages
@@ -233,7 +250,12 @@ class RemoteWorker:  # pylint: disable=R0902
         if not self.work_dir:
             raise BossError(f'No work_dir on {self.hostname} '
                 f'(call init_git and push_source first)')
-        worker_cmd = 'python3 tools/buildman/main.py --worker'
+        # Run buildman from the copied tool, not the tree under test, so the
+        # worker matches the boss. Point -g at work_dir so the worker builds
+        # the pushed source regardless of where the tool lives
+        tool_dir = self.tool_dir or os.path.join(self.work_dir, '.tool')
+        worker_cmd = (f'python3 {tool_dir}/buildman/main.py --worker '
+                      f'-g {self.work_dir}')
         if debug:
             worker_cmd += ' -D'
         ssh_cmd = [
@@ -369,6 +391,38 @@ class RemoteWorker:  # pylint: disable=R0902
         except command.CommandExc as exc:
             raise BossError(
                 f'git push to {self.hostname} failed: {exc}') from exc
+
+    def push_tool(self):
+        """Copy the boss's own buildman source to the worker
+
+        Sends the running buildman, u_boot_pylib and patman packages (plus
+        the qconfig module) to the worker's tool directory, kept separate
+        from the tree under test. The worker runs from here, so it uses the
+        same tool version as the boss even when the tree under test has an
+        old buildman, or none at all. tar ships the files on disk, so any
+        uncommitted local changes are included too.
+
+        Raises:
+            BossError: if the transfer fails
+        """
+        if not self.tool_dir:
+            raise BossError(
+                f'No tool_dir on {self.hostname} (call init_git first)')
+        tar_cmd = ['tar', '-C', _TOOLS_DIR,
+                   '--exclude=__pycache__', '--exclude=*.pyc',
+                   '-cf', '-'] + _TOOL_ITEMS
+        remote = (f'rm -rf {self.tool_dir} && mkdir -p {self.tool_dir} && '
+                  f'tar -C {self.tool_dir} -xf -')
+        ssh_cmd = [
+            'ssh',
+            '-o', f'ConnectTimeout={self.timeout}',
+        ] + SSH_OPTS + [self.hostname, '--', remote]
+        try:
+            command.run_pipe([tar_cmd, ssh_cmd], capture=True,
+                capture_stderr=True, raise_on_error=True)
+        except command.CommandExc as exc:
+            raise BossError(
+                f'Failed to push tool to {self.hostname}: {exc}') from exc
 
     def configure(self, settings):
         """Send build settings and toolchain paths to the worker
@@ -1007,12 +1061,13 @@ class WorkerPool:
     def start_all(self, git_dir, refspec, debug=False, settings=None):
         """Start workers on all machines
 
-        Uses a three-phase approach so that each worker runs the same
-        version of buildman as the boss:
+        Uses a staged approach so that each worker runs the same version
+        of buildman as the boss:
             1. Create git repos on all machines (parallel)
-            2. Push source to all repos (parallel)
-            3. Start workers from pushed source (parallel)
-            4. Send build settings to all workers (parallel)
+            2. Push the tree under test to all repos (parallel)
+            3. Copy the boss's own buildman tool to all machines (parallel)
+            4. Start workers from the copied tool (parallel)
+            5. Send build settings to all workers (parallel)
 
         Args:
             git_dir (str): Local git directory to push
@@ -1031,11 +1086,15 @@ class WorkerPool:
         ready = self._run_parallel('Pushing source to', ready,
             lambda wrk: wrk.push_source(git_dir, refspec))
 
-        # Phase 3: start workers
+        # Phase 3: copy the boss's own buildman tool
+        ready = self._run_parallel('Sending tool to', ready,
+            lambda wrk: wrk.push_tool())
+
+        # Phase 4: start workers
         self.workers = self._run_parallel('Starting', ready,
             lambda wrk: self._start_one(wrk, debug))
 
-        # Phase 4: send build settings
+        # Phase 5: send build settings
         if settings and self.workers:
             self._run_parallel('Configuring', self.workers,
                 lambda wrk: wrk.configure(settings))
