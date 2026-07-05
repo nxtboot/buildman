@@ -650,6 +650,37 @@ class TestWriteRemoteResult(unittest.TestCase):
                                 binary=False),
                 manifest)
 
+    def test_with_config(self):
+        """Test writing the config files returned for a failed board"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            build_dir = os.path.join(tmpdir, 'sandbox')
+            builder = mock.Mock()
+            builder.get_build_dir.return_value = build_dir
+
+            resp = {
+                'resp': 'build_result',
+                'board': 'sandbox',
+                'commit_upto': 0,
+                'return_code': 2,
+                'stderr': 'error',
+                'stdout': '',
+                'config': {
+                    '.config': 'CONFIG_FOO=y\n',
+                    'autoconf-spl.h': '#define FOO 1\n',
+                },
+            }
+            boss._write_remote_result(builder, resp, {}, 'host1')
+
+            # Each config file is written under its own name, ready for -C
+            self.assertEqual(
+                tools.read_file(os.path.join(build_dir, '.config'),
+                                binary=False),
+                'CONFIG_FOO=y\n')
+            self.assertEqual(
+                tools.read_file(os.path.join(build_dir, 'autoconf-spl.h'),
+                                binary=False),
+                '#define FOO 1\n')
+
 
 class FakeMachineInfo:  # pylint: disable=R0903
     """Fake machine info for testing"""

@@ -155,6 +155,26 @@ class TestUtilityFunctions(unittest.TestCase):
                 fout.write('fake')
             self.assertEqual(worker._get_sizes(tmpdir), {})
 
+    def test_get_config(self):
+        """Test reading generated config files from a build dir"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, '.config'), 'w',
+                      encoding='utf-8') as fout:
+                fout.write('CONFIG_FOO=y\n')
+            config = worker._get_config(tmpdir)
+            self.assertEqual(config['.config'], 'CONFIG_FOO=y\n')
+
+    def test_get_config_empty(self):
+        """Test with no config files present"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(worker._get_config(tmpdir), {})
+
+    @mock.patch('buildman.worker.builderthread.config_file_map',
+                return_value={'.config': '/nonexistent/dir/.config'})
+    def test_get_config_unreadable(self, _mock):
+        """Test that an unreadable config file is skipped"""
+        self.assertEqual(worker._get_config('/x'), {})
+
 
 class TestCmdSetup(_ProtoTestBase):
     """Test _cmd_setup()"""
@@ -441,6 +461,19 @@ class TestWorkerBuilderThread(_ProtoTestBase):
                                return_value='common/board_f.c: 1-9\n'):
             thread._send_result(result)
         self.assert_resp('lines', 'common/board_f.c: 1-9\n')
+
+    def test_send_result_config_on_failure(self):
+        """Test that _send_result returns config files for a failed board"""
+        thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=False)
+        result = mock.Mock(
+            brd=mock.Mock(target='sandbox'),
+            commit_upto=0, return_code=2,
+            stderr='error', stdout='', out_dir='/nonexistent')
+        with mock.patch('buildman.worker._get_config',
+                        return_value={'.config': 'CONFIG_FOO=y\n'}):
+            thread._send_result(result)
+        self.assert_resp('config', {'.config': 'CONFIG_FOO=y\n'})
 
     def test_run_job_sends_heartbeat(self):
         """Test run_job sends heartbeat"""

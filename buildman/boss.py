@@ -754,6 +754,13 @@ def _write_remote_result(builder, resp, board_selected, hostname):
         tools.write_file(os.path.join(build_dir, 'lines'), lines,
                          binary=False)
 
+    # Write the generated config files returned for a failed board, under the
+    # same names a local build would, so the config can be inspected without
+    # reproducing the build
+    for name, content in resp.get('config', {}).items():
+        tools.write_file(os.path.join(build_dir, name), content,
+                         binary=False)
+
     # Update the builder's progress display
     brd = board_selected.get(board)
     if brd:

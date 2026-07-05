@@ -1674,8 +1674,9 @@ uncommitted changes) to a directory on each worker. Workers run that copied
 buildman rather than whatever version happens to be in the tree under test,
 so they always match the boss even when building an older branch whose
 in-tree buildman differs, or one that has no buildman at all. Build results
-(return codes, stdout, stderr, sizes) are streamed back and written into the
-same output directory structure as local builds.
+(return codes, stdout, stderr, sizes, source lines and, for failed boards,
+the generated config files) are streamed back and written into the same
+output directory structure as local builds.
 
 Per-worker log files are written to the output directory as
 ``worker-<hostname>.log`` for debugging protocol issues.

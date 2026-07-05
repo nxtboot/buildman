@@ -194,6 +194,41 @@ def copy_files(out_dir, build_dir, dirname, patterns):
             shutil.copy(fname, os.path.join(build_dir, target))
 
 
+# Config files preserved from each build, relative to the build directory.
+# copy_files() writes these into the output for every board so that -C can
+# diff config across commits
+CONFIG_FILE_PATTERNS = [
+    'u-boot.cfg', 'spl/u-boot-spl.cfg', 'tpl/u-boot-tpl.cfg',
+    '.config', 'include/autoconf.mk', 'include/generated/autoconf.h',
+]
+
+
+def config_file_map(out_dir):
+    """Map config files present in a build to their output names
+
+    Applies the same '-spl'/'-tpl' renaming as copy_files() so the files
+    land under the names buildman reads back. Used by the distributed
+    worker, which must send file contents rather than copy them.
+
+    Args:
+        out_dir (str): Build output directory to scan
+
+    Returns:
+        dict: Keyed by output filename, with the source path as the value
+    """
+    result = {}
+    for dirname in ['', 'spl', 'tpl']:
+        for pattern in CONFIG_FILE_PATTERNS:
+            for fname in glob.glob(os.path.join(out_dir, dirname, pattern)):
+                target = os.path.basename(fname)
+                if dirname:
+                    base, ext = os.path.splitext(target)
+                    if ext:
+                        target = f'{base}-{dirname}{ext}'
+                result[target] = fname
+    return result
+
+
 # pylint: disable=R0903
 class BuilderJob:
     """Holds information about a job to be performed by a thread
@@ -964,11 +999,8 @@ class BuilderThread(threading.Thread):
         if not work_in_output:
             # Write out the configuration files, with a special case for SPL
             for dirname in ['', 'spl', 'tpl']:
-                copy_files(
-                    result.out_dir, build_dir, dirname,
-                    ['u-boot.cfg', 'spl/u-boot-spl.cfg', 'tpl/u-boot-tpl.cfg',
-                     '.config', 'include/autoconf.mk',
-                     'include/generated/autoconf.h'])
+                copy_files(result.out_dir, build_dir, dirname,
+                           CONFIG_FILE_PATTERNS)
 
             # Now write the actual build output
             if keep_outputs:

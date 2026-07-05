@@ -1038,5 +1038,36 @@ class TestLinesCode(unittest.TestCase):
         out = '\n'.join(line.text for line in terminal.get_print_test_lines())
         self.assertIn('... and 50 more lines', out)
 
+
+class TestConfigFileMap(unittest.TestCase):
+    """Test builderthread.config_file_map()"""
+
+    def test_naming(self):
+        """Config files are mapped to the names buildman reads back"""
+        with tempfile.TemporaryDirectory() as out_dir:
+            os.makedirs(os.path.join(out_dir, 'include', 'generated'))
+            os.makedirs(os.path.join(out_dir, 'spl', 'include', 'generated'))
+            for rel in ['u-boot.cfg', '.config',
+                        'include/generated/autoconf.h',
+                        'spl/include/generated/autoconf.h']:
+                with open(os.path.join(out_dir, rel), 'w',
+                          encoding='utf-8') as outf:
+                    outf.write('x\n')
+
+            fmap = builderthread.config_file_map(out_dir)
+
+            # Top-level files keep their name; SPL files gain a -spl suffix
+            self.assertIn('u-boot.cfg', fmap)
+            self.assertIn('.config', fmap)
+            self.assertIn('autoconf.h', fmap)
+            self.assertIn('autoconf-spl.h', fmap)
+            self.assertEqual(fmap['autoconf-spl.h'],
+                os.path.join(out_dir, 'spl/include/generated/autoconf.h'))
+
+    def test_missing(self):
+        """A directory with no config files maps to nothing"""
+        with tempfile.TemporaryDirectory() as out_dir:
+            self.assertEqual(builderthread.config_file_map(out_dir), {})
+
 if __name__ == '__main__':
     unittest.main()

@@ -167,7 +167,7 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
         board (str): Board target name
         commit_upto (int): Commit number
         return_code (int): Build return code
-        **kwargs: Optional keys: stderr, stdout, sizes, lines
+        **kwargs: Optional keys: stderr, stdout, sizes, lines, config
     """
     result = {
         'resp': 'build_result',
@@ -184,6 +184,9 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
     lines = kwargs.get('lines')
     if lines:
         result['lines'] = lines
+    config = kwargs.get('config')
+    if config:
+        result['config'] = config
     _send(result)
 
 
@@ -243,6 +246,26 @@ def _get_sizes(out_dir):
     except OSError:
         pass
     return {}
+
+
+def _get_config(out_dir):
+    """Read the generated config files from a build output directory
+
+    Args:
+        out_dir (str): Build output directory
+
+    Returns:
+        dict: Keyed by output filename (e.g. '.config', 'autoconf-spl.h'),
+            with the file contents as the value. Empty if none are present
+    """
+    config = {}
+    for target, fname in builderthread.config_file_map(out_dir).items():
+        try:
+            with open(fname, 'r', encoding='utf-8', errors='replace') as inf:
+                config[target] = inf.read()
+        except OSError:
+            pass
+    return config
 
 
 def _worker_make(_commit, _brd, _stage, cwd, *args, **kwargs):
@@ -447,6 +470,7 @@ class _WorkerBuilderThread(builderthread.BuilderThread):
         """Send the build result to the boss over the SSH protocol"""
         sizes = {}
         lines = ''
+        config = {}
         if result.out_dir and result.return_code == 0:
             sizes = _get_sizes(result.out_dir)
             # Scan the DWARF line info while the object files are still
@@ -454,10 +478,16 @@ class _WorkerBuilderThread(builderthread.BuilderThread):
             # never writes the manifest. The boss writes it to the build dir
             if self.builder.read_lines:
                 lines = self._scan_lines(result)
+        elif result.out_dir and result.return_code > 0:
+            # Return the generated config for a failed board so the failure
+            # can be diagnosed without reproducing the build locally. Only on
+            # failure, since a build that got far enough to fail has the
+            # config files but a good build's are not usually needed
+            config = _get_config(result.out_dir)
         _send_build_result(
             result.brd.target, result.commit_upto, result.return_code,
             stderr=result.stderr or '', stdout=result.stdout or '',
-            sizes=sizes, lines=lines)
+            sizes=sizes, lines=lines, config=config)
 
     def _checkout(self, commit_upto, work_dir):
         """Check out a commit using subprocess to avoid select() FD limit
