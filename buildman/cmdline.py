@@ -50,6 +50,8 @@ def add_upto_m(parser):
         help='Enabling debugging (provides a full traceback on error)')
     parser.add_argument('--dtc-skip', action='store_true', default=False,
           help='Skip building of dtc and use the system version')
+    parser.add_argument('--shared-dtc', action='store_true', default=False,
+          help='Build dtc/pylibfdt once and share it across all board builds')
     parser.add_argument('-e', '--show_errors', action='store_true',
           default=False, help='Show errors and warnings')
     parser.add_argument('-E', '--warnings-as-errors', action='store_true',

@@ -20,6 +20,7 @@ import sys
 import threading
 
 from buildman import builderthread
+from buildman import dtcache
 from buildman.cfgutil import Config, process_config
 from buildman.outcome import (DisplayOptions, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
@@ -228,7 +229,8 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, build_target=None, read_lines=False,
+                 dtc_skip=False, shared_dtc=False, build_target=None,
+                 read_lines=False,
                  thread_class=builderthread.BuilderThread,
                  handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
@@ -283,6 +285,9 @@ class Builder:
                 retrying a failed build
             make_func (function): Function to call to run 'make'
             dtc_skip (bool): True to skip building dtc and use the system one
+            shared_dtc (bool): True to build dtc/pylibfdt once and share it
+                across all board builds, instead of building it in each
+                output directory
             build_target (str): Build target to use (None to use the default)
             thread_class (type): BuilderThread subclass to use (default
                 builderthread.BuilderThread). This allows the caller to
@@ -349,6 +354,11 @@ class Builder:
                 raise ValueError('Cannot find dtc')
         else:
             self.dtc = None
+        if shared_dtc:
+            self.dtc_cache = dtcache.DtcCache(
+                os.path.join(self._working_dir, '.dtc'), num_jobs=num_jobs)
+        else:
+            self.dtc_cache = None
         self.build_target = build_target
 
         if not self.squash_config_y:

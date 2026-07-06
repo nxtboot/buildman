@@ -559,6 +559,8 @@ class BuilderThread(threading.Thread):
 
         args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
                                               req.work_dir, commit_upto)
+        if self.builder.dtc_cache:
+            self._apply_shared_dtc(env, src_dir)
         if req.brd.extended:
             config_args = [f'{req.brd.orig_target}_defconfig']
             for frag in req.brd.extended.fragments:
@@ -572,6 +574,26 @@ class BuilderThread(threading.Thread):
         _remove_old_outputs(out_dir)
 
         return BuildSetup(env, args, config_args, cwd, src_dir)
+
+    def _apply_shared_dtc(self, env, src_dir):
+        """Point the build at the shared dtc/pylibfdt, if available
+
+        Obtains the shared dtc build for this source tree (building it if
+        needed) and adjusts the environment so that U-Boot uses it, instead
+        of building its own copy. If the shared build failed, the
+        environment is left alone and the build proceeds as normal.
+
+        Args:
+            env (dict of bytes): Environment to adjust
+            src_dir (str): Path to the U-Boot source tree being built
+        """
+        paths = self.builder.dtc_cache.obtain(src_dir, self.builder.gnu_make)
+        if paths:
+            dtc, pylibfdt = paths
+            env[b'DTC'] = tools.to_bytes(dtc)
+            pypath = tools.to_bytes(pylibfdt)
+            old = env.get(b'PYTHONPATH')
+            env[b'PYTHONPATH'] = pypath + b':' + old if old else pypath
 
     def _reconfig_if_needed(self, req, setup, commit, config_out, cmd_list,
                             out_dir, do_config, mrproper, result):

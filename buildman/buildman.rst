@@ -1138,6 +1138,22 @@ Note also the ``--dtc-skip`` option which uses the system device-tree compiler t
 avoid needing to build it for each board. This can save 10-20% of build time.
 An alternative is to set DTC=/path/to/dtc when running Buildman.
 
+Sharing dtc between builds
+--------------------------
+
+Rather than using the system device-tree compiler, the ``--shared-dtc`` option
+tells Buildman to build dtc and pylibfdt itself, once, and share the result
+between all board builds. The shared build lives in a cache directory keyed by
+a hash of the scripts/dtc source, so a commit which changes dtc gets a fresh
+build while the common case shares a single one. The cache persists across
+runs, so repeated builds pay nothing.
+
+This has the same effect as ``--dtc-skip`` (each board avoids building dtc and
+pylibfdt, saving several seconds of CPU time per board) but uses the correct,
+in-tree version of dtc rather than whatever the system provides. If the shared
+build fails for any reason, a warning is printed and each board builds its own
+dtc as normal.
+
 Checking configuration
 ----------------------
 

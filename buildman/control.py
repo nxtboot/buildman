@@ -593,6 +593,7 @@ def _collect_worker_settings(args):
         'reproducible_builds', 'warnings_as_errors',
         'mrproper', 'fallback_mrproper', 'config_only',
         'force_build', 'kconfig_check', 'force_reconfig', 'lines',
+        'shared_dtc',
     ]
     for name in flag_names:
         val = getattr(args, name, None)
@@ -1046,6 +1047,10 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
         print('--no-local requires --dist')
         return 1
 
+    if args.dtc_skip and args.shared_dtc:
+        print('Cannot use --dtc-skip with --shared-dtc')
+        return 1
+
     git_dir = os.path.join(args.git, '.git')
 
     toolchains = get_toolchains(toolchains, col, args.override_toolchain,
@@ -1159,8 +1164,8 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
             kconfig_check = args.kconfig_check,
             force_reconfig = args.force_reconfig, in_tree = args.in_tree,
             force_config_on_failure=not args.quick, make_func=make_func,
-            dtc_skip=args.dtc_skip, build_target=args.target,
-            read_lines=args.lines)
+            dtc_skip=args.dtc_skip, shared_dtc=args.shared_dtc,
+            build_target=args.target, read_lines=args.lines)
     result_handler.set_builder(builder)
 
     TEST_BUILDER = builder
