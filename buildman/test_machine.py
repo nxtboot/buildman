@@ -157,20 +157,21 @@ class TestMachine(unittest.TestCase):
         self.assertFalse(m.avail)
         self.assertIn('invalid probe response', m.reason)
 
-    @mock.patch('buildman.machine._run_ssh')
+    @mock.patch('buildman.machine._run_ssh_full')
     def test_probe_toolchains(self, mock_ssh):
         """Test probing toolchains"""
-        mock_ssh.return_value = '''List of available toolchains (2):
+        mock_ssh.return_value = ('''List of available toolchains (2):
 arm       : /usr/bin/arm-linux-gnueabi-gcc
 sandbox   : /usr/bin/gcc
 
-'''
+''', '')
         m = machine.Machine('server1')
         archs = m.probe_toolchains('buildman')
         self.assertEqual(archs, {
             'arm': '/usr/bin/arm-linux-gnueabi-gcc',
             'sandbox': '/usr/bin/gcc',
         })
+        self.assertEqual(m.tc_error, '')
 
     @mock.patch('buildman.machine._run_ssh')
     def test_fetch_toolchain_success(self, mock_ssh):
@@ -291,23 +292,28 @@ class TestMachinePool(unittest.TestCase):
         self.assertEqual(len(available), 1)
         self.assertEqual(available[0].hostname, 'host1')
 
+    @mock.patch('buildman.machine._run_ssh_full')
     @mock.patch('buildman.machine._run_ssh')
-    def test_check_toolchains(self, mock_ssh):
+    def test_check_toolchains(self, mock_ssh, mock_ssh_full):
         """Test checking toolchains on machines"""
         def ssh_side_effect(_hostname, cmd, **_kwargs):
             if 'python3' in cmd:
                 return json.dumps({
                     **MACHINE_INFO, 'load_1m': 1.0,
                     'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
+            return ''
+
+        def ssh_full_side_effect(_hostname, cmd, **_kwargs):
             if '--list-tool-chains' in cmd:
-                return '''List of available toolchains (2):
+                return ('''List of available toolchains (2):
 arm       : /usr/bin/arm-gcc
 sandbox   : /usr/bin/gcc
 
-'''
-            return ''
+''', '')
+            return ('', '')
 
         mock_ssh.side_effect = ssh_side_effect
+        mock_ssh_full.side_effect = ssh_full_side_effect
         bsettings.add_file(
             '[machines]\n'
             'host1\n'
@@ -319,22 +325,27 @@ sandbox   : /usr/bin/gcc
             missing = pool.check_toolchains({'arm', 'sandbox'})
         self.assertEqual(missing, {})
 
+    @mock.patch('buildman.machine._run_ssh_full')
     @mock.patch('buildman.machine._run_ssh')
-    def test_check_toolchains_missing(self, mock_ssh):
+    def test_check_toolchains_missing(self, mock_ssh, mock_ssh_full):
         """Test checking toolchains with some missing"""
         def ssh_side_effect(_hostname, cmd, **_kwargs):
             if 'python3' in cmd:
                 return json.dumps({
                     **MACHINE_INFO, 'load_1m': 1.0,
                     'mem_avail_mb': 8000, 'disk_avail_mb': 20000})
-            if '--list-tool-chains' in cmd:
-                return '''List of available toolchains (1):
-sandbox   : /usr/bin/gcc
-
-'''
             return ''
 
+        def ssh_full_side_effect(_hostname, cmd, **_kwargs):
+            if '--list-tool-chains' in cmd:
+                return ('''List of available toolchains (1):
+sandbox   : /usr/bin/gcc
+
+''', '')
+            return ('', '')
+
         mock_ssh.side_effect = ssh_side_effect
+        mock_ssh_full.side_effect = ssh_full_side_effect
         bsettings.add_file(
             '[machines]\n'
             'host1\n'
@@ -398,6 +409,45 @@ class TestRunSsh(unittest.TestCase):
         with self.assertRaises(machine.MachineError) as ctx:
             machine._run_ssh('host1', ['echo', 'hello'])
         self.assertIn('ssh failed', str(ctx.exception))
+
+
+class TestRunSshFull(unittest.TestCase):
+    """Test _run_ssh_full()"""
+
+    @mock.patch('buildman.machine.command.run_pipe')
+    def test_success(self, mock_pipe):
+        """Test a successful command returns both stdout and stderr"""
+        mock_pipe.return_value = mock.Mock(
+            return_code=0, stdout='out\n', stderr='warn\n')
+        self.assertEqual(machine._run_ssh_full('host1', ['x']),
+                         ('out\n', 'warn\n'))
+
+    @mock.patch('buildman.machine.command.run_pipe')
+    def test_command_exc(self, mock_pipe):
+        """Test a command exception becomes a MachineError"""
+        mock_pipe.side_effect = command.CommandExc(
+            'ssh failed', command.CommandResult())
+        with self.assertRaises(machine.MachineError) as ctx:
+            machine._run_ssh_full('host1', ['x'])
+        self.assertIn('ssh failed', str(ctx.exception))
+
+    @mock.patch('buildman.machine.command.run_pipe')
+    def test_failure_with_stderr(self, mock_pipe):
+        """Test failure with stderr reports the last non-empty line"""
+        mock_pipe.return_value = mock.Mock(
+            return_code=1, stdout='', stderr='warn\nreal error\n')
+        with self.assertRaises(machine.MachineError) as ctx:
+            machine._run_ssh_full('host1', ['x'])
+        self.assertIn('real error', str(ctx.exception))
+
+    @mock.patch('buildman.machine.command.run_pipe')
+    def test_failure_no_stderr(self, mock_pipe):
+        """Test failure with no stderr reports the return code"""
+        mock_pipe.return_value = mock.Mock(
+            return_code=3, stdout='', stderr='')
+        with self.assertRaises(machine.MachineError) as ctx:
+            machine._run_ssh_full('host1', ['x'])
+        self.assertIn('failed with code', str(ctx.exception))
 
 
 class TestGetMachinesConfig(unittest.TestCase):
@@ -547,7 +597,7 @@ class TestToolchainStatus(unittest.TestCase):
 class TestMachineExtended(unittest.TestCase):
     """Extended Machine tests for coverage"""
 
-    @mock.patch('buildman.machine._run_ssh')
+    @mock.patch('buildman.machine._run_ssh_full')
     def test_probe_toolchains_ssh_failure(self, mock_ssh):
         """Test toolchain probe when SSH fails"""
         mock_ssh.side_effect = machine.MachineError('timeout')
@@ -555,6 +605,19 @@ class TestMachineExtended(unittest.TestCase):
         result = m.probe_toolchains('buildman')
         self.assertEqual(result, {})
         self.assertIn('timeout', m.tc_error)
+
+    @mock.patch('buildman.machine._run_ssh_full')
+    def test_probe_toolchains_broken_prefix(self, mock_ssh):
+        """Test toolchain probe detects broken prefix in remote config"""
+        mock_ssh.return_value = (
+            "Error: No tool chain found for prefix '/bad/path/gcc'\n"
+            "List of available toolchains (1):\n"
+            "sandbox   : /usr/bin/gcc\n\n",
+            '')
+        m = machine.Machine('host1')
+        result = m.probe_toolchains('buildman')
+        self.assertIn('sandbox', result)
+        self.assertIn('No tool chain found', m.tc_error)
 
     @mock.patch('buildman.machine._run_ssh')
     def test_probe_toolchains_from_boss(self, mock_ssh):
@@ -716,6 +779,58 @@ class TestMachinePoolExtended(unittest.TestCase):
             pool.check_toolchains({'arm', 'sandbox'})
         with terminal.capture():
             pool.print_summary(local_archs={'arm', 'sandbox'})
+
+    def test_tool_drift_notes(self):
+        """Test that differing host tool versions are reported"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+        pool.machines[0].info.tools = {'dtc': 'DTC 1.6.1',
+                                       'swig': 'SWIG 4.0.2'}
+        pool.machines[1].info.tools = {'dtc': 'DTC 1.7.0',
+                                       'swig': 'SWIG 4.0.2'}
+
+        notes = pool._tool_drift_notes()
+
+        # dtc differs and is reported; swig matches and is not
+        self.assertEqual(len(notes), 1)
+        self.assertIn('dtc', notes[0])
+        self.assertIn('DTC 1.6.1 (host1)', notes[0])
+        self.assertIn('DTC 1.7.0 (host2)', notes[0])
+
+    def test_tool_drift_notes_agree(self):
+        """Test no note when tool versions agree"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+            mach.info.tools = {'dtc': 'DTC 1.6.1'}
+        self.assertEqual(pool._tool_drift_notes(), [])
+
+    def test_print_summary_tool_drift(self):
+        """Test print_summary shows a drift warning when versions differ"""
+        bsettings.add_file('[machines]\nhost1\nhost2\n')
+        pool = machine.MachinePool()
+        for mach in pool.machines:
+            mach.avail = True
+        pool.machines[0].info.tools = {'dtc': 'DTC 1.6.1'}
+        pool.machines[1].info.tools = {'dtc': 'DTC 1.7.0'}
+        with terminal.capture() as (stdout, _):
+            pool.print_summary()
+        self.assertIn('Host tool version drift', stdout.getvalue())
+        self.assertIn('DTC 1.7.0', stdout.getvalue())
+
+    @mock.patch('buildman.machine._run_ssh')
+    def test_probe_parses_tools(self, mock_ssh):
+        """Test that probe records host tool versions"""
+        mock_ssh.return_value = json.dumps({
+            **MACHINE_INFO, 'tools': {'dtc': 'DTC 1.6.1'}})
+        bsettings.add_file('[machines]\nhost1\n')
+        pool = machine.MachinePool()
+        with terminal.capture():
+            pool.probe_all()
+        self.assertEqual(pool.machines[0].info.tools, {'dtc': 'DTC 1.6.1'})
 
     @mock.patch('buildman.machine._run_ssh')
     def test_check_toolchains_version_mismatch(self, mock_ssh):

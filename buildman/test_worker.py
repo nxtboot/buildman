@@ -155,6 +155,26 @@ class TestUtilityFunctions(unittest.TestCase):
                 fout.write('fake')
             self.assertEqual(worker._get_sizes(tmpdir), {})
 
+    def test_get_config(self):
+        """Test reading generated config files from a build dir"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, '.config'), 'w',
+                      encoding='utf-8') as fout:
+                fout.write('CONFIG_FOO=y\n')
+            config = worker._get_config(tmpdir)
+            self.assertEqual(config['.config'], 'CONFIG_FOO=y\n')
+
+    def test_get_config_empty(self):
+        """Test with no config files present"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(worker._get_config(tmpdir), {})
+
+    @mock.patch('buildman.worker.builderthread.config_file_map',
+                return_value={'.config': '/nonexistent/dir/.config'})
+    def test_get_config_unreadable(self, _mock):
+        """Test that an unreadable config file is skipped"""
+        self.assertEqual(worker._get_config('/x'), {})
+
 
 class TestCmdSetup(_ProtoTestBase):
     """Test _cmd_setup()"""
@@ -256,6 +276,16 @@ class TestCmdConfigure(_ProtoTestBase):
         state = {}
         worker._cmd_configure({'settings': {}}, state)
         self.assertEqual(state['settings'], {})
+
+    def test_configure_with_toolchains(self):
+        """Test that configure adds toolchains sent by the boss"""
+        tc = mock.Mock()
+        state = {'toolchains': tc}
+        req = {'settings': {'no_lto': True},
+               'toolchains': {'arm': '~/gcc/arm-linux-gcc'}}
+        self.assertTrue(worker._cmd_configure(req, state))
+        tc.add.assert_called_once()
+        self.assert_resp('resp', 'configure_done')
 
 
 class TestRunWorker(_RunWorkerBase):
@@ -410,6 +440,7 @@ class TestWorkerBuilderThread(_ProtoTestBase):
     def test_send_result(self):
         """Test that _send_result sends a build_result message"""
         thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=False)
         result = mock.Mock(
             brd=mock.Mock(target='sandbox'),
             commit_upto=0, return_code=0,
@@ -417,6 +448,32 @@ class TestWorkerBuilderThread(_ProtoTestBase):
         thread._send_result(result)
         self.assert_resp('resp', 'build_result')
         self.assert_resp('board', 'sandbox')
+
+    def test_send_result_lines(self):
+        """Test that _send_result includes the --lines manifest"""
+        thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=True)
+        result = mock.Mock(
+            brd=mock.Mock(target='sandbox'),
+            commit_upto=0, return_code=0,
+            stderr='', stdout='', out_dir='/nonexistent')
+        with mock.patch.object(thread, '_scan_lines',
+                               return_value='common/board_f.c: 1-9\n'):
+            thread._send_result(result)
+        self.assert_resp('lines', 'common/board_f.c: 1-9\n')
+
+    def test_send_result_config_on_failure(self):
+        """Test that _send_result returns config files for a failed board"""
+        thread = self._make_thread()
+        thread.builder = mock.Mock(read_lines=False)
+        result = mock.Mock(
+            brd=mock.Mock(target='sandbox'),
+            commit_upto=0, return_code=2,
+            stderr='error', stdout='', out_dir='/nonexistent')
+        with mock.patch('buildman.worker._get_config',
+                        return_value={'.config': 'CONFIG_FOO=y\n'}):
+            thread._send_result(result)
+        self.assert_resp('config', {'.config': 'CONFIG_FOO=y\n'})
 
     def test_run_job_sends_heartbeat(self):
         """Test run_job sends heartbeat"""
@@ -881,7 +938,16 @@ class TestDoWorker(unittest.TestCase):
     def test_start(self, _grp, _pid, _setpgrp, mock_run):
         """Test do_worker sets process group and runs"""
         self.assertEqual(worker.do_worker(debug=False), 0)
-        mock_run.assert_called_once_with(False)
+        mock_run.assert_called_once_with(False, '.')
+
+    @mock.patch('buildman.worker.run_worker', return_value=0)
+    @mock.patch('os.setpgrp')
+    @mock.patch('os.getpid', return_value=100)
+    @mock.patch('os.getpgrp', return_value=100)
+    def test_start_git_dir(self, _grp, _pid, _setpgrp, mock_run):
+        """Test do_worker passes the source tree through to run_worker"""
+        self.assertEqual(worker.do_worker(False, '/tmp/bm-src'), 0)
+        mock_run.assert_called_once_with(False, '/tmp/bm-src')
 
     @mock.patch('buildman.worker.run_worker', return_value=0)
     @mock.patch('os.setpgrp', side_effect=OSError('not allowed'))

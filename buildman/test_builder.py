@@ -15,9 +15,9 @@ from unittest import mock
 
 from buildman import builder
 from buildman import builderthread
-from buildman.outcome import (DisplayOptions, OUTCOME_OK,
-                              OUTCOME_ERROR, OUTCOME_UNKNOWN)
-from buildman.resulthandler import ResultHandler
+from buildman.outcome import (BoardStatus, DisplayOptions, ErrLine,
+                              OUTCOME_OK, OUTCOME_ERROR, OUTCOME_UNKNOWN)
+from buildman.resulthandler import ResultHandler, is_blob_missing_line
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 
@@ -1037,6 +1037,133 @@ class TestLinesCode(unittest.TestCase):
         self.handler._print_lines_code(added, [])
         out = '\n'.join(line.text for line in terminal.get_print_test_lines())
         self.assertIn('... and 50 more lines', out)
+
+
+class TestConfigFileMap(unittest.TestCase):
+    """Test builderthread.config_file_map()"""
+
+    def test_naming(self):
+        """Config files are mapped to the names buildman reads back"""
+        with tempfile.TemporaryDirectory() as out_dir:
+            os.makedirs(os.path.join(out_dir, 'include', 'generated'))
+            os.makedirs(os.path.join(out_dir, 'spl', 'include', 'generated'))
+            for rel in ['u-boot.cfg', '.config',
+                        'include/generated/autoconf.h',
+                        'spl/include/generated/autoconf.h']:
+                with open(os.path.join(out_dir, rel), 'w',
+                          encoding='utf-8') as outf:
+                    outf.write('x\n')
+
+            fmap = builderthread.config_file_map(out_dir)
+
+            # Top-level files keep their name; SPL files gain a -spl suffix
+            self.assertIn('u-boot.cfg', fmap)
+            self.assertIn('.config', fmap)
+            self.assertIn('autoconf.h', fmap)
+            self.assertIn('autoconf-spl.h', fmap)
+            self.assertEqual(fmap['autoconf-spl.h'],
+                os.path.join(out_dir, 'spl/include/generated/autoconf.h'))
+
+    def test_missing(self):
+        """A directory with no config files maps to nothing"""
+        with tempfile.TemporaryDirectory() as out_dir:
+            self.assertEqual(builderthread.config_file_map(out_dir), {})
+
+
+class TestBlobMissing(unittest.TestCase):
+    """Tests for separating missing-blob output from real breakage"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        self.handler.reset_result_summary({})
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def test_is_blob_missing_line(self):
+        """Missing-blob messages are recognised; real errors are not"""
+        self.assertTrue(is_blob_missing_line('Some images are invalid'))
+        self.assertTrue(is_blob_missing_line(
+            "Image 'main' is missing external blobs and is non-functional"))
+        self.assertFalse(is_blob_missing_line("error: 'foo' undeclared"))
+
+    def test_split(self):
+        """Blob lines are split out, others kept"""
+        real = ErrLine('+', [], 'error: undefined reference')
+        blob = ErrLine('w+', [], 'Some images are invalid')
+        keep, drop = self.handler._split_blob_lines([real, blob])
+        self.assertEqual(keep, [real])
+        self.assertEqual(drop, [blob])
+
+    def test_display_separates_blobs(self):
+        """Blob lines print under their own heading, after real errors"""
+        empty = BoardStatus([], [], [], [], [])
+        real = ErrLine('+', [], 'error: undefined reference to bar')
+        blob = ErrLine('+', [], "Image is missing external blobs")
+        self.handler._display_arch_results(
+            {}, empty, [], [real, blob], [], [], False)
+        out = '\n'.join(line.text
+                        for line in terminal.get_print_test_lines())
+        self.assertIn('undefined reference to bar', out)
+        self.assertIn('Missing external blobs', out)
+        # Real error comes first, then the blob heading, then the blob line
+        self.assertLess(out.index('undefined reference to bar'),
+                        out.index('Missing external blobs'))
+        self.assertLess(out.index('Missing external blobs'),
+                        out.index('Image is missing external blobs'))
+
+
+class TestFlakeDetection(unittest.TestCase):
+    """Tests for _report_flakes() cross-commit flake detection"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.col = terminal.Color(terminal.COLOR_NEVER)
+        self.handler = ResultHandler(self.col, DEFAULT_OPTS)
+        terminal.set_print_test_mode()
+
+    def tearDown(self):
+        """Clean up after tests"""
+        terminal.set_print_test_mode(False)
+
+    def _run(self, history, boards):
+        """Run _report_flakes() with a given outcome history"""
+        self.handler._history = history
+        self.handler._report_flakes({brd: None for brd in boards})
+        return '\n'.join(line.text
+                         for line in terminal.get_print_test_lines())
+
+    def test_regression_not_flagged(self):
+        """A board that fails and stays failed is a real regression"""
+        hist = {0: {'a': (OUTCOME_OK, False)},
+                1: {'a': (OUTCOME_ERROR, False)},
+                2: {'a': (OUTCOME_ERROR, False)}}
+        self.assertEqual(self._run(hist, ['a']), '')
+
+    def test_flake_flagged(self):
+        """A board that fails then recovers is flagged as a likely flake"""
+        hist = {0: {'b': (OUTCOME_OK, False)},
+                1: {'b': (OUTCOME_ERROR, False)},
+                2: {'b': (OUTCOME_OK, False)}}
+        out = self._run(hist, ['b'])
+        self.assertIn('Likely flakes', out)
+        self.assertIn('b', out)
+
+    def test_blob_failure_ignored(self):
+        """A missing-blob failure that clears is not treated as a flake"""
+        hist = {0: {'c': (OUTCOME_OK, False)},
+                1: {'c': (OUTCOME_ERROR, True)},
+                2: {'c': (OUTCOME_OK, False)}}
+        self.assertEqual(self._run(hist, ['c']), '')
+
+    def test_single_commit_no_report(self):
+        """One commit is not enough to tell a flake from a regression"""
+        hist = {0: {'a': (OUTCOME_ERROR, False)}}
+        self.assertEqual(self._run(hist, ['a']), '')
 
 if __name__ == '__main__':
     unittest.main()

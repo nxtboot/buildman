@@ -73,6 +73,23 @@ def get_bogomips():
         pass
     return 0.0
 
+def get_tool_ver(cmd, arg):
+    try:
+        out = subprocess.run([cmd, arg], capture_output=True, text=True)
+        text = (out.stdout + out.stderr).strip()
+        return text.splitlines()[0] if text else ''
+    except (OSError, ValueError):
+        return ''
+
+def get_tools():
+    # Host tools whose version affects generated code (dtc) or the build
+    # (swig, python), so drift between machines can be spotted
+    return {
+        'dtc': get_tool_ver('dtc', '--version'),
+        'swig': get_tool_ver('swig', '-version'),
+        'python': get_tool_ver('python3', '--version'),
+    }
+
 print(json.dumps({
     'arch': platform.machine(),
     'cpus': get_cpus(),
@@ -81,6 +98,7 @@ print(json.dumps({
     'load_1m': get_load(),
     'mem_avail_mb': get_mem_avail_mb(),
     'disk_avail_mb': get_disk_avail_mb(),
+    'tools': get_tools(),
 }))
 '''
 
@@ -112,6 +130,8 @@ class MachineInfo:
         load (float): 1-minute load average
         mem_avail_mb (int): Available memory in MB
         disk_avail_mb (int): Available disk space in MB
+        tools (dict): Host tool version strings, keyed by 'dtc', 'swig'
+            and 'python'
     """
     arch: str = ''
     cpus: int = 0
@@ -120,6 +140,7 @@ class MachineInfo:
     load: float = 0.0
     mem_avail_mb: int = 0
     disk_avail_mb: int = 0
+    tools: dict = dataclasses.field(default_factory=dict)
 
 
 class MachineError(Exception):
@@ -170,6 +191,52 @@ def _run_ssh(hostname, cmd, timeout=SSH_TIMEOUT, stdin_data=None):
             f'{result.return_code}')
 
     return result.stdout
+
+
+def _run_ssh_full(hostname, cmd, timeout=SSH_TIMEOUT, stdin_data=None):
+    """Run a command on a remote machine via SSH, returning stdout and stderr
+
+    Like _run_ssh() but returns both stdout and stderr so the caller can
+    inspect warnings printed to stderr even when the command succeeds.
+
+    Args:
+        hostname (str): SSH hostname (user@host or just host)
+        cmd (list of str): Command and arguments
+        timeout (int): Connection timeout in seconds
+        stdin_data (str or None): Data to send to the command's stdin
+
+    Returns:
+        tuple: (stdout, stderr) strings
+
+    Raises:
+        MachineError: if SSH connection fails or command returns non-zero
+    """
+    ssh_cmd = [
+        'ssh',
+        '-o', 'BatchMode=yes',
+        '-o', f'ConnectTimeout={timeout}',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        hostname,
+        '--',
+    ] + cmd
+    try:
+        result = command.run_pipe(
+            [ssh_cmd], capture=True, capture_stderr=True,
+            raise_on_error=False, stdin_data=stdin_data)
+    except command.CommandExc as exc:
+        raise MachineError(str(exc)) from exc
+
+    if result.return_code:
+        stderr = result.stderr.strip()
+        if stderr:
+            lines = [l for l in stderr.splitlines() if l.strip()]
+            msg = lines[-1] if lines else stderr
+            raise MachineError(f'SSH to {hostname}: {msg}')
+        raise MachineError(
+            f'SSH to {hostname} failed with code '
+            f'{result.return_code}')
+
+    return result.stdout, result.stderr
 
 
 def gcc_version(gcc_path):
@@ -548,6 +615,7 @@ class MachinePool:
         lock = threading.Lock()
         done = []
         failed = []
+        fetched_map = {}
         total = sum(len(v) for v in missing_map.values())
 
         def _fetch_one(mach, missing):
@@ -573,12 +641,10 @@ class MachinePool:
                         f'Fetching toolchains {len(done)}/{total}: '
                         f'{mach.name} {arch}')
             if fetched:
-                mach.probe_toolchains(buildman_path,
-                                      local_gcc=local_gcc)
-                missing -= fetched
-                if not missing:
-                    with lock:
-                        del missing_map[mach]
+                # Record what was fetched before the re-probe, so the
+                # missing_map update below still happens if the probe raises
+                fetched_map[mach] = fetched
+                mach.probe_toolchains(buildman_path, local_gcc=local_gcc)
 
         tout.progress(f'Fetching {total} toolchains on '
                       f'{len(missing_map)} machines')
@@ -590,6 +656,14 @@ class MachinePool:
         for t in threads:
             t.join()
         tout.clear_progress()
+
+        # Drop fetched archs from missing_map in the main thread. Keeping this
+        # off the worker threads makes it reliable (a re-probe that raises in a
+        # thread no longer loses it) and visible to coverage tooling
+        for mach, fetched in list(fetched_map.items()):
+            missing_map[mach] -= fetched
+            if not missing_map[mach]:
+                del missing_map[mach]
 
         # Report failures
         for msg in failed:
@@ -714,6 +788,39 @@ class MachinePool:
             for note in notes:
                 print(note)
 
+        tool_notes = self._tool_drift_notes()
+        if tool_notes:
+            print()
+            print('Host tool version drift (may cause per-machine '
+                  'differences):')
+            for note in tool_notes:
+                print(note)
+
+    def _tool_drift_notes(self):
+        """Return notes about host-tool version drift across machines
+
+        A differing dtc, swig or python version can make a board build
+        differently, or fail on only one machine, so warn when the
+        available machines do not all report the same version.
+
+        Returns:
+            list of str: One note per tool whose version differs, or []
+        """
+        notes = []
+        for tool in ('dtc', 'swig', 'python'):
+            by_ver = {}
+            for mach in self.machines:
+                if not mach.avail:
+                    continue
+                ver = mach.info.tools.get(tool, '')
+                if ver:
+                    by_ver.setdefault(ver, []).append(mach.name)
+            if len(by_ver) > 1:
+                parts = [f'{ver} ({", ".join(names)})'
+                         for ver, names in sorted(by_ver.items())]
+                notes.append(f'  {tool}: {"; ".join(parts)}')
+        return notes
+
 
 class Machine:
     """Represents a remote (or local) build machine
@@ -776,6 +883,7 @@ class Machine:
             load=info.get('load_1m', 0.0),
             mem_avail_mb=info.get('mem_avail_mb', 0),
             disk_avail_mb=info.get('disk_avail_mb', 0),
+            tools=info.get('tools', {}),
         )
 
         # Check whether the machine is too busy or low on resources
@@ -822,14 +930,23 @@ class Machine:
         if local_gcc:
             return self._probe_toolchains_from_boss(local_gcc)
         try:
-            result = _run_ssh(self.hostname,
-                              [buildman_path, '--list-tool-chains'])
+            stdout, stderr = _run_ssh_full(
+                self.hostname,
+                [buildman_path, '--list-tool-chains'])
         except MachineError as exc:
             self.toolchains = {}
             self.tc_error = str(exc)
             return self.toolchains
 
-        self.toolchains = _parse_toolchain_list(result)
+        self.toolchains = _parse_toolchain_list(stdout)
+
+        # Check for broken toolchain prefixes in the remote config.
+        # The error is printed to stdout by toolchain.scan().
+        errors = [l.strip() for l in stdout.splitlines()
+                  if 'No tool chain found' in l]
+        if errors:
+            self.tc_error = errors[0]
+
         return self.toolchains
 
     def _probe_toolchains_from_boss(self, local_gcc):

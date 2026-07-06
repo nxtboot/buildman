@@ -592,7 +592,7 @@ def _collect_worker_settings(args):
         'verbose_build', 'allow_missing', 'no_lto',
         'reproducible_builds', 'warnings_as_errors',
         'mrproper', 'fallback_mrproper', 'config_only',
-        'force_build', 'kconfig_check',
+        'force_build', 'kconfig_check', 'force_reconfig', 'lines',
     ]
     for name in flag_names:
         val = getattr(args, name, None)
@@ -796,9 +796,10 @@ def run_builder(builder, commits, board_selected, display_options, args):
 
     if not args.ide:
         commit_count = count_build_commits(commits, args.step)
-        tprint(get_action_summary(args.summary, commit_count,
-                                  board_selected, args.threads,
-                                  args.jobs, no_local=args.no_local))
+        if not args.no_local:
+            tprint(get_action_summary(args.summary, commit_count,
+                                      board_selected, args.threads,
+                                      args.jobs))
 
     builder.set_display_options(
         display_options, args.filter_dtb_warnings,
@@ -1019,7 +1020,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
     # Handle --worker: run in worker mode for distributed builds
     if args.worker:
         from buildman import worker  # pylint: disable=C0415
-        return worker.do_worker(args.debug)
+        return worker.do_worker(args.debug, args.git)
 
     # Handle --kill-workers: kill stale workers and exit
     if args.kill_workers:

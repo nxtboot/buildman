@@ -1301,12 +1301,13 @@ class Builder:
         self.prepare_working_space(min(self.num_threads, len(board_selected)),
                 board_selected and commits is not None)
         self.prepare_output_space()
-        if not self._opts.ide:
+        if not self._opts.ide and board_selected:
             tprint('\rStarting build...', newline=False)
         self.start_time = datetime.now()
         self._setup_build(board_selected, commits)
         self.count += extra_count
-        self.process_result(None)
+        if board_selected:
+            self.process_result(None)
         self.thread_exceptions = []
         # Create jobs to build all commits for each board
         for brd in board_selected.values():

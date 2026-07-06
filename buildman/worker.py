@@ -167,7 +167,7 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
         board (str): Board target name
         commit_upto (int): Commit number
         return_code (int): Build return code
-        **kwargs: Optional keys: stderr, stdout, sizes
+        **kwargs: Optional keys: stderr, stdout, sizes, lines, config
     """
     result = {
         'resp': 'build_result',
@@ -181,6 +181,12 @@ def _send_build_result(board, commit_upto, return_code, **kwargs):
     sizes = kwargs.get('sizes')
     if sizes:
         result['sizes'] = sizes
+    lines = kwargs.get('lines')
+    if lines:
+        result['lines'] = lines
+    config = kwargs.get('config')
+    if config:
+        result['config'] = config
     _send(result)
 
 
@@ -240,6 +246,26 @@ def _get_sizes(out_dir):
     except OSError:
         pass
     return {}
+
+
+def _get_config(out_dir):
+    """Read the generated config files from a build output directory
+
+    Args:
+        out_dir (str): Build output directory
+
+    Returns:
+        dict: Keyed by output filename (e.g. '.config', 'autoconf-spl.h'),
+            with the file contents as the value. Empty if none are present
+    """
+    config = {}
+    for target, fname in builderthread.config_file_map(out_dir).items():
+        try:
+            with open(fname, 'r', encoding='utf-8', errors='replace') as inf:
+                config[target] = inf.read()
+        except OSError:
+            pass
+    return config
 
 
 def _worker_make(_commit, _brd, _stage, cwd, *args, **kwargs):
@@ -443,12 +469,25 @@ class _WorkerBuilderThread(builderthread.BuilderThread):
     def _send_result(self, result):
         """Send the build result to the boss over the SSH protocol"""
         sizes = {}
+        lines = ''
+        config = {}
         if result.out_dir and result.return_code == 0:
             sizes = _get_sizes(result.out_dir)
+            # Scan the DWARF line info while the object files are still
+            # present, since _write_result() is a no-op on the worker and so
+            # never writes the manifest. The boss writes it to the build dir
+            if self.builder.read_lines:
+                lines = self._scan_lines(result)
+        elif result.out_dir and result.return_code > 0:
+            # Return the generated config for a failed board so the failure
+            # can be diagnosed without reproducing the build locally. Only on
+            # failure, since a build that got far enough to fail has the
+            # config files but a good build's are not usually needed
+            config = _get_config(result.out_dir)
         _send_build_result(
             result.brd.target, result.commit_upto, result.return_code,
             stderr=result.stderr or '', stdout=result.stdout or '',
-            sizes=sizes)
+            sizes=sizes, lines=lines, config=config)
 
     def _checkout(self, commit_upto, work_dir):
         """Check out a commit using subprocess to avoid select() FD limit
@@ -516,8 +555,15 @@ def _cmd_configure(req, state):
     allow_missing, no_lto, etc.) and are applied to every subsequent
     build.
 
+    If the request includes a 'toolchains' dict mapping architecture
+    names to gcc paths, those are added to the worker's Toolchains
+    object. This allows the boss to control which cross-compilers the
+    worker uses, avoiding problems with stale entries in the worker's
+    own ~/.buildman config.
+
     Args:
         req (dict): Request with 'settings' dict containing build flags
+            and optional 'toolchains' dict of arch -> gcc path
         state (dict): Worker state, updated in place
 
     Returns:
@@ -525,7 +571,19 @@ def _cmd_configure(req, state):
     """
     settings = req.get('settings', {})
     state['settings'] = settings
-    _dbg(f'configure: {settings}')
+
+    tc_paths = req.get('toolchains', {})
+    if tc_paths:
+        toolchains = state['toolchains']
+        for arch, gcc in tc_paths.items():
+            gcc = os.path.expanduser(gcc)
+            toolchains.add(gcc, test=True, verbose=False,
+                           priority=toolchain_mod.PRIORITY_FULL_PREFIX,
+                           arch=arch)
+        _dbg(f'configure: {len(tc_paths)} toolchains, {settings}')
+    else:
+        _dbg(f'configure: {settings}')
+
     _send({'resp': 'configure_done'})
     return True
 
@@ -683,6 +741,8 @@ def _create_builder(state, num_threads, num_jobs):
         reproducible_builds=settings.get('reproducible_builds', False),
         force_config_on_failure=True,
         kconfig_check=settings.get('kconfig_check', True),
+        force_reconfig=settings.get('force_reconfig', False),
+        read_lines=settings.get('lines', False),
     )
     result_handler.set_builder(bldr)
     return bldr
@@ -828,7 +888,7 @@ def _cmd_quit(state):
     _kill_group()
 
 
-def run_worker(debug=False):
+def run_worker(debug=False, git_dir='.'):
     """Main worker loop
 
     Reads JSON commands from stdin and dispatches them. Sends responses
@@ -837,6 +897,8 @@ def run_worker(debug=False):
 
     Args:
         debug (bool): True to print debug messages to stderr
+        git_dir (str): Path to the source tree to build (the boss passes
+            this with -g so it need not match the process's cwd)
 
     Returns:
         int: 0 on success, non-zero on error
@@ -864,12 +926,11 @@ def run_worker(debug=False):
 
     nthreads = _get_nthreads()
 
-    # Scan for toolchains at startup so we can select the right
-    # cross-compiler for each board's architecture. The boss sets up
-    # the git repo and pushes source via SSH before starting us, so
-    # there is no 'setup' command — we are ready as soon as we start.
+    # Scan for toolchains but skip [toolchain-prefix] entries from the
+    # local config — those may contain stale paths that cause errors.
+    # The boss sends the toolchain paths it wants us to use in the
+    # 'configure' command, which override anything found here.
     toolchains = toolchain_mod.Toolchains()
-    toolchains.get_settings(show_warning=False)
     toolchains.scan(verbose=False, raise_on_error=False)
 
     _dbg(f'ready: {nthreads} threads')
@@ -877,7 +938,7 @@ def run_worker(debug=False):
 
     stop_event = threading.Event()
     state = {
-        'work_dir': os.getcwd(),
+        'work_dir': os.path.realpath(git_dir),
         'nthreads': nthreads,
         'toolchains': toolchains,
         'stop': stop_event,
@@ -961,11 +1022,12 @@ def _dispatch_commands(cmd_queue, eof_sentinel, state):
     return 1
 
 
-def do_worker(debug=False):
+def do_worker(debug=False, git_dir='.'):
     """Entry point for 'buildman --worker'
 
     Args:
         debug (bool): True to print debug messages to stderr
+        git_dir (str): Path to the source tree to build
 
     Returns:
         int: 0 on success
@@ -983,4 +1045,4 @@ def do_worker(debug=False):
     except OSError:
         pass
     _is_group_leader = os.getpid() == os.getpgrp()
-    return run_worker(debug)
+    return run_worker(debug, git_dir)

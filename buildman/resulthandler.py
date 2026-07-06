@@ -17,6 +17,31 @@ from u_boot_pylib import command
 from u_boot_pylib.terminal import tprint
 
 
+# Substrings that mark a build message as caused by a missing external blob
+# (proprietary firmware absent from the tree) rather than a code problem.
+# These are expected in a blobless environment and are shown separately in
+# the summary so they do not obscure genuine breakage
+BLOB_MISSING_SIGNATURES = (
+    'some images are invalid',
+    'missing external blob',
+    'faked external blob',
+    'faked blob',
+)
+
+
+def is_blob_missing_line(line):
+    """Return True if an error/warning line is about a missing external blob
+
+    Args:
+        line (str): The error or warning text
+
+    Returns:
+        bool: True if the line matches a known missing-blob message
+    """
+    low = line.lower()
+    return any(sig in low for sig in BLOB_MISSING_SIGNATURES)
+
+
 class ResultHandler:
     """Handles display of build size results and summaries
 
@@ -53,6 +78,7 @@ class ResultHandler:
         self._config_filenames = None
         self._result_getter = None
         self._error_lines = 0
+        self._history = {}
 
         # Baseline state for result comparisons
         self._base_board_dict = {}
@@ -104,6 +130,9 @@ class ResultHandler:
         self._base_commit = None
         self._source_cache = {}
         self._error_lines = 0
+        # Per-commit outcome history for cross-commit flake detection, keyed
+        # by commit number then board target, holding (rc, is_blob) tuples
+        self._history = {}
 
     def _print_result_summary(self, board_selected, board_dict, err_lines,
                              err_line_boards, warn_lines, warn_line_boards,
@@ -430,6 +459,18 @@ class ResultHandler:
                 board_selected, commit_upto, self._opts.show_bloat,
                 self._opts.show_config, self._opts.show_environment,
                 self._opts.show_lines)
+
+        # Record each board's outcome so flakes can be spotted across commits.
+        # A missing-blob failure is not a real failure, so note it separately
+        self._history[commit_upto] = {
+            target: (outcome.rc,
+                     bool(outcome.err_lines) and
+                     all(is_blob_missing_line(line)
+                         for line in outcome.err_lines))
+            for target, outcome in board_dict.items()
+            if target in board_selected
+        }
+
         if commits:
             msg = f'{commit_upto + 1:02d}: {commits[commit_upto].subject}'
             tprint(msg, colour=self._col.BLUE)
@@ -459,6 +500,43 @@ class ResultHandler:
                 commit_upto, commits, board_selected)
         if not self._get_error_lines():
             tprint('(no errors to report)', colour=self._col.GREEN)
+        self._report_flakes(board_selected)
+
+    def _report_flakes(self, board_selected):
+        """Flag boards whose failures look like flakes, not regressions
+
+        A genuine regression appears at one commit and stays failed to the
+        end of the series. A board that fails at some commit but builds fine
+        at a later one has recovered on its own, which points to a flaky or
+        environmental failure rather than a source regression. Surface these
+        so they can be re-run to confirm rather than trusted as breakage.
+        Missing-blob failures are ignored, since they are expected.
+
+        Args:
+            board_selected (dict): Dict of boards to consider, keyed by target
+        """
+        # Need at least two commits to tell a persistent failure from a blip
+        if len(self._history) < 2:
+            return
+        order = sorted(self._history)
+        flaky = []
+        for target in sorted(board_selected):
+            fails = []
+            for commit_upto in order:
+                rc, is_blob = self._history[commit_upto].get(
+                    target, (OUTCOME_UNKNOWN, False))
+                if rc == OUTCOME_UNKNOWN:
+                    continue
+                fails.append(rc == OUTCOME_ERROR and not is_blob)
+            # A real regression stays failed once it starts; a success after
+            # the first failure means the board recovered on its own
+            if True in fails and False in fails[fails.index(True):]:
+                flaky.append(target)
+
+        if flaky:
+            tprint('Likely flakes (failed then recovered, re-run to '
+                   'confirm):', colour=self._col.MAGENTA)
+            tprint('  ' + ' '.join(flaky), colour=self._col.MAGENTA)
 
     def print_build_summary(self, count, already_done, kconfig_reconfig,
                             start_time, thread_exceptions, lines_time=0.0,
@@ -866,11 +944,39 @@ class ResultHandler:
         for arch, target_list in arch_list.items():
             tprint(f'{arch:>10s}: {target_list}')
             error_lines += 1
+        # Separate missing-blob messages so genuine breakage is not buried
+        # under output that is expected in a blobless environment
+        worse_err, blob_err = self._split_blob_lines(worse_err)
+        worse_warn, blob_warn = self._split_blob_lines(worse_warn)
+
         error_lines += self._output_err_lines(better_err, colour=self._col.GREEN)
         error_lines += self._output_err_lines(worse_err, colour=self._col.RED)
         error_lines += self._output_err_lines(better_warn, colour=self._col.CYAN)
         error_lines += self._output_err_lines(worse_warn, colour=self._col.YELLOW)
+
+        blob_lines = blob_err + blob_warn
+        if blob_lines:
+            tprint('Missing external blobs (expected in a blobless build):',
+                   colour=self._col.MAGENTA)
+            error_lines += self._output_err_lines(
+                blob_lines, colour=self._col.MAGENTA)
         return error_lines
+
+    @staticmethod
+    def _split_blob_lines(err_lines):
+        """Split error/warning lines into real and missing-blob groups
+
+        Args:
+            err_lines (list of ErrLine): Lines to split
+
+        Returns:
+            tuple: (real, blob) lists of ErrLine, where blob holds the
+                missing-blob messages and real holds everything else
+        """
+        real, blob = [], []
+        for line in err_lines:
+            (blob if is_blob_missing_line(line.errline) else real).append(line)
+        return real, blob
 
     @staticmethod
     def _print_ide_output(board_selected, board_dict):
