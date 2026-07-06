@@ -744,6 +744,7 @@ def _create_builder(state, num_threads, num_jobs):
         force_reconfig=settings.get('force_reconfig', False),
         read_lines=settings.get('lines', False),
         shared_dtc=settings.get('shared_dtc', False),
+        skip_unaffected=settings.get('skip_unaffected', False),
     )
     result_handler.set_builder(bldr)
     return bldr

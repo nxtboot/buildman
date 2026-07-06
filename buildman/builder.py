@@ -229,8 +229,8 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, shared_dtc=False, build_target=None,
-                 read_lines=False,
+                 dtc_skip=False, shared_dtc=False, skip_unaffected=False,
+                 build_target=None, read_lines=False,
                  thread_class=builderthread.BuilderThread,
                  handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
@@ -288,6 +288,9 @@ class Builder:
             shared_dtc (bool): True to build dtc/pylibfdt once and share it
                 across all board builds, instead of building it in each
                 output directory
+            skip_unaffected (bool): True to skip building commits which
+                cannot affect a board, based on the dependencies of its
+                previous build
             build_target (str): Build target to use (None to use the default)
             thread_class (type): BuilderThread subclass to use (default
                 builderthread.BuilderThread). This allows the caller to
@@ -359,6 +362,13 @@ class Builder:
                 os.path.join(self._working_dir, '.dtc'), num_jobs=num_jobs)
         else:
             self.dtc_cache = None
+        self.skip_unaffected = skip_unaffected
+        self.skipped = 0
+        # Cache of files changed between two commits, keyed by
+        # (from_upto, to_upto). Shared by all builder threads, so guarded by
+        # a lock
+        self._commit_files = {}
+        self._commit_files_lock = threading.Lock()
         self.build_target = build_target
 
         if not self.squash_config_y:
@@ -463,6 +473,35 @@ class Builder:
         if self.dtc:
             env[b'DTC'] = tools.to_bytes(self.dtc)
         return env
+
+    def get_commit_files(self, from_upto, to_upto):
+        """Get the list of files changed between two commits being built
+
+        The result is cached, so only the first thread to ask about a
+        particular range runs git; the others reuse the answer.
+
+        Args:
+            from_upto (int): Commit number (0...n-1) to compare from
+            to_upto (int): Commit number (0...n-1) to compare to
+
+        Returns:
+            list of str or None: Source-tree-relative paths of the files
+                changed between the two commits, or None if this could not
+                be determined (in which case no build should be skipped)
+        """
+        key = (from_upto, to_upto)
+        with self._commit_files_lock:
+            if key not in self._commit_files:
+                result = command.run_one(
+                    'git', f'--git-dir={self.git_dir}', 'diff-tree', '-r',
+                    '--name-only', self.commits[from_upto].hash,
+                    self.commits[to_upto].hash, capture=True,
+                    capture_stderr=True, raise_on_error=False)
+                if result.return_code:
+                    self._commit_files[key] = None
+                else:
+                    self._commit_files[key] = result.stdout.splitlines()
+            return self._commit_files[key]
 
     def set_display_options(self, display_options,
                             filter_dtb_warnings=False,
@@ -617,6 +656,8 @@ class Builder:
                 self._warned += 1
             if result.already_done:
                 self._already_done += 1
+            if getattr(result, 'skipped', False):
+                self.skipped += 1
             if result.kconfig_reconfig:
                 self.kconfig_reconfig += 1
             if self._opts.ide:
@@ -1401,4 +1442,4 @@ class Builder:
         self._result_handler.print_build_summary(
             self.count, self._already_done, self.kconfig_reconfig,
             self.start_time, self.thread_exceptions,
-            self._lines_time, self._lines_count)
+            self._lines_time, self._lines_count, self.skipped)

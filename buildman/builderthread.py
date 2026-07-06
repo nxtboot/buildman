@@ -18,6 +18,7 @@ import threading
 import time
 
 from buildman import cfgutil
+from buildman import depscan
 from u_boot_pylib import command
 from u_boot_pylib import dwarf_lines
 from u_boot_pylib import gitutil
@@ -305,6 +306,16 @@ class BuilderThread(threading.Thread):
         self.per_board_out_dir = per_board_out_dir
         self.test_exception = test_exception
         self.toolchain = None
+
+        # State used by --skip-unaffected, all relating to the current job:
+        # _skip_built_upto is the commit number whose build output is in the
+        # output directory (i.e. the last commit actually built), or None if
+        # unknown; _skip_deps is the dependency set for that build, or None
+        # if not yet scanned; _skip_ok indicates that the last result was a
+        # clean pass, so its result files can be copied forward
+        self._skip_built_upto = None
+        self._skip_deps = None
+        self._skip_ok = False
 
     def make(self, commit, brd, stage, cwd, *args, **kwargs):
         """Run 'make' on a particular commit and board.
@@ -753,6 +764,79 @@ class BuilderThread(threading.Thread):
         result.kconfig_reconfig = kconfig_reconfig
         return result, do_config, kconfig_reconfig
 
+    def _try_skip(self, req, commit_upto, out_dir, result):
+        """Try to skip a build which the commit cannot affect
+
+        Checks whether all the files changed since the last-built commit
+        are ones which cannot affect this board, based on the dependency
+        files from its previous build. If so, the previous result files
+        are copied forward and a pass result is returned, so the build
+        (and its result processing) can be skipped entirely.
+
+        This must only be called when the previous commit for this board
+        produced a clean pass in this job (self._skip_ok) and no
+        reconfigure or force flag applies.
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            out_dir (str): Output directory for the build
+            result (CommandResult): Result from _read_done_file(), updated
+                on success
+
+        Returns:
+            CommandResult or None: Result marked as skipped, or None if the
+                build cannot be skipped
+        """
+        builder = self.builder
+
+        # The previous result files must be available to copy forward (they
+        # are not when running as a distributed worker, which writes no
+        # local results)
+        prev_dir = builder.get_build_dir(self._skip_built_upto,
+                                         req.brd.target)
+        done_file = builder.get_done_file(self._skip_built_upto,
+                                          req.brd.target)
+        if not os.path.isdir(prev_dir) or not os.path.exists(done_file):
+            return None
+
+        files = builder.get_commit_files(self._skip_built_upto, commit_upto)
+        if files is None:
+            return None
+        if self._skip_deps is None:
+            self._skip_deps = depscan.scan_deps(
+                out_dir or '', os.path.realpath(req.work_dir))
+        defconfigs = {f'{req.brd.target}_defconfig'}
+        if req.brd.extended:
+            defconfigs.add(f'{req.brd.orig_target}_defconfig')
+        if not depscan.can_skip(files, self._skip_deps, defconfigs):
+            return None
+
+        # Copy the result files from the last-built commit, since the
+        # output is identical
+        mkdir(builder.get_output_dir(commit_upto))
+        new_dir = builder.get_build_dir(commit_upto, req.brd.target)
+        shutil.copytree(prev_dir, new_dir, dirs_exist_ok=True)
+
+        result.return_code = 0
+        result.stdout = ''
+        result.already_done = False
+        result.skipped = True
+
+        # Carry any warnings forward, since the output is identical; if the
+        # previous build was clean, remove any stale error file left in
+        # this commit's directory from an earlier run
+        prev_err = builder.get_err_file(self._skip_built_upto,
+                                        req.brd.target)
+        if os.path.exists(prev_err) and os.stat(prev_err).st_size:
+            result.stderr = 'bad'
+        else:
+            result.stderr = ''
+            err_file = builder.get_err_file(commit_upto, req.brd.target)
+            if os.path.exists(err_file):
+                os.remove(err_file)
+        return result
+
     def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
                    force_build, force_build_failures):
         """Build a particular commit.
@@ -785,9 +869,20 @@ class BuilderThread(threading.Thread):
                                                   force_build_failures)
 
         if will_build:
-            result, do_config, _ = self._do_build(
-                req, commit_upto, do_config, mrproper, config_only,
-                out_dir, out_rel_dir, result)
+            skip_result = None
+            if (self.builder.skip_unaffected and commit_upto is not None and
+                    self._skip_ok and self._skip_built_upto is not None and
+                    commit_upto > self._skip_built_upto and not do_config and
+                    not mrproper and not config_only and not force_build and
+                    not self.builder.force_reconfig):
+                skip_result = self._try_skip(req, commit_upto, out_dir,
+                                             result)
+            if skip_result is not None:
+                result = skip_result
+            else:
+                result, do_config, _ = self._do_build(
+                    req, commit_upto, do_config, mrproper, config_only,
+                    out_dir, out_rel_dir, result)
 
         result.remote = None
         result.toolchain = self.toolchain
@@ -982,7 +1077,10 @@ class BuilderThread(threading.Thread):
         # it.
         maybe_aborted = result.stderr and 'No child processes' in result.stderr
 
-        if result.return_code >= 0 and result.already_done:
+        if result.return_code >= 0 and (result.already_done or
+                                        getattr(result, 'skipped', False)):
+            # For a skipped build the result files were copied from the
+            # previous commit by _try_skip()
             return
 
         # Write the output and stderr
@@ -1064,6 +1162,9 @@ class BuilderThread(threading.Thread):
         self.toolchain = None
         req = RunRequest(brd, work_dir, job.work_in_output, job.adjust_cfg,
                          job.fragments)
+        self._skip_built_upto = None
+        self._skip_deps = None
+        self._skip_ok = False
         if job.commits:
             # Run 'make board_defconfig' on the first commit
             do_config = True
@@ -1121,6 +1222,19 @@ class BuilderThread(threading.Thread):
                     result.commit_upto = commit_upto
                     if result.return_code < 0:
                         raise ValueError('Interrupt')
+
+                # Track the state of the output directory for
+                # --skip-unaffected: a skipped build leaves it (and its
+                # dependency set) unchanged, a real build moves it to this
+                # commit and an already-done result leaves it unknown
+                if not getattr(result, 'skipped', False):
+                    self._skip_deps = None
+                    if result.already_done:
+                        self._skip_built_upto = None
+                        self._skip_ok = False
+                    else:
+                        self._skip_built_upto = commit_upto
+                        self._skip_ok = not result.return_code
 
                 # We have the build results, so output the result
                 self._write_result(result, job.keep_outputs, job.work_in_output)
