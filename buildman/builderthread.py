@@ -402,6 +402,10 @@ class BuilderThread(threading.Thread):
             args.append('NO_LTO=1')
         if self.builder.reproducible_builds:
             args.append('SOURCE_DATE_EPOCH=0')
+        if self.builder.ccache:
+            # The Makefile sets HOSTCC unconditionally, so the environment
+            # cannot override it; pass it as a make argument instead
+            args.append(f'HOSTCC={self.builder.ccache} gcc')
         args.extend(self.builder.toolchains.get_make_arguments(brd))
         args.extend(self.toolchain.make_args())
         return args, cwd, src_dir

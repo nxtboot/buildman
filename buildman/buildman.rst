@@ -250,6 +250,14 @@ Setting up
    this section is not important. If more than one line is provided, only the
    last one is used.
 
+   Alternatively, the ``--ccache`` option enables ccache without any settings
+   changes. As well as wrapping the cross compiler, this wraps the host
+   compiler (so the tools built for each board benefit too) and sets
+   CCACHE_BASEDIR so that builds of the same source in different working
+   directories share cache entries. Repeated builds of the same board and
+   source hit the cache almost entirely; different boards benefit less, since
+   most objects depend on the board configuration.
+
 #. Make sure you have the required Python pre-requisites
 
    Buildman uses multiprocessing, Queue, shutil, StringIO, ConfigParser and

@@ -745,6 +745,9 @@ def _create_builder(state, num_threads, num_jobs):
         read_lines=settings.get('lines', False),
         shared_dtc=settings.get('shared_dtc', False),
         skip_unaffected=settings.get('skip_unaffected', False),
+        # Degrade gracefully if this machine does not have ccache
+        use_ccache=settings.get('ccache', False) and
+            bool(shutil.which('ccache')),
     )
     result_handler.set_builder(bldr)
     return bldr

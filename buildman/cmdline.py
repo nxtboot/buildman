@@ -40,6 +40,8 @@ def add_upto_m(parser):
     parser.add_argument('-C', '--force-reconfig', dest='force_reconfig',
           action='store_true', default=False,
           help='Reconfigure for every commit (disable incremental build)')
+    parser.add_argument('--ccache', action='store_true', default=False,
+          help='Use ccache for the host and cross compilers')
     parser.add_argument('--config-only', action='store_true',
                         default=False,
                         help="Don't build, just configure each commit")

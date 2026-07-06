@@ -593,7 +593,7 @@ def _collect_worker_settings(args):
         'reproducible_builds', 'warnings_as_errors',
         'mrproper', 'fallback_mrproper', 'config_only',
         'force_build', 'kconfig_check', 'force_reconfig', 'lines',
-        'shared_dtc', 'skip_unaffected',
+        'shared_dtc', 'skip_unaffected', 'ccache',
     ]
     for name in flag_names:
         val = getattr(args, name, None)
@@ -1165,7 +1165,7 @@ def do_buildman(args, toolchains=None, make_func=None, brds=None,
             force_reconfig = args.force_reconfig, in_tree = args.in_tree,
             force_config_on_failure=not args.quick, make_func=make_func,
             dtc_skip=args.dtc_skip, shared_dtc=args.shared_dtc,
-            skip_unaffected=args.skip_unaffected,
+            skip_unaffected=args.skip_unaffected, use_ccache=args.ccache,
             build_target=args.target, read_lines=args.lines)
     result_handler.set_builder(builder)
 

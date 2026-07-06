@@ -230,7 +230,7 @@ class Builder:
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
                  dtc_skip=False, shared_dtc=False, skip_unaffected=False,
-                 build_target=None, read_lines=False,
+                 use_ccache=False, build_target=None, read_lines=False,
                  thread_class=builderthread.BuilderThread,
                  handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
@@ -291,6 +291,8 @@ class Builder:
             skip_unaffected (bool): True to skip building commits which
                 cannot affect a board, based on the dependencies of its
                 previous build
+            use_ccache (bool): True to use ccache for the host and cross
+                compilers
             build_target (str): Build target to use (None to use the default)
             thread_class (type): BuilderThread subclass to use (default
                 builderthread.BuilderThread). This allows the caller to
@@ -362,6 +364,12 @@ class Builder:
                 os.path.join(self._working_dir, '.dtc'), num_jobs=num_jobs)
         else:
             self.dtc_cache = None
+        if use_ccache:
+            self.ccache = shutil.which('ccache')
+            if not self.ccache:
+                raise ValueError('Cannot find ccache')
+        else:
+            self.ccache = None
         self.skip_unaffected = skip_unaffected
         self.skipped = 0
         # Cache of files changed between two commits, keyed by
@@ -472,6 +480,18 @@ class Builder:
         env = toolchain.make_environment(self.full_path)
         if self.dtc:
             env[b'DTC'] = tools.to_bytes(self.dtc)
+        if self.ccache:
+            # Wrap the cross compiler (and the other cross tools, which
+            # ccache simply passes through). Skip this if the user has
+            # already set up a ccache wrapper in the settings file
+            cross = env.get(b'CROSS_COMPILE', b'')
+            if b'ccache' not in cross:
+                env[b'CROSS_COMPILE'] = tools.to_bytes(self.ccache) + \
+                    b' ' + cross
+            # Make the cache shared between the per-thread work directories,
+            # which build the same source at different paths
+            env[b'CCACHE_BASEDIR'] = tools.to_bytes(
+                os.path.realpath(self._working_dir))
         return env
 
     def get_commit_files(self, from_upto, to_upto):
