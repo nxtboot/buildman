@@ -2735,8 +2735,6 @@ class Kconfig(object):
                 i = match.end()
                 if i < len(s) and s[i] in "\\\"'$":
                     s = s[:match.start()] + s[i:]
-                else:
-                    i = match.end()
 
             elif match.group() == "$(":
                 # A macro call within the string
@@ -6199,7 +6197,7 @@ def unescape(s):
     """
     return _unescape_sub(r"\1", s)
 
-# unescape() helper — only unescape \"
+# unescape() helper - only unescape \"
 _unescape_sub = re.compile(r'\\(")').sub
 
 
