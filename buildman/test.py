@@ -1378,6 +1378,26 @@ class TestBuildSummary(TestBuildBase):
 class TestBuilderFuncs(TestBuildBase):
     """Tests for individual Builder methods"""
 
+    def test_progress_local_tag(self):
+        """The [local] tag only appears when building across machines"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 1, 2,
+                                self._col, self._result_handler,
+                                checkout=False)
+        build.count = 1
+
+        # A plain local build does not tag progress with [local]
+        terminal.get_print_test_lines()
+        build.process_result(None)
+        text = ''.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('(starting)', text)
+        self.assertNotIn('[local]', text)
+
+        # A distributed build tags local builds so they stand out from remote
+        build.distributed = True
+        build.process_result(None)
+        text = ''.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('[local]', text)
+
     def test_read_func_sizes(self):
         """Test read_func_sizes() function"""
         build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,

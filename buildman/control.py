@@ -727,6 +727,9 @@ def _start_remote_builds(builder, commits, board_selected, args):
 
     remote_thread = None
     if worker_pool and remote_boards:
+        # Building across machines: local builds are now tagged [local] in
+        # the progress line so they can be told apart from remote ones
+        builder.distributed = True
         remote_thread = threading.Thread(
             target=worker_pool.build_boards,
             args=(remote_boards, commits, builder,

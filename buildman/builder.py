@@ -413,6 +413,10 @@ class Builder:
         self.verbose = False
         self.progress = ''
 
+        # True when building across remote machines, so the progress line
+        # tags local builds with [local] to tell them apart from remote ones
+        self.distributed = False
+
         # Note: baseline state for result summaries is now in ResultHandler
 
         self._thread_class = thread_class
@@ -718,8 +722,10 @@ class Builder:
             line += f'{target} [{machine}]'
         elif self.progress:
             line += f'{target} [{self.progress}]'
-        else:
+        elif self.distributed:
             line += f'{target} [local]'
+        else:
+            line += f'{target}'
         if not self._opts.ide:
             terminal.print_clear()
             tprint(line, newline=False, limit_to_line=True)
