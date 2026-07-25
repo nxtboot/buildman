@@ -2169,13 +2169,23 @@ class TestBossLogTimer(unittest.TestCase):
             blog.record_sent('host1', 5)
 
             # Patch STATUS_INTERVAL to fire quickly
+            fname = os.path.join(tmpdir, '.buildman.log')
             with mock.patch.object(boss, 'STATUS_INTERVAL', 0.01):
                 blog.start_timer()
-                time.sleep(0.05)
+                # Poll for the status line rather than sleeping a fixed
+                # time: on a loaded machine the timer thread may not run
+                # within a short sleep, which makes the test flaky. The
+                # log is flushed on every status line, so reading it here
+                # is safe
+                deadline = time.monotonic() + 10
+                content = ''
+                while time.monotonic() < deadline:
+                    content = tools.read_file(fname, binary=False)
+                    if 'host1' in content:
+                        break
+                    time.sleep(0.01)
             blog.close()
 
-            content = tools.read_file(
-                os.path.join(tmpdir, '.buildman.log'), binary=False)
             # Timer should have logged at least one status line
             self.assertIn('host1', content)
 
