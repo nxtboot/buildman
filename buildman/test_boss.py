@@ -300,6 +300,21 @@ class TestRemoteWorkerPush(unittest.TestCase):
         self.assertIn('HEAD:refs/heads/work', cmd)
 
     @mock.patch('buildman.boss.command.run_pipe')
+    def test_push_worktree(self, mock_pipe):
+        """Test that the push names the git directory, not runs in it
+
+        In a git worktree '.git' is a file, so it cannot be the cwd
+        """
+        mock_pipe.return_value = mock.Mock(return_code=0)
+        w = boss.RemoteWorker('host1')
+        w.git_dir = '/tmp/bm-worker-123/.git'
+
+        w.push_source('/home/user/wt/.git', 'HEAD:refs/heads/work')
+        cmd = mock_pipe.call_args[0][0][0]
+        self.assertEqual(['git', '--git-dir', '/home/user/wt/.git'], cmd[:3])
+        self.assertNotIn('cwd', mock_pipe.call_args[1])
+
+    @mock.patch('buildman.boss.command.run_pipe')
     def test_push_failure(self, mock_pipe):
         """Test git push failure"""
         mock_pipe.side_effect = command.CommandExc(
