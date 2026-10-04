@@ -42,11 +42,11 @@ SSH_OPTS = [
 # The boss ships its own buildman source to each worker, so the worker runs
 # the same tool version as the boss rather than whatever buildman (if any)
 # happens to be committed in the tree under test. _TOOLS_DIR is the directory
-# holding the running buildman, and _TOOL_ITEMS lists the packages and modules
-# the worker imports at startup (main.py -> control -> ...), copied so they
-# land directly in the worker's tool directory
+# holding the running buildman, and _TOOL_ITEMS lists what to copy into the
+# worker's tool directory. The buildman package includes the libraries it
+# vendors (see buildman/__init__.py), so it is all the worker needs
 _TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-_TOOL_ITEMS = ['buildman', 'u_boot_pylib', 'patman', 'qconfig.py']
+_TOOL_ITEMS = ['buildman']
 
 # Per-build timeout in seconds. If a worker doesn't respond within this
 # time, the boss assumes the worker is dead or hung and stops using it.

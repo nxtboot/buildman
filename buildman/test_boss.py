@@ -338,8 +338,7 @@ class TestRemoteWorkerPush(unittest.TestCase):
         # The pipeline is 'tar -c ... | ssh host tar -x ...'
         tar_cmd, ssh_cmd = mock_pipe.call_args[0][0]
         self.assertEqual(tar_cmd[0], 'tar')
-        for item in ('buildman', 'u_boot_pylib', 'patman', 'qconfig.py'):
-            self.assertIn(item, tar_cmd)
+        self.assertIn('buildman', tar_cmd)
         self.assertIn('host1', ssh_cmd)
         self.assertIn('/tmp/bm-worker-123/.tool', ssh_cmd[-1])
 
