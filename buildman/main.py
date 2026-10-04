@@ -10,7 +10,8 @@ import importlib.resources
 import os
 import sys
 
-# Bring in the patman libraries
+# Allow running directly from a checkout ('python3 buildman/main.py'), so that
+# 'from buildman import ...' resolves
 # pylint: disable=C0413
 our_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(1, os.path.join(our_path, '..'))
@@ -80,13 +81,12 @@ def run_tests(skip_net_tests, debug, verbose, args):
 def run_test_coverage():
     """Run the tests and check that we get 100% coverage"""
     test_util.run_test_coverage(
-        'tools/buildman/buildman', None,
-        ['tools/patman/*.py', 'tools/u_boot_pylib/*', '*test_fdt.py',
-         'tools/buildman/kconfiglib.py', 'tools/buildman/*test*.py',
-         'tools/buildman/main.py', 'tools/qconfig.py',
-         'tools/buildman/builder.py', 'tools/buildman/builderthread.py',
-         'tools/buildman/cfgutil.py', 'tools/buildman/control.py',
-         'tools/buildman/resulthandler.py', 'tools/buildman/toolchain.py'],
+        os.path.join(our_path, 'main.py'), None,
+        ['*/_vendor/*', '*/buildman/kconfiglib.py', '*/buildman/*test*.py',
+         '*/buildman/main.py', '*/buildman/builder.py',
+         '*/buildman/builderthread.py', '*/buildman/cfgutil.py',
+         '*/buildman/control.py', '*/buildman/resulthandler.py',
+         '*/buildman/toolchain.py'],
         '/tmp/b', single_thread='-T1')
 
 
@@ -112,9 +112,9 @@ def run_buildman():
     if args.full_help:
         if hasattr(importlib.resources, 'files'):
             dirpath = importlib.resources.files('buildman')
-            tools.print_full_help(str(dirpath.joinpath('README.rst')))
+            tools.print_full_help(str(dirpath.joinpath('buildman.rst')))
         else:
-            with importlib.resources.path('buildman', 'README.rst') as readme:
+            with importlib.resources.path('buildman', 'buildman.rst') as readme:
                 tools.print_full_help(str(readme))
         return 0
 

@@ -199,8 +199,8 @@ class TestFunctional(unittest.TestCase):
         self._base_dir = tempfile.mkdtemp()
         self._output_dir = tempfile.mkdtemp()
         self._git_dir = os.path.join(self._base_dir, 'src')
-        self._buildman_pathname = sys.argv[0]
-        self._buildman_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
+        self._buildman_dir = os.path.dirname(os.path.realpath(__file__))
+        self._buildman_pathname = os.path.join(self._buildman_dir, 'main.py')
         command.TEST_RESULT = self._handle_command
         bsettings.setup(None)
         bsettings.add_file(SETTINGS_DATA)
@@ -237,7 +237,6 @@ class TestFunctional(unittest.TestCase):
         # Captured make arguments for testing
         self._captured_make_args = []
 
-        self._buildman_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
         self._test_dir = os.path.join(self._buildman_dir, 'test')
 
         # Set up some fake source files
@@ -257,7 +256,7 @@ class TestFunctional(unittest.TestCase):
         self._toolchains.add('gcc', test=False)
 
     def _run_buildman(self, *args):
-        all_args = [self._buildman_pathname] + list(args)
+        all_args = [sys.executable, self._buildman_pathname] + list(args)
         return command.run_one(*all_args, capture=True, capture_stderr=True)
 
     def _run_control(self, *args, brds=False, clean_dir=False,
@@ -294,7 +293,7 @@ class TestFunctional(unittest.TestCase):
         """Test that -H shows the full README.rst file"""
         command.TEST_RESULT = None
         result = self._run_buildman('-H')
-        help_file = os.path.join(self._buildman_dir, 'README.rst')
+        help_file = os.path.join(self._buildman_dir, 'buildman.rst')
         # Remove possible extraneous strings
         extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
         gothelp = result.stdout.replace(extra, '')

@@ -29,5 +29,10 @@ classifiers = [
 [project.scripts]
 buildman = "buildman.main:run_buildman"
 
+[tool.setuptools.packages.find]
+# buildman.test and its subdirs hold the test data, found as namespace packages
+include = ["buildman*"]
+
 [tool.setuptools.package-data]
 buildman = ["*.rst"]
+"buildman.test" = ["**/*"]
