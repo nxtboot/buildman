@@ -4,6 +4,7 @@
 
 """Tests for boards.py"""
 
+import contextlib
 import errno
 import multiprocessing
 import os
@@ -239,30 +240,50 @@ config ARCH_RV32I
             'Old Mother',
             ], lines)
 
+    @contextlib.contextmanager
+    def _in_output_dir(self):
+        """Run the enclosed code in the (empty) output directory
+
+        ensure_board_list() scans the configs/ directory and the MAINTAINERS
+        files under the current directory. Run it in a known, empty directory
+        rather than wherever the tests happen to be run from, which could be a
+        large tree.
+        """
+        old_dir = os.getcwd()
+        os.chdir(self._output_dir)
+        try:
+            yield
+        finally:
+            os.chdir(old_dir)
+
     def test_ensure_board_list_options(self):
         """Test ensure_board_list() with force and quiet flags"""
         outfile = os.path.join(self._output_dir, 'test-boards-opts.cfg')
         brds = boards.Boards()
 
-        # Test force=False, quiet=False (normal generation)
-        with terminal.capture():
-            brds.ensure_board_list(outfile, jobs=1, force=False, quiet=False)
-        self.assertTrue(os.path.exists(outfile))
+        with self._in_output_dir():
+            # Test force=False, quiet=False (normal generation)
+            with terminal.capture():
+                brds.ensure_board_list(outfile, jobs=1, force=False,
+                                       quiet=False)
+            self.assertTrue(os.path.exists(outfile))
 
-        # Test force=True (regenerate even if current)
-        with terminal.capture() as (stdout, _):
-            brds.ensure_board_list(outfile, jobs=1, force=True, quiet=False)
-        self.assertTrue(os.path.exists(outfile))
+            # Test force=True (regenerate even if current)
+            with terminal.capture() as (stdout, _):
+                brds.ensure_board_list(outfile, jobs=1, force=True,
+                                       quiet=False)
+            self.assertTrue(os.path.exists(outfile))
 
-        # Test quiet=True (minimal output)
-        with terminal.capture() as (stdout, _):
-            brds.ensure_board_list(outfile, jobs=1, force=False, quiet=True)
-        self.assertNotIn('Checking', stdout.getvalue())
+            # Test quiet=True (minimal output)
+            with terminal.capture() as (stdout, _):
+                brds.ensure_board_list(outfile, jobs=1, force=False,
+                                       quiet=True)
+            self.assertNotIn('Checking', stdout.getvalue())
 
-        # Test quiet=True when up to date (no output)
-        with terminal.capture() as (stdout, _):
-            result = brds.ensure_board_list(outfile, jobs=1, force=False,
-                                            quiet=True)
+            # Test quiet=True when up to date (no output)
+            with terminal.capture() as (stdout, _):
+                result = brds.ensure_board_list(outfile, jobs=1, force=False,
+                                                quiet=True)
         self.assertTrue(result)
         self.assertEqual('', stdout.getvalue())
 
@@ -578,14 +599,16 @@ endif
         outfile = os.path.join(self._output_dir, 'test-boards-uptodate.cfg')
         brds = boards.Boards()
 
-        # First generate the file
-        with terminal.capture():
-            brds.ensure_board_list(outfile, jobs=1, force=False, quiet=False)
+        with self._in_output_dir():
+            # First generate the file
+            with terminal.capture():
+                brds.ensure_board_list(outfile, jobs=1, force=False,
+                                       quiet=False)
 
-        # Run again - should say "up to date"
-        with terminal.capture() as (stdout, _):
-            result = brds.ensure_board_list(outfile, jobs=1, force=False,
-                                            quiet=False)
+            # Run again - should say "up to date"
+            with terminal.capture() as (stdout, _):
+                result = brds.ensure_board_list(outfile, jobs=1, force=False,
+                                                quiet=False)
         self.assertTrue(result)
         self.assertIn('up to date', stdout.getvalue())
 

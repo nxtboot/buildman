@@ -1432,8 +1432,17 @@ endif
         outfile = os.path.join(self._output_dir, 'test-boards.cfg')
         if os.path.exists(outfile):
             os.remove(outfile)
-        with terminal.capture() as (_stdout, _stderr):
-            self._run_control('-R', outfile, brds=None, get_builder=False)
+
+        # This scans the configs/ directory and the MAINTAINERS files under the
+        # current directory, so use a known, empty one rather than wherever the
+        # tests happen to be run from
+        old_dir = os.getcwd()
+        os.chdir(self._output_dir)
+        try:
+            with terminal.capture() as (_stdout, _stderr):
+                self._run_control('-R', outfile, brds=None, get_builder=False)
+        finally:
+            os.chdir(old_dir)
         self.assertTrue(os.path.exists(outfile))
 
     def test_print_prefix(self):
