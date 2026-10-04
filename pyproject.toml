@@ -8,16 +8,22 @@ version = "0.0.7"
 authors = [
   { name="Simon Glass", email="sjg@chromium.org" },
 ]
-dependencies = [
-    "filelock >= 3.0.12",
-]
-description = "Buildman build tool for U-Boot"
+description = "Build U-Boot for many boards and commits, and summarise the results"
 readme = "README.rst"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
+license = "GPL-2.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["u-boot", "build", "firmware", "toolchain", "kconfig"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
-    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Embedded Systems",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "filelock >= 3.0.12",
 ]
 
 [project.optional-dependencies]
@@ -25,8 +31,10 @@ classifiers = [
 test = ["concurrencytest", "coverage"]
 
 [project.urls]
-"Homepage" = "https://docs.u-boot-project.org/en/latest/build/buildman.html"
-"Bug Tracker" = "https://git.u-boot-project.org/groups/u-boot/-/issues"
+Homepage = "https://github.com/nxtboot/buildman"
+Documentation = "https://buildman.readthedocs.io/"
+Repository = "https://github.com/nxtboot/buildman"
+"Bug Tracker" = "https://github.com/nxtboot/buildman/issues"
 
 [project.scripts]
 buildman = "buildman.main:run_buildman"
