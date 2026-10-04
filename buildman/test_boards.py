@@ -216,6 +216,29 @@ config ARCH_RV32I
         finally:
             tools.write_file(main, orig_data, binary=False)
 
+    def test_format_and_output(self):
+        """Test format_and_output() aligns the columns and sorts the lines"""
+        outfile = os.path.join(self._output_dir, 'test-boards-format.cfg')
+        fields = ('status', 'arch', 'cpu', 'soc', 'vendor', 'board', 'target',
+                  'config', 'maintainers')
+        params_list = [
+            dict(zip(fields, ('Active', 'powerpc', 'ppc', 'mpc85xx', 'Tester',
+                              'board2', 'Board2', 'config2', 'Old Mother'))),
+            dict(zip(fields, ('Active', 'arm', 'armv7', '-', 'Tester',
+                              'board0', 'board0', 'config0', 'Mary'))),
+        ]
+        boards.Boards.format_and_output(params_list, outfile)
+
+        lines = [line for line in
+                 tools.read_file(outfile, binary=False).splitlines()
+                 if line and not line.startswith('#')]
+        self.assertEqual([
+            'Active  arm      armv7  -        Tester  board0  board0  config0  '
+            'Mary',
+            'Active  powerpc  ppc    mpc85xx  Tester  board2  Board2  config2  '
+            'Old Mother',
+            ], lines)
+
     def test_ensure_board_list_options(self):
         """Test ensure_board_list() with force and quiet flags"""
         outfile = os.path.join(self._output_dir, 'test-boards-opts.cfg')
