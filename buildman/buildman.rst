@@ -11,8 +11,8 @@ example Raspberry Pi 2):
 
 .. code-block:: bash
 
+   pip install buildman
    cd /path/to/u-boot
-   PATH=$PATH:`pwd`/tools/buildman
    buildman --fetch-arch arm
    buildman -k rpi_2
    ls ../current/rpi_2
@@ -271,7 +271,7 @@ Setting up
 
    Run this check to make sure that you have a toolchain for every architecture::
 
-      $ ./tools/buildman/buildman --list-tool-chains
+      $ buildman --list-tool-chains
       Scanning for tool chains
          - scanning prefix '/opt/gcc-4.6.3-nolibc/x86_64-linux/bin/x86_64-linux-'
       Tool chain test:  OK, arch='x86', priority 1
@@ -454,7 +454,7 @@ Setting up
    To make this easier, Buildman can automatically download and install
    toolchains from kernel.org. First list the available architectures::
 
-      $ ./tools/buildman/buildman --fetch-arch list
+      $ buildman --fetch-arch list
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.6.3/
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.6.2/
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.5.1/
@@ -465,7 +465,7 @@ Setting up
 
    Then pick one and download it::
 
-      $ ./tools/buildman/buildman --fetch-arch or32
+      $ buildman --fetch-arch or32
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.6.3/
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.6.2/
       Checking: https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/4.5.1/
@@ -481,7 +481,7 @@ Setting up
 
    .. code-block:: bash
 
-      ./tools/buildman/buildman --fetch-arch all
+      buildman --fetch-arch all
       sudo mkdir -p /toolchains
       sudo mv ~/.buildman-toolchains/*/* /toolchains/
 
@@ -516,7 +516,7 @@ branch with a valid upstream):
 
 .. code-block:: bash
 
-   ./tools/buildman/buildman -b <branch> -n
+   buildman -b <branch> -n
 
 If it can't detect the upstream branch, try checking out the branch, and
 doing something like ``git branch --set-upstream-to upstream/master``
@@ -570,7 +570,7 @@ To run the build for real, take off the -n:
 
 .. code-block:: bash
 
-   ./tools/buildman/buildman -b <branch>
+   buildman -b <branch>
 
 Buildman will set up some working directories, and get started. After a
 minute or so it will settle down to a steady pace, with a display like this::
@@ -589,7 +589,7 @@ To find out how the build went, ask for a summary with -s. You can do this
 either before the build completes (presumably in another terminal) or
 afterwards. Let's work through an example of how this is used::
 
-   $ ./tools/buildman/buildman -b lcd9b -s
+   $ buildman -b lcd9b -s
    ...
    01: Merge branch 'master' of git://git.denx.de/u-boot-arm
       powerpc:   + galaxy5200_LOWBOOT
@@ -626,7 +626,7 @@ green, without the +.
 
 To see the actual error::
 
-   $ ./tools/buildman/buildman -b <branch> -se
+   $ buildman -b <branch> -se
    ...
    12: lcd: Add support for flushing LCD fb from dcache after update
           arm:   + lubbock
@@ -662,7 +662,7 @@ But if you did want to see just the errors for lubbock, use:
 
 .. code-block:: bash
 
-   ./tools/buildman/buildman -b <branch> -se lubbock
+   buildman -b <branch> -se lubbock
 
 If you see error lines marked with '-', that means that the errors were fixed
 by that commit. Sometimes commits can be in the wrong order, so that a
@@ -728,7 +728,7 @@ size more or less the same with each new release.
 
 To check the impact of your commits on image size, use -S. For example::
 
-   $ ./tools/buildman/buildman -b us-x86 -sS
+   $ buildman -b us-x86 -sS
    Summary of 10 commits for 1066 boards (4 threads, 1 job per thread)
    01: MAKEALL: add support for per architecture toolchains
    02: x86: Add function to get top of usable ram
@@ -772,7 +772,7 @@ It is even possible to go a little further with the -B option (``--bloat``). Thi
 shows where U-Boot has bloated, breaking the size change down to the function
 level. Example output is below::
 
-   $ ./tools/buildman/buildman -b us-mem4 -sSdB
+   $ buildman -b us-mem4 -sSdB
    ...
    19: Roll crc32 into hash infrastructure
           arm: (for 10/10 boards)  all -143.4  bss +1.2  data -4.8  rodata -48.2 text -91.6
@@ -1077,7 +1077,7 @@ Toolchain priority
     Note that you can pass ad-hoc options to the build using environment
     variables, for example::
 
-       SOME_OPTION=1234 ./tools/buildman/buildman my_board
+       SOME_OPTION=1234 buildman my_board
 
 
 Quick Sanity Check
@@ -1140,7 +1140,7 @@ Combining all of these options together yields the command-line shown below.
 This will provide the quickest possible feedback regarding the current content
 of the source tree, thus allowing rapid tested evolution of the code::
 
-    ./tools/buildman/buildman -Pr tegra
+    buildman -Pr tegra
 
 Note also the ``--dtc-skip`` option which uses the system device-tree compiler to
 avoid needing to build it for each board. This can save 10-20% of build time.
@@ -1408,7 +1408,7 @@ not cause the build to fail:
 Support for binary blobs
 ------------------------
 
-U-Boot is moving to using Binman (see :doc:`../develop/package/binman`) for
+U-Boot is moving to using Binman (see https://binman.readthedocs.io/) for
 dealing with the complexities of packaging U-Boot along with binary files from
 other projects. These are called 'external blobs' by Binman.
 
