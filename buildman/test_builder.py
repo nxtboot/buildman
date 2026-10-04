@@ -957,6 +957,18 @@ class TestLines(unittest.TestCase):
         self.assertEqual({'cmd/cat.c': {10, 11, 12, 20}, 'lib/foo.c': {5}},
                          lines)
 
+    def test_read_lines_file_phase(self):
+        """An xPL phase prefix is kept as part of the manifest key"""
+        with tempfile.NamedTemporaryFile('w', delete=False) as fd:
+            fd.write('lib/foo.c: 5\n')
+            fd.write('spl:lib/foo.c: 7-8\n')
+            fname = fd.name
+        try:
+            lines = builder.Builder._read_lines_file(fname)
+        finally:
+            os.remove(fname)
+        self.assertEqual({'lib/foo.c': {5}, 'spl:lib/foo.c': {7, 8}}, lines)
+
 
 class TestLinesCode(unittest.TestCase):
     """Tests for --lines-code content-aware line diffing"""
@@ -980,6 +992,22 @@ class TestLinesCode(unittest.TestCase):
         commit = mock.Mock(hash='cur') if cur_src is not None else None
         return self.handler._diff_compiled(base_commit, commit, 'f.c',
                                            old_lines, new_lines)
+
+    def test_diff_phase_prefix(self):
+        """The source of an xPL entry is read without its phase prefix"""
+        paths = []
+
+        def read_source(commit_hash, rel):
+            paths.append(rel)
+            return ['int a;', 'int b;']
+
+        self.handler._read_source = read_source
+        added, removed = self.handler._diff_compiled(
+            mock.Mock(hash='base'), mock.Mock(hash='cur'), 'spl:lib/f.c',
+            {1, 2}, {1})
+        self.assertEqual(['lib/f.c', 'lib/f.c'], paths)
+        self.assertEqual([], added)
+        self.assertEqual([(2, 'int b;')], removed)
 
     def test_diff_renumbered(self):
         """A compiled line that only moved is not reported as changed"""
@@ -1164,6 +1192,41 @@ class TestFlakeDetection(unittest.TestCase):
         """One commit is not enough to tell a flake from a regression"""
         hist = {0: {'a': (OUTCOME_ERROR, False)}}
         self.assertEqual(self._run(hist, ['a']), '')
+
+
+class TestScanLines(unittest.TestCase):
+    """Tests for BuilderThread._scan_lines()"""
+
+    def test_phases(self):
+        """Each xPL phase gets its own entries, prefixed with the phase"""
+        thread = builderthread.BuilderThread.__new__(
+            builderthread.BuilderThread)
+        thread.builder = mock.Mock(num_jobs=1)
+        result = mock.Mock(out_dir='/build', src_dir='/src')
+        objs = ['/build/common/board_f.o', '/build/spl/common/spl/spl.o',
+                '/build/tpl/lib/string.o', '/build/spl/lib/string.o']
+        lines = {
+            '': {'/src/common/board_f.c': {1, 2, 3}},
+            'spl': {'/src/common/spl/spl.c': {4},
+                    '/src/lib/string.c': {5, 6}},
+            'tpl': {'/src/lib/string.c': {5}, '/elsewhere/x.c': {1}},
+        }
+
+        def extract(build_dir, src_dir, jobs, use_threads, obj_files):
+            phase = obj_files[0].split('/')[2]
+            if phase not in ('spl', 'tpl'):
+                phase = ''
+            return lines[phase], []
+
+        with mock.patch.object(builderthread.dwarf_lines,
+                               'find_object_files', return_value=objs), \
+             mock.patch.object(builderthread.dwarf_lines, 'extract_lines',
+                               side_effect=extract):
+            manifest = thread._scan_lines(result)
+        self.assertEqual('common/board_f.c: 1-3\n'
+                         'spl:common/spl/spl.c: 4\n'
+                         'spl:lib/string.c: 5-6\n'
+                         'tpl:lib/string.c: 5\n', manifest)
 
 if __name__ == '__main__':
     unittest.main()

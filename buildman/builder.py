@@ -914,7 +914,7 @@ class Builder:
         lines = {}
         with open(fname, 'r', encoding='utf-8') as fd:
             for line in fd:
-                rel_path, _, ranges = line.partition(':')
+                rel_path, _, ranges = line.rpartition(':')
                 lines[rel_path.strip()] = dwarf_lines.parse_ranges(ranges)
         return lines
 

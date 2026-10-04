@@ -343,6 +343,8 @@ class ResultHandler:
                 (with empty text) if either source cannot be read, e.g. a file
                 added or deleted between the commits.
         """
+        # Drop any xPL phase prefix (e.g. 'spl:') to get the source path
+        rel = rel.rpartition(':')[2]
         base_src = (self._read_source(base_commit.hash, rel)
                     if base_commit else None)
         cur_src = self._read_source(commit.hash, rel) if commit else None

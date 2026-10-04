@@ -1038,15 +1038,28 @@ class BuilderThread(threading.Thread):
         # which cannot start worker processes, but threads are fine and the
         # work is dominated by the readelf subprocess
         jobs = self.builder.num_jobs or 4
-        line_map, _ = dwarf_lines.extract_lines(result.out_dir, src_dir,
-                                                jobs=jobs, use_threads=True)
+
+        # Keep each xPL phase separate from U-Boot proper, since a line can
+        # drop out of SPL while still being compiled into U-Boot proper. The
+        # xPL objects live under a directory named after the phase, and their
+        # entries get the phase as a prefix, e.g. 'spl:common/spl/spl.c'
+        phase_objs = {}
+        for obj in dwarf_lines.find_object_files(result.out_dir):
+            top = os.path.relpath(obj, result.out_dir).split(os.sep)[0]
+            phase = top if top in dwarf_lines.XPL_DIRS else ''
+            phase_objs.setdefault(phase, []).append(obj)
         out = []
-        for abs_path, used in line_map.items():
-            rel_path = os.path.relpath(abs_path, src_dir)
-            if rel_path.startswith('..') or os.path.isabs(rel_path):
-                continue
-            ranges = dwarf_lines.lines_to_ranges(used)
-            out.append((rel_path, dwarf_lines.format_ranges(ranges)))
+        for phase, objs in sorted(phase_objs.items()):
+            line_map, _ = dwarf_lines.extract_lines(
+                result.out_dir, src_dir, jobs=jobs, use_threads=True,
+                obj_files=objs)
+            for abs_path, used in line_map.items():
+                rel_path = os.path.relpath(abs_path, src_dir)
+                if rel_path.startswith('..') or os.path.isabs(rel_path):
+                    continue
+                ranges = dwarf_lines.lines_to_ranges(used)
+                key = f'{phase}:{rel_path}' if phase else rel_path
+                out.append((key, dwarf_lines.format_ranges(ranges)))
 
         # Record how long the scan took, so buildman can report the extra time
         # spent on --lines. Several builder threads update this concurrently,
