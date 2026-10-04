@@ -20,6 +20,7 @@ import sys
 import threading
 
 from buildman import builderthread
+from buildman import dtcache
 from buildman.cfgutil import Config, process_config
 from buildman.outcome import (DisplayOptions, Outcome,
                               OUTCOME_OK, OUTCOME_WARNING, OUTCOME_ERROR,
@@ -228,7 +229,8 @@ class Builder:
                  force_build_failures=False, kconfig_check=True,
                  force_reconfig=False,
                  in_tree=False, force_config_on_failure=False, make_func=None,
-                 dtc_skip=False, build_target=None, read_lines=False,
+                 dtc_skip=False, shared_dtc=False, skip_unaffected=False,
+                 use_ccache=False, build_target=None, read_lines=False,
                  thread_class=builderthread.BuilderThread,
                  handle_signals=True, lazy_thread_setup=False):
         """Create a new Builder object
@@ -283,6 +285,14 @@ class Builder:
                 retrying a failed build
             make_func (function): Function to call to run 'make'
             dtc_skip (bool): True to skip building dtc and use the system one
+            shared_dtc (bool): True to build dtc/pylibfdt once and share it
+                across all board builds, instead of building it in each
+                output directory
+            skip_unaffected (bool): True to skip building commits which
+                cannot affect a board, based on the dependencies of its
+                previous build
+            use_ccache (bool): True to use ccache for the host and cross
+                compilers
             build_target (str): Build target to use (None to use the default)
             thread_class (type): BuilderThread subclass to use (default
                 builderthread.BuilderThread). This allows the caller to
@@ -349,6 +359,24 @@ class Builder:
                 raise ValueError('Cannot find dtc')
         else:
             self.dtc = None
+        if shared_dtc:
+            self.dtc_cache = dtcache.DtcCache(
+                os.path.join(self._working_dir, '.dtc'), num_jobs=num_jobs)
+        else:
+            self.dtc_cache = None
+        if use_ccache:
+            self.ccache = shutil.which('ccache')
+            if not self.ccache:
+                raise ValueError('Cannot find ccache')
+        else:
+            self.ccache = None
+        self.skip_unaffected = skip_unaffected
+        self.skipped = 0
+        # Cache of files changed between two commits, keyed by
+        # (from_upto, to_upto). Shared by all builder threads, so guarded by
+        # a lock
+        self._commit_files = {}
+        self._commit_files_lock = threading.Lock()
         self.build_target = build_target
 
         if not self.squash_config_y:
@@ -384,6 +412,10 @@ class Builder:
         self.timestamps = collections.deque()
         self.verbose = False
         self.progress = ''
+
+        # True when building across remote machines, so the progress line
+        # tags local builds with [local] to tell them apart from remote ones
+        self.distributed = False
 
         # Note: baseline state for result summaries is now in ResultHandler
 
@@ -452,7 +484,48 @@ class Builder:
         env = toolchain.make_environment(self.full_path)
         if self.dtc:
             env[b'DTC'] = tools.to_bytes(self.dtc)
+        if self.ccache:
+            # Wrap the cross compiler (and the other cross tools, which
+            # ccache simply passes through). Skip this if the user has
+            # already set up a ccache wrapper in the settings file
+            cross = env.get(b'CROSS_COMPILE', b'')
+            if b'ccache' not in cross:
+                env[b'CROSS_COMPILE'] = tools.to_bytes(self.ccache) + \
+                    b' ' + cross
+            # Make the cache shared between the per-thread work directories,
+            # which build the same source at different paths
+            env[b'CCACHE_BASEDIR'] = tools.to_bytes(
+                os.path.realpath(self._working_dir))
         return env
+
+    def get_commit_files(self, from_upto, to_upto):
+        """Get the list of files changed between two commits being built
+
+        The result is cached, so only the first thread to ask about a
+        particular range runs git; the others reuse the answer.
+
+        Args:
+            from_upto (int): Commit number (0...n-1) to compare from
+            to_upto (int): Commit number (0...n-1) to compare to
+
+        Returns:
+            list of str or None: Source-tree-relative paths of the files
+                changed between the two commits, or None if this could not
+                be determined (in which case no build should be skipped)
+        """
+        key = (from_upto, to_upto)
+        with self._commit_files_lock:
+            if key not in self._commit_files:
+                result = command.run_one(
+                    'git', f'--git-dir={self.git_dir}', 'diff-tree', '-r',
+                    '--name-only', self.commits[from_upto].hash,
+                    self.commits[to_upto].hash, capture=True,
+                    capture_stderr=True, raise_on_error=False)
+                if result.return_code:
+                    self._commit_files[key] = None
+                else:
+                    self._commit_files[key] = result.stdout.splitlines()
+            return self._commit_files[key]
 
     def set_display_options(self, display_options,
                             filter_dtb_warnings=False,
@@ -607,6 +680,8 @@ class Builder:
                 self._warned += 1
             if result.already_done:
                 self._already_done += 1
+            if getattr(result, 'skipped', False):
+                self.skipped += 1
             if result.kconfig_reconfig:
                 self.kconfig_reconfig += 1
             if self._opts.ide:
@@ -647,8 +722,10 @@ class Builder:
             line += f'{target} [{machine}]'
         elif self.progress:
             line += f'{target} [{self.progress}]'
-        else:
+        elif self.distributed:
             line += f'{target} [local]'
+        else:
+            line += f'{target}'
         if not self._opts.ide:
             terminal.print_clear()
             tprint(line, newline=False, limit_to_line=True)
@@ -837,7 +914,7 @@ class Builder:
         lines = {}
         with open(fname, 'r', encoding='utf-8') as fd:
             for line in fd:
-                rel_path, _, ranges = line.partition(':')
+                rel_path, _, ranges = line.rpartition(':')
                 lines[rel_path.strip()] = dwarf_lines.parse_ranges(ranges)
         return lines
 
@@ -1391,4 +1468,4 @@ class Builder:
         self._result_handler.print_build_summary(
             self.count, self._already_done, self.kconfig_reconfig,
             self.start_time, self.thread_exceptions,
-            self._lines_time, self._lines_count)
+            self._lines_time, self._lines_count, self.skipped)

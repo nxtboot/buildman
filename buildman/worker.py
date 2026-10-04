@@ -743,6 +743,11 @@ def _create_builder(state, num_threads, num_jobs):
         kconfig_check=settings.get('kconfig_check', True),
         force_reconfig=settings.get('force_reconfig', False),
         read_lines=settings.get('lines', False),
+        shared_dtc=settings.get('shared_dtc', False),
+        skip_unaffected=settings.get('skip_unaffected', False),
+        # Degrade gracefully if this machine does not have ccache
+        use_ccache=settings.get('ccache', False) and
+            bool(shutil.which('ccache')),
     )
     result_handler.set_builder(bldr)
     return bldr

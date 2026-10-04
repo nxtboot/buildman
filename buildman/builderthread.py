@@ -18,6 +18,7 @@ import threading
 import time
 
 from buildman import cfgutil
+from buildman import depscan
 from u_boot_pylib import command
 from u_boot_pylib import dwarf_lines
 from u_boot_pylib import gitutil
@@ -306,6 +307,16 @@ class BuilderThread(threading.Thread):
         self.test_exception = test_exception
         self.toolchain = None
 
+        # State used by --skip-unaffected, all relating to the current job:
+        # _skip_built_upto is the commit number whose build output is in the
+        # output directory (i.e. the last commit actually built), or None if
+        # unknown; _skip_deps is the dependency set for that build, or None
+        # if not yet scanned; _skip_ok indicates that the last result was a
+        # clean pass, so its result files can be copied forward
+        self._skip_built_upto = None
+        self._skip_deps = None
+        self._skip_ok = False
+
     def make(self, commit, brd, stage, cwd, *args, **kwargs):
         """Run 'make' on a particular commit and board.
 
@@ -391,6 +402,10 @@ class BuilderThread(threading.Thread):
             args.append('NO_LTO=1')
         if self.builder.reproducible_builds:
             args.append('SOURCE_DATE_EPOCH=0')
+        if self.builder.ccache:
+            # The Makefile sets HOSTCC unconditionally, so the environment
+            # cannot override it; pass it as a make argument instead
+            args.append(f'HOSTCC={self.builder.ccache} gcc')
         args.extend(self.builder.toolchains.get_make_arguments(brd))
         args.extend(self.toolchain.make_args())
         return args, cwd, src_dir
@@ -559,6 +574,8 @@ class BuilderThread(threading.Thread):
 
         args, cwd, src_dir = self._build_args(req.brd, out_dir, out_rel_dir,
                                               req.work_dir, commit_upto)
+        if self.builder.dtc_cache:
+            self._apply_shared_dtc(env, src_dir)
         if req.brd.extended:
             config_args = [f'{req.brd.orig_target}_defconfig']
             for frag in req.brd.extended.fragments:
@@ -572,6 +589,26 @@ class BuilderThread(threading.Thread):
         _remove_old_outputs(out_dir)
 
         return BuildSetup(env, args, config_args, cwd, src_dir)
+
+    def _apply_shared_dtc(self, env, src_dir):
+        """Point the build at the shared dtc/pylibfdt, if available
+
+        Obtains the shared dtc build for this source tree (building it if
+        needed) and adjusts the environment so that U-Boot uses it, instead
+        of building its own copy. If the shared build failed, the
+        environment is left alone and the build proceeds as normal.
+
+        Args:
+            env (dict of bytes): Environment to adjust
+            src_dir (str): Path to the U-Boot source tree being built
+        """
+        paths = self.builder.dtc_cache.obtain(src_dir, self.builder.gnu_make)
+        if paths:
+            dtc, pylibfdt = paths
+            env[b'DTC'] = tools.to_bytes(dtc)
+            pypath = tools.to_bytes(pylibfdt)
+            old = env.get(b'PYTHONPATH')
+            env[b'PYTHONPATH'] = pypath + b':' + old if old else pypath
 
     def _reconfig_if_needed(self, req, setup, commit, config_out, cmd_list,
                             out_dir, do_config, mrproper, result):
@@ -731,6 +768,79 @@ class BuilderThread(threading.Thread):
         result.kconfig_reconfig = kconfig_reconfig
         return result, do_config, kconfig_reconfig
 
+    def _try_skip(self, req, commit_upto, out_dir, result):
+        """Try to skip a build which the commit cannot affect
+
+        Checks whether all the files changed since the last-built commit
+        are ones which cannot affect this board, based on the dependency
+        files from its previous build. If so, the previous result files
+        are copied forward and a pass result is returned, so the build
+        (and its result processing) can be skipped entirely.
+
+        This must only be called when the previous commit for this board
+        produced a clean pass in this job (self._skip_ok) and no
+        reconfigure or force flag applies.
+
+        Args:
+            req (RunRequest): Run request (see RunRequest for details)
+            commit_upto (int): Commit number to build (0...n-1)
+            out_dir (str): Output directory for the build
+            result (CommandResult): Result from _read_done_file(), updated
+                on success
+
+        Returns:
+            CommandResult or None: Result marked as skipped, or None if the
+                build cannot be skipped
+        """
+        builder = self.builder
+
+        # The previous result files must be available to copy forward (they
+        # are not when running as a distributed worker, which writes no
+        # local results)
+        prev_dir = builder.get_build_dir(self._skip_built_upto,
+                                         req.brd.target)
+        done_file = builder.get_done_file(self._skip_built_upto,
+                                          req.brd.target)
+        if not os.path.isdir(prev_dir) or not os.path.exists(done_file):
+            return None
+
+        files = builder.get_commit_files(self._skip_built_upto, commit_upto)
+        if files is None:
+            return None
+        if self._skip_deps is None:
+            self._skip_deps = depscan.scan_deps(
+                out_dir or '', os.path.realpath(req.work_dir))
+        defconfigs = {f'{req.brd.target}_defconfig'}
+        if req.brd.extended:
+            defconfigs.add(f'{req.brd.orig_target}_defconfig')
+        if not depscan.can_skip(files, self._skip_deps, defconfigs):
+            return None
+
+        # Copy the result files from the last-built commit, since the
+        # output is identical
+        mkdir(builder.get_output_dir(commit_upto))
+        new_dir = builder.get_build_dir(commit_upto, req.brd.target)
+        shutil.copytree(prev_dir, new_dir, dirs_exist_ok=True)
+
+        result.return_code = 0
+        result.stdout = ''
+        result.already_done = False
+        result.skipped = True
+
+        # Carry any warnings forward, since the output is identical; if the
+        # previous build was clean, remove any stale error file left in
+        # this commit's directory from an earlier run
+        prev_err = builder.get_err_file(self._skip_built_upto,
+                                        req.brd.target)
+        if os.path.exists(prev_err) and os.stat(prev_err).st_size:
+            result.stderr = 'bad'
+        else:
+            result.stderr = ''
+            err_file = builder.get_err_file(commit_upto, req.brd.target)
+            if os.path.exists(err_file):
+                os.remove(err_file)
+        return result
+
     def run_commit(self, req, commit_upto, do_config, mrproper, config_only,
                    force_build, force_build_failures):
         """Build a particular commit.
@@ -763,9 +873,20 @@ class BuilderThread(threading.Thread):
                                                   force_build_failures)
 
         if will_build:
-            result, do_config, _ = self._do_build(
-                req, commit_upto, do_config, mrproper, config_only,
-                out_dir, out_rel_dir, result)
+            skip_result = None
+            if (self.builder.skip_unaffected and commit_upto is not None and
+                    self._skip_ok and self._skip_built_upto is not None and
+                    commit_upto > self._skip_built_upto and not do_config and
+                    not mrproper and not config_only and not force_build and
+                    not self.builder.force_reconfig):
+                skip_result = self._try_skip(req, commit_upto, out_dir,
+                                             result)
+            if skip_result is not None:
+                result = skip_result
+            else:
+                result, do_config, _ = self._do_build(
+                    req, commit_upto, do_config, mrproper, config_only,
+                    out_dir, out_rel_dir, result)
 
         result.remote = None
         result.toolchain = self.toolchain
@@ -917,15 +1038,28 @@ class BuilderThread(threading.Thread):
         # which cannot start worker processes, but threads are fine and the
         # work is dominated by the readelf subprocess
         jobs = self.builder.num_jobs or 4
-        line_map, _ = dwarf_lines.extract_lines(result.out_dir, src_dir,
-                                                jobs=jobs, use_threads=True)
+
+        # Keep each xPL phase separate from U-Boot proper, since a line can
+        # drop out of SPL while still being compiled into U-Boot proper. The
+        # xPL objects live under a directory named after the phase, and their
+        # entries get the phase as a prefix, e.g. 'spl:common/spl/spl.c'
+        phase_objs = {}
+        for obj in dwarf_lines.find_object_files(result.out_dir):
+            top = os.path.relpath(obj, result.out_dir).split(os.sep)[0]
+            phase = top if top in dwarf_lines.XPL_DIRS else ''
+            phase_objs.setdefault(phase, []).append(obj)
         out = []
-        for abs_path, used in line_map.items():
-            rel_path = os.path.relpath(abs_path, src_dir)
-            if rel_path.startswith('..') or os.path.isabs(rel_path):
-                continue
-            ranges = dwarf_lines.lines_to_ranges(used)
-            out.append((rel_path, dwarf_lines.format_ranges(ranges)))
+        for phase, objs in sorted(phase_objs.items()):
+            line_map, _ = dwarf_lines.extract_lines(
+                result.out_dir, src_dir, jobs=jobs, use_threads=True,
+                obj_files=objs)
+            for abs_path, used in line_map.items():
+                rel_path = os.path.relpath(abs_path, src_dir)
+                if rel_path.startswith('..') or os.path.isabs(rel_path):
+                    continue
+                ranges = dwarf_lines.lines_to_ranges(used)
+                key = f'{phase}:{rel_path}' if phase else rel_path
+                out.append((key, dwarf_lines.format_ranges(ranges)))
 
         # Record how long the scan took, so buildman can report the extra time
         # spent on --lines. Several builder threads update this concurrently,
@@ -960,7 +1094,10 @@ class BuilderThread(threading.Thread):
         # it.
         maybe_aborted = result.stderr and 'No child processes' in result.stderr
 
-        if result.return_code >= 0 and result.already_done:
+        if result.return_code >= 0 and (result.already_done or
+                                        getattr(result, 'skipped', False)):
+            # For a skipped build the result files were copied from the
+            # previous commit by _try_skip()
             return
 
         # Write the output and stderr
@@ -1042,6 +1179,9 @@ class BuilderThread(threading.Thread):
         self.toolchain = None
         req = RunRequest(brd, work_dir, job.work_in_output, job.adjust_cfg,
                          job.fragments)
+        self._skip_built_upto = None
+        self._skip_deps = None
+        self._skip_ok = False
         if job.commits:
             # Run 'make board_defconfig' on the first commit
             do_config = True
@@ -1099,6 +1239,19 @@ class BuilderThread(threading.Thread):
                     result.commit_upto = commit_upto
                     if result.return_code < 0:
                         raise ValueError('Interrupt')
+
+                # Track the state of the output directory for
+                # --skip-unaffected: a skipped build leaves it (and its
+                # dependency set) unchanged, a real build moves it to this
+                # commit and an already-done result leaves it unknown
+                if not getattr(result, 'skipped', False):
+                    self._skip_deps = None
+                    if result.already_done:
+                        self._skip_built_upto = None
+                        self._skip_ok = False
+                    else:
+                        self._skip_built_upto = commit_upto
+                        self._skip_ok = not result.return_code
 
                 # We have the build results, so output the result
                 self._write_result(result, job.keep_outputs, job.work_in_output)

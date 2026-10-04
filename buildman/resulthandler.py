@@ -343,6 +343,8 @@ class ResultHandler:
                 (with empty text) if either source cannot be read, e.g. a file
                 added or deleted between the commits.
         """
+        # Drop any xPL phase prefix (e.g. 'spl:') to get the source path
+        rel = rel.rpartition(':')[2]
         base_src = (self._read_source(base_commit.hash, rel)
                     if base_commit else None)
         cur_src = self._read_source(commit.hash, rel) if commit else None
@@ -540,7 +542,7 @@ class ResultHandler:
 
     def print_build_summary(self, count, already_done, kconfig_reconfig,
                             start_time, thread_exceptions, lines_time=0.0,
-                            lines_count=0):
+                            lines_count=0, skipped=0):
         """Print a summary of the build results
 
         Show the number of boards built, how many were already done, duration
@@ -555,16 +557,20 @@ class ResultHandler:
             lines_time (float): Total time (seconds) spent scanning DWARF info
                 for --lines, summed across builder threads
             lines_count (int): Number of builds scanned for --lines
+            skipped (int): Number of builds skipped since the commit could
+                not affect the board
         """
         tprint()
 
         msg = f'Completed: {count} total built'
-        if already_done or kconfig_reconfig:
+        if already_done or kconfig_reconfig or skipped:
             parts = []
             if already_done:
                 parts.append(f'{already_done} previously')
             if already_done != count:
                 parts.append(f'{count - already_done} newly')
+            if skipped:
+                parts.append(f'{skipped} skipped as unaffected')
             if kconfig_reconfig:
                 parts.append(f'{kconfig_reconfig} reconfig')
             msg += ' (' + ', '.join(parts) + ')'

@@ -384,10 +384,12 @@ class RemoteWorker:  # pylint: disable=R0902
             raise BossError(
                 f'No git_dir on {self.hostname} (call init_git first)')
         push_url = f'{self.hostname}:{self.git_dir}'
+        # Name the git directory rather than running in it, since in a git
+        # worktree '.git' is a file pointing to the real directory
         try:
-            command.run_pipe([['git', 'push', '--force', push_url, refspec]],
-                capture=True, capture_stderr=True,
-                raise_on_error=True, cwd=local_git_dir)
+            command.run_pipe([['git', '--git-dir', local_git_dir, 'push',
+                               '--force', push_url, refspec]],
+                capture=True, capture_stderr=True, raise_on_error=True)
         except command.CommandExc as exc:
             raise BossError(
                 f'git push to {self.hostname} failed: {exc}') from exc

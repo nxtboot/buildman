@@ -40,6 +40,8 @@ def add_upto_m(parser):
     parser.add_argument('-C', '--force-reconfig', dest='force_reconfig',
           action='store_true', default=False,
           help='Reconfigure for every commit (disable incremental build)')
+    parser.add_argument('--ccache', action='store_true', default=False,
+          help='Use ccache for the host and cross compilers')
     parser.add_argument('--config-only', action='store_true',
                         default=False,
                         help="Don't build, just configure each commit")
@@ -50,6 +52,8 @@ def add_upto_m(parser):
         help='Enabling debugging (provides a full traceback on error)')
     parser.add_argument('--dtc-skip', action='store_true', default=False,
           help='Skip building of dtc and use the system version')
+    parser.add_argument('--shared-dtc', action='store_true', default=False,
+          help='Build dtc/pylibfdt once and share it across all board builds')
     parser.add_argument('-e', '--show_errors', action='store_true',
           default=False, help='Show errors and warnings')
     parser.add_argument('-E', '--warnings-as-errors', action='store_true',
@@ -193,6 +197,10 @@ def add_after_m(parser):
     parser.add_argument('--lines-code', action='store_true', default=False,
           help='With -s, show the source code of the lines added/removed '
                'from the build by each commit (implies --lines)')
+    parser.add_argument('--skip-unaffected', action='store_true',
+          default=False,
+          help='Skip building commits which cannot affect a board, based on '
+               'the dependencies of its previous build')
     parser.add_argument('--step', type=int,
           default=1, help='Only build every n commits (0=just first and last)')
     if HAS_TESTS:

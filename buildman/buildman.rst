@@ -250,6 +250,14 @@ Setting up
    this section is not important. If more than one line is provided, only the
    last one is used.
 
+   Alternatively, the ``--ccache`` option enables ccache without any settings
+   changes. As well as wrapping the cross compiler, this wraps the host
+   compiler (so the tools built for each board benefit too) and sets
+   CCACHE_BASEDIR so that builds of the same source in different working
+   directories share cache entries. Repeated builds of the same board and
+   source hit the cache almost entirely; different boards benefit less, since
+   most objects depend on the board configuration.
+
 #. Make sure you have the required Python pre-requisites
 
    Buildman uses multiprocessing, Queue, shutil, StringIO, ConfigParser and
@@ -1137,6 +1145,54 @@ of the source tree, thus allowing rapid tested evolution of the code::
 Note also the ``--dtc-skip`` option which uses the system device-tree compiler to
 avoid needing to build it for each board. This can save 10-20% of build time.
 An alternative is to set DTC=/path/to/dtc when running Buildman.
+
+Sharing dtc between builds
+--------------------------
+
+Rather than using the system device-tree compiler, the ``--shared-dtc`` option
+tells Buildman to build dtc and pylibfdt itself, once, and share the result
+between all board builds. The shared build lives in a cache directory keyed by
+a hash of the scripts/dtc source, so a commit which changes dtc gets a fresh
+build while the common case shares a single one. The cache persists across
+runs, so repeated builds pay nothing.
+
+This has the same effect as ``--dtc-skip`` (each board avoids building dtc and
+pylibfdt, saving several seconds of CPU time per board) but uses the correct,
+in-tree version of dtc rather than whatever the system provides. If the shared
+build fails for any reason, a warning is printed and each board builds its own
+dtc as normal.
+
+Skipping unaffected boards
+--------------------------
+
+When building a branch, most commits do not affect most boards: a commit which
+touches one driver is only compiled by the boards which enable it. Even so,
+each board/commit combination normally costs several seconds, since make must
+re-check every rule, binman re-runs and buildman collects the results. Across
+a large board selection this 'no-op' work can be more than half the total
+build time.
+
+The ``--skip-unaffected`` option tells Buildman to skip building a commit for
+a board when it can prove that the commit cannot affect it. It does this using
+the dependency files which the build writes (.cmd files), which list every
+source file, header, devicetree file and linker script used. If all the files
+changed by a commit are either outside the build entirely (such as
+documentation) or are sources which the board's previous build did not use,
+the build is skipped and the previous results are carried forward, including
+any warnings.
+
+Buildman is conservative: anything it does not understand (Makefiles, Kconfig
+files, scripts, tools which run during the build, files with unrecognised
+extensions) causes a full rebuild, as does a defconfig change for the board
+being built. Skipped builds are reported in the final summary, e.g.::
+
+    Completed: 372 total built (372 newly, 341 skipped as unaffected)
+
+Note that a skipped build produces exactly the same summary output (sizes,
+warnings, etc.) as the incremental build it replaces would have. In fact the
+results can be more accurate: an incremental build which does not recompile a
+file with a warning loses that warning, whereas skipping carries it forward
+until the file is actually rebuilt.
 
 Checking configuration
 ----------------------

@@ -41,6 +41,8 @@ def run_tests(skip_net_tests, debug, verbose, args):
     from buildman import test_bsettings
     from buildman import test_builder
     from buildman import test_cfgutil
+    from buildman import test_depscan
+    from buildman import test_dtcache
     from buildman import test_machine
     from buildman import test_worker
     from buildman import test_boss
@@ -66,6 +68,8 @@ def run_tests(skip_net_tests, debug, verbose, args):
          test_builder.TestCheckOutputForLoop,
          test_builder.TestMake,
          test_builder.TestPrintBuildSummary,
+         test_depscan,
+         test_dtcache,
          test_machine,
          test_worker,
          test_boss,

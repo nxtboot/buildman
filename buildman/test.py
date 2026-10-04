@@ -1108,6 +1108,42 @@ class TestBuildMisc(TestBuildBase):
         finally:
             os.environ['PATH'] = old_path
 
+    def test_ccache(self):
+        """Test the --ccache option"""
+        old_path = os.getenv('PATH')
+        try:
+            os.environ['PATH'] = self.base_dir
+
+            # Check a missing tool
+            with self.assertRaises(ValueError) as exc:
+                builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                self._col, self._result_handler,
+                                use_ccache=True)
+            self.assertIn('Cannot find ccache', str(exc.exception))
+
+            # Create a fake tool to use
+            ccache = os.path.join(self.base_dir, 'ccache')
+            tools.write_file(ccache, b'xx')
+            os.chmod(ccache, 0o777)
+
+            build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                    self._col, self._result_handler,
+                                    use_ccache=True)
+            tch = self.toolchains.select('arm')
+            env = build.make_environment(tch)
+            self.assertTrue(env[b'CROSS_COMPILE'].startswith(
+                tools.to_bytes(ccache)))
+            self.assertIn(b'CCACHE_BASEDIR', env)
+
+            # Try the normal case, i.e. no ccache
+            build = builder.Builder(self.toolchains, self.base_dir, None, 0, 2,
+                                    self._col, self._result_handler)
+            env = build.make_environment(tch)
+            self.assertNotIn(b'ccache', env[b'CROSS_COMPILE'])
+            self.assertNotIn(b'CCACHE_BASEDIR', env)
+        finally:
+            os.environ['PATH'] = old_path
+
     def test_homedir(self):
         """Test using ~ in a toolchain or toolchain-prefix section"""
         # Add some test settings
@@ -1341,6 +1377,26 @@ class TestBuildSummary(TestBuildBase):
 
 class TestBuilderFuncs(TestBuildBase):
     """Tests for individual Builder methods"""
+
+    def test_progress_local_tag(self):
+        """The [local] tag only appears when building across machines"""
+        build = builder.Builder(self.toolchains, self.base_dir, None, 1, 2,
+                                self._col, self._result_handler,
+                                checkout=False)
+        build.count = 1
+
+        # A plain local build does not tag progress with [local]
+        terminal.get_print_test_lines()
+        build.process_result(None)
+        text = ''.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('(starting)', text)
+        self.assertNotIn('[local]', text)
+
+        # A distributed build tags local builds so they stand out from remote
+        build.distributed = True
+        build.process_result(None)
+        text = ''.join(line.text for line in terminal.get_print_test_lines())
+        self.assertIn('[local]', text)
 
     def test_read_func_sizes(self):
         """Test read_func_sizes() function"""
