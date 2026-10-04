@@ -1,0 +1,148 @@
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # U-Boot source for the tests which run its Kconfig tools (see UBOOT_SRC
+  # in buildman/func_test.py). It must be recent enough to have the
+  # BUILDMAN_TEST_A option in test/Kconfig
+  UBOOT_REPO: https://concept.u-boot.org/u-boot/u-boot.git
+  UBOOT_REF: 1c030e0e7b89f178bfb8353d5a236d4e11eebf69
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Kconfig, run via merge_config.sh and 'make savedefconfig', needs a
+      # host compiler along with bison and flex
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison build-essential flex
+
+      - name: Fetch the U-Boot source
+        run: |
+          git init -q u-boot
+          git -C u-boot fetch -q --depth 1 "$UBOOT_REPO" "$UBOOT_REF"
+          git -C u-boot checkout -q FETCH_HEAD
+          echo "UBOOT_SRC=$PWD/u-boot" >> "$GITHUB_ENV"
+
+      # The coverage check runs 'coverage' only from within a virtualenv,
+      # falling back to the distro's 'python3-coverage' otherwise
+      - name: Create a virtualenv
+        run: |
+          python -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .[test]
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name 'CI Tester'
+          git config --global user.email 'ci@example.com'
+
+      - name: Run the test suite
+        run: buildman -t
+
+      # Coverage needs the tests to run single-threaded, so only check it
+      # once
+      - name: Check test coverage
+        if: matrix.python-version == '3.12'
+        run: buildman --coverage
+
+  test-latest:
+    # Run against the newest dependency versions (no requirements.txt
+    # pins), which is what a fresh 'pip install buildman' gets. This catches
+    # breakage from upstream releases before users hit it, rather than only
+    # testing the pinned versions above.
+    name: Test (latest deps, Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison build-essential flex
+
+      - name: Fetch the U-Boot source
+        run: |
+          git init -q u-boot
+          git -C u-boot fetch -q --depth 1 "$UBOOT_REPO" "$UBOOT_REF"
+          git -C u-boot checkout -q FETCH_HEAD
+          echo "UBOOT_SRC=$PWD/u-boot" >> "$GITHUB_ENV"
+
+      - name: Install with the latest dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name 'CI Tester'
+          git config --global user.email 'ci@example.com'
+
+      - name: Run the test suite
+        run: buildman -t
+
+  package:
+    name: Build and check the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Check the distribution with twine
+        run: twine check --strict dist/*
+
+      - name: Install the wheel into a clean environment and smoke-test it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --upgrade pip
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/buildman --help > /dev/null
+          echo 'entry point works'
+
+      - name: Upload the built distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/*
