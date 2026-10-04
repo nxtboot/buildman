@@ -1,1 +1,9 @@
 *.pyc
+__pycache__/
+.venv/
+.coverage
+htmlcov/
+*.egg-info/
+/dist/
+/build/
+/doc/_build/
