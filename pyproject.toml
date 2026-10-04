@@ -10,7 +10,6 @@ authors = [
 ]
 dependencies = [
     "filelock >= 3.0.12",
-    "u_boot_pylib >= 0.0.6",
     "patch-manager >= 0.0.6"
 ]
 description = "Buildman build tool for U-Boot"
@@ -22,6 +21,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+# Running the test suite (parallel test execution and coverage)
+test = ["concurrencytest", "coverage"]
+
 [project.urls]
 "Homepage" = "https://docs.u-boot-project.org/en/latest/build/buildman.html"
 "Bug Tracker" = "https://git.u-boot-project.org/groups/u-boot/-/issues"
@@ -30,7 +33,8 @@ classifiers = [
 buildman = "buildman.main:run_buildman"
 
 [tool.setuptools.packages.find]
-# buildman.test and its subdirs hold the test data, found as namespace packages
+# buildman.test and its subdirs hold the test data, found as namespace packages.
+# buildman._vendor holds the vendored libraries (see buildman/__init__.py)
 include = ["buildman*"]
 
 [tool.setuptools.package-data]
