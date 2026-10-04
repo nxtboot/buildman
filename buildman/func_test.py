@@ -34,6 +34,23 @@ from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
+def find_uboot_src():
+    """Find a U-Boot source tree for tests which run its Kconfig
+
+    A few tests run U-Boot's merge_config.sh and 'make savedefconfig' to check
+    how buildman handles real Kconfig behaviour. Point the UBOOT_SRC
+    environment variable at a U-Boot source tree to run these tests.
+
+    Returns:
+        str: Path to the U-Boot source tree, or None if not available
+    """
+    src = os.environ.get('UBOOT_SRC')
+    if src and os.path.exists(os.path.join(src, 'scripts', 'kconfig',
+                                           'merge_config.sh')):
+        return src
+    return None
+
+
 SETTINGS_DATA = '''
 # Buildman settings file
 [global]
@@ -250,6 +267,11 @@ class TestFunctional(unittest.TestCase):
         shutil.rmtree(self._base_dir)
         shutil.rmtree(self._output_dir)
 
+    def require_uboot_src(self):
+        """Skip the test unless a U-Boot source tree is available"""
+        if not find_uboot_src():
+            self.skipTest('Set UBOOT_SRC to a U-Boot tree to run this test')
+
     def setup_toolchains(self):
         """Set up toolchains for testing"""
         self._toolchains = toolchain.Toolchains()
@@ -460,7 +482,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
             CommandResult: Result of running the script
         """
         # Run from the real U-Boot source tree (not the test's fake git dir)
-        src_root = os.path.dirname(os.path.dirname(self._buildman_dir))
+        src_root = find_uboot_src()
         merge_script = os.path.join(src_root, 'scripts', 'kconfig',
                                     'merge_config.sh')
 
@@ -495,7 +517,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
             CommandResult: Result of running the command
         """
         # Run from the U-Boot source tree
-        src_root = os.path.dirname(os.path.dirname(self._buildman_dir))
+        src_root = find_uboot_src()
 
         # Build the full command
         new_cmd = ['make'] + list(args)
@@ -1177,6 +1199,7 @@ Idx Name          Size      VMA       LMA       File off  Algn
 
     def test_reproducible(self):
         """Test that the -r flag works"""
+        self.require_uboot_src()
         # Use single board to avoid parallel merge_config.sh race conditions
         lines, cfg_data = self.check_command('board0', '-r')
         self.assertIn(b'SOURCE_DATE_EPOCH=0', lines[0])
@@ -1729,6 +1752,7 @@ something: me
         CONFIG_BUILDMAN_TEST_B, so enabling BUILDMAN_TEST_A should also enable
         BUILDMAN_TEST_B.
         """
+        self.require_uboot_src()
         # Use single board to avoid parallel merge_config.sh race conditions
         # Enable UNIT_TEST since BUILDMAN_TEST_A depends on it
         _lines, cfg_data = self.check_command(
