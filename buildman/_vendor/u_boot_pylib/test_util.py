@@ -24,7 +24,7 @@ except:
 
 def run_test_coverage(prog, filter_fname, exclude_list, build_dir,
                       required=None, extra_args=None, single_thread='-P1',
-                      args=None):
+                      args=None, test_cmd=None):
     """Run tests and check that we get 100% coverage
 
     Args:
@@ -43,6 +43,9 @@ def run_test_coverage(prog, filter_fname, exclude_list, build_dir,
             single-threaded. This is necessary to get proper coverage results.
             The default is '-P0'
         args (list of str): List of tests to run, or None to run all
+        test_cmd (str): Argument which tells the tool to run its tests, or
+            None to choose from the name of the program: 'test' for binman,
+            patman and pickman, else '-t'
 
     Raises:
         ValueError if the code coverage is not 100%
@@ -57,8 +60,9 @@ def run_test_coverage(prog, filter_fname, exclude_list, build_dir,
     glob_list += exclude_list
     glob_list += ['*libfdt.py', '*/site-packages/*', '*/dist-packages/*']
     glob_list += ['*concurrencytest*']
-    use_test = 'binman' in prog or 'patman' in prog or 'pickman' in prog
-    test_cmd = 'test' if use_test else '-t'
+    if not test_cmd:
+        name = os.path.basename(prog)
+        test_cmd = 'test' if name in ('binman', 'patman', 'pickman') else '-t'
     prefix = ''
     if build_dir:
         prefix = 'PYTHONPATH=$PYTHONPATH:%s/sandbox_spl/tools ' % build_dir

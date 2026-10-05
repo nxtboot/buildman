@@ -8,6 +8,12 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Fixed
+~~~~~
+- ``buildman --coverage`` runs the tests even when the path to buildman
+  contains 'binman', 'patman' or 'pickman', instead of passing them the wrong
+  argument and reporting low coverage.
+
 0.1.0 - 2026-10-05
 ------------------
 
