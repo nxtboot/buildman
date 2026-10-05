@@ -215,8 +215,8 @@ def _get_load_avg():
         return 0.0
 
 
-def _get_sizes(out_dir):
-    """Get the image sizes from a build output directory
+def _run_tool(cmd, cwd, env=None):
+    """Run a binutils tool and return its output
 
     Uses subprocess.Popen directly instead of command.run_pipe() to
     avoid the select() FD_SETSIZE limit in cros_subprocess. With many
@@ -224,28 +224,58 @@ def _get_sizes(out_dir):
     causing select() to fail or corrupt memory.
 
     Args:
+        cmd (list of str): Command and arguments
+        cwd (str): Directory to run the command in
+        env (dict): Environment to use, or None for the current one
+
+    Returns:
+        str: Output of the command, or '' if it failed
+    """
+    try:
+        proc = subprocess.Popen(  # pylint: disable=R1732
+            cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, _ = proc.communicate()
+    except OSError:
+        return ''
+    if proc.returncode:
+        return ''
+    return stdout.decode('utf-8', errors='replace')
+
+
+def _get_sizes(out_dir, cross='', env=None):
+    """Get the image sizes from a build output directory
+
+    This produces the same lines as a local build (see
+    BuilderThread._process_elf_file()), for each of U-Boot proper, SPL and
+    TPL: the output of the toolchain's 'size' with the header line dropped
+    and the .rodata size appended. The ELF files are named relative to the
+    output directory, since the summary matches up the sizes for each
+    commit using the filename.
+
+    Args:
         out_dir (str): Build output directory
+        cross (str): Cross-compiler prefix, e.g. 'aarch64-linux-'
+        env (dict): Environment with the toolchain on the PATH, as used for
+            the build, or None for the current one
 
     Returns:
         dict: Size information, or empty dict if not available
     """
-    elf = os.path.join(out_dir, 'u-boot')
-    if not os.path.exists(elf):
+    lines = []
+    for fname in builderthread.BASE_ELF_FILENAMES:
+        if not os.path.exists(os.path.join(out_dir, fname)):
+            continue
+        size = _run_tool([f'{cross}size', fname], out_dir,
+                         env).splitlines()
+        if len(size) < 2:
+            continue
+        rodata = builderthread.get_rodata_size(
+            _run_tool([f'{cross}objdump', '-h', fname], out_dir, env))
+        lines.append(f'{size[1]} {rodata}')
+    if not lines:
         return {}
-    try:
-        proc = subprocess.Popen(  # pylint: disable=R1732
-            ['size', elf], stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, _ = proc.communicate()
-        if proc.returncode == 0:
-            # Strip the header line from size output, keeping only data lines.
-            # This matches the format that local builderthread produces.
-            lines = stdout.decode('utf-8', errors='replace').splitlines()
-            if len(lines) > 1:
-                return {'raw': '\n'.join(lines[1:])}
-    except OSError:
-        pass
-    return {}
+    return {'raw': '\n'.join(lines)}
 
 
 def _get_config(out_dir):
@@ -472,7 +502,10 @@ class _WorkerBuilderThread(builderthread.BuilderThread):
         lines = ''
         config = {}
         if result.out_dir and result.return_code == 0:
-            sizes = _get_sizes(result.out_dir)
+            # The toolchain's tools are only found on the PATH which the
+            # build uses
+            env = self.builder.make_environment(self.toolchain)
+            sizes = _get_sizes(result.out_dir, self.toolchain.cross, env)
             # Scan the DWARF line info while the object files are still
             # present, since _write_result() is a no-op on the worker and so
             # never writes the manifest. The boss writes it to the build dir
