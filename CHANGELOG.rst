@@ -13,6 +13,10 @@ Fixed
 - ``buildman --coverage`` runs the tests even when the path to buildman
   contains 'binman', 'patman' or 'pickman', instead of passing them the wrong
   argument and reporting low coverage.
+- A distributed build (``--dist``) records the same sizes as a local one:
+  U-Boot proper, SPL and TPL, each with its ``.rodata`` size and named
+  relative to the build directory, so that ``-S`` compares them correctly
+  across commits built on different machines.
 
 0.1.0 - 2026-10-05
 ------------------

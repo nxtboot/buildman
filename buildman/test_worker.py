@@ -131,19 +131,52 @@ class TestUtilityFunctions(unittest.TestCase):
 
     @mock.patch('buildman.worker.subprocess.Popen')
     def test_get_sizes_with_elf(self, mock_popen):
-        """Test with ELF file present"""
-        proc = mock.Mock()
-        proc.communicate.return_value = (
-            b'   text    data     bss     dec     hex filename\n'
-            b'  12345    1234     567   14146    374a u-boot\n',
-            b'')
-        proc.returncode = 0
-        mock_popen.return_value = proc
+        """Test that the sizes match what a local build records"""
+        def popen(cmd, cwd, env, **_kwargs):
+            proc = mock.Mock(returncode=0)
+            fname = cmd[-1]
+            if cmd[0].endswith('objdump'):
+                out = (f'{fname}:     file format elf64-littleaarch64\n\n'
+                       'Sections:\n'
+                       'Idx Name    Size      VMA       LMA       File off\n'
+                       '  1 .rodata 00001234  00000000  00000000  00010000\n')
+            else:
+                out = ('   text    data     bss     dec     hex filename\n'
+                       f'  12345    1234     567   14146    374a {fname}\n')
+            calls.append((cmd, cwd, env))
+            proc.communicate.return_value = (out.encode(), b'')
+            return proc
+
+        calls = []
+        mock_popen.side_effect = popen
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.mkdir(os.path.join(tmpdir, 'spl'))
+            for fname in ['u-boot', 'spl/u-boot-spl']:
+                with open(os.path.join(tmpdir, fname), 'w',
+                          encoding='utf-8') as fout:
+                    fout.write('fake')
+            env = {b'PATH': b'/toolchain/bin'}
+            sizes = worker._get_sizes(tmpdir, 'aarch64-linux-', env)
+            self.assertEqual(
+                {'raw': '  12345    1234     567   14146    374a u-boot 00001234\n'
+                        '  12345    1234     567   14146    374a '
+                        'spl/u-boot-spl 00001234'}, sizes)
+            self.assertEqual(
+                (['aarch64-linux-size', 'u-boot'], tmpdir, env), calls[0])
+            self.assertEqual(
+                (['aarch64-linux-objdump', '-h', 'u-boot'], tmpdir, env),
+                calls[1])
+
+    @mock.patch('buildman.worker.subprocess.Popen')
+    def test_get_sizes_size_fails(self, mock_popen):
+        """Test when size exits with an error"""
+        mock_popen.return_value = mock.Mock(returncode=1)
+        mock_popen.return_value.communicate.return_value = (b'', b'error')
         with tempfile.TemporaryDirectory() as tmpdir:
             elf = os.path.join(tmpdir, 'u-boot')
             with open(elf, 'w', encoding='utf-8') as fout:
                 fout.write('fake')
-            self.assertIn('raw', worker._get_sizes(tmpdir))
+            self.assertEqual(worker._get_sizes(tmpdir), {})
 
     @mock.patch('buildman.worker.subprocess.Popen',
                 side_effect=OSError('no size'))
@@ -430,8 +463,10 @@ class TestWorkerBuilderThread(_ProtoTestBase):
         Uses __new__ to avoid calling __init__ which requires a real
         Builder. Tests must set any attributes they need.
         """
-        return worker._WorkerBuilderThread.__new__(
+        thread = worker._WorkerBuilderThread.__new__(
             worker._WorkerBuilderThread)
+        thread.toolchain = mock.Mock(cross='')
+        return thread
 
     def test_write_result_is_noop(self):
         """Test that _write_result does nothing"""

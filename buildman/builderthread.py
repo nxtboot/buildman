@@ -157,6 +157,23 @@ def mkdir(dirname, parents=False):
             raise
 
 
+def get_rodata_size(objdump):
+    """Get the size of the .rodata section from 'objdump -h' output
+
+    Args:
+        objdump (str): Output of 'objdump -h' on an ELF file
+
+    Returns:
+        str: Size of .rodata in hex, as printed by objdump, or '' if there is
+            no .rodata section
+    """
+    for line in objdump.splitlines():
+        fields = line.split()
+        if len(fields) > 5 and fields[1] == '.rodata':
+            return fields[2]
+    return ''
+
+
 def _remove_old_outputs(out_dir):
     """Remove any old output-target files
 
@@ -931,10 +948,7 @@ class BuilderThread(threading.Thread):
                             result.brd.target, fname)
             with open(objdump, 'w', encoding='utf-8') as outf:
                 print(dump_result.stdout, end=' ', file=outf)
-            for line in dump_result.stdout.splitlines():
-                fields = line.split()
-                if len(fields) > 5 and fields[1] == '.rodata':
-                    rodata_size = fields[2]
+            rodata_size = get_rodata_size(dump_result.stdout)
 
         cmd = [f'{self.toolchain.cross}size', fname]
         size_result = command.run_one(*cmd, capture=True,
