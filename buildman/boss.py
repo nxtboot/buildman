@@ -29,6 +29,7 @@ import time
 
 from buildman import builderthread
 from buildman import worker as worker_mod
+import u_boot_pylib
 from u_boot_pylib import command
 from u_boot_pylib import tools
 from u_boot_pylib import tout
@@ -41,12 +42,13 @@ SSH_OPTS = [
 
 # The boss ships its own buildman source to each worker, so the worker runs
 # the same tool version as the boss rather than whatever buildman (if any)
-# happens to be committed in the tree under test. _TOOLS_DIR is the directory
-# holding the running buildman, and _TOOL_ITEMS lists what to copy into the
-# worker's tool directory. The buildman package includes the libraries it
-# vendors (see buildman/__init__.py), so it is all the worker needs
-_TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-_TOOL_ITEMS = ['buildman']
+# happens to be committed in the tree under test. _TOOL_PACKAGES lists the
+# directories of the packages to copy into the worker's tool directory: the
+# running buildman, which includes the libraries it vendors (see
+# buildman/__init__.py), and the u_boot_pylib library which it depends on.
+# These may be installed in different places.
+_TOOL_PACKAGES = [os.path.dirname(os.path.realpath(path))
+                  for path in (__file__, u_boot_pylib.__file__)]
 
 # Per-build timeout in seconds. If a worker doesn't respond within this
 # time, the boss assumes the worker is dead or hung and stops using it.
@@ -410,9 +412,11 @@ class RemoteWorker:  # pylint: disable=R0902
         if not self.tool_dir:
             raise BossError(
                 f'No tool_dir on {self.hostname} (call init_git first)')
-        tar_cmd = ['tar', '-C', _TOOLS_DIR,
-                   '--exclude=__pycache__', '--exclude=*.pyc',
-                   '-cf', '-'] + _TOOL_ITEMS
+        tar_cmd = ['tar', '--exclude=__pycache__', '--exclude=*.pyc',
+                   '-cf', '-']
+        for pkg_dir in _TOOL_PACKAGES:
+            tar_cmd += ['-C', os.path.dirname(pkg_dir),
+                        os.path.basename(pkg_dir)]
         remote = (f'rm -rf {self.tool_dir} && mkdir -p {self.tool_dir} && '
                   f'tar -C {self.tool_dir} -xf -')
         ssh_cmd = [

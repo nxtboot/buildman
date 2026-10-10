@@ -76,6 +76,6 @@ A few tests run U-Boot's real Kconfig tools. Set ``UBOOT_SRC`` to a U-Boot
 source tree to include them; otherwise they are skipped. ``buildman
 --coverage`` checks that the tests cover all of the code.
 
-The ``u_boot_pylib`` library, the parts of patman which buildman uses and
-U-Boot's ``qconfig`` tool are vendored from the U-Boot tree, so no surrounding
-U-Boot source is needed to run the tests.
+The parts of patman which buildman uses and U-Boot's ``qconfig`` tool are
+vendored from the U-Boot tree and ``u_boot_pylib`` is installed from PyPI as
+``u-boot-pylib``, so no surrounding U-Boot source is needed to run the tests.

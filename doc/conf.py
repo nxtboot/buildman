@@ -23,6 +23,10 @@ extensions = [
 # Section labels are referenced as 'document:Section title'
 autosectionlabel_prefix_document = True
 
+# Only label the top-level sections, since lower ones, such as the Fixed and
+# Changed headings of each release in the changelog, are not unique
+autosectionlabel_maxdepth = 2
+
 # Resolve references into the U-Boot documentation, which buildman's manual
 # refers to in places
 intersphinx_mapping = {

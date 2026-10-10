@@ -57,7 +57,6 @@ Vendored code
 Some code is copied from the U-Boot tree, so that the project is
 self-contained:
 
-- ``buildman/_vendor/u_boot_pylib/``: the U-Boot Python library
 - ``buildman/_vendor/patman/``: the patman modules which buildman uses to
   read series metadata (``patchstream``, ``commit`` and their dependencies)
 - ``buildman/_vendor/qconfig.py``: U-Boot's tool for querying CONFIG options
@@ -67,7 +66,9 @@ top level, so that installing buildman does not clash with U-Boot's own
 copies or with other packages which provide them. ``buildman/__init__.py``
 adds ``buildman/_vendor/`` to the start of the import path, so the code still
 imports them by their usual names and matches the U-Boot tree. It also means
-the package alone is all that distributed builds need to copy to workers.
+distributed builds can copy the package to workers along with the
+``u_boot_pylib`` library, which is not vendored: it is a dependency, from the
+``u-boot-pylib`` package (https://github.com/nxtboot/u-boot-pylib).
 
 When refreshing these from U-Boot, note the U-Boot commit in the commit
 message.

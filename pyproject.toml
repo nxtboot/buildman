@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "filelock >= 3.0.12",
+    "u-boot-pylib >= 0.1.0",
 ]
 
 [project.optional-dependencies]
