@@ -19,6 +19,7 @@ import types
 import unittest
 from unittest import mock
 
+import u_boot_pylib
 from u_boot_pylib import command
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
@@ -338,7 +339,12 @@ class TestRemoteWorkerPush(unittest.TestCase):
         # The pipeline is 'tar -c ... | ssh host tar -x ...'
         tar_cmd, ssh_cmd = mock_pipe.call_args[0][0]
         self.assertEqual(tar_cmd[0], 'tar')
-        self.assertIn('buildman', tar_cmd)
+
+        # buildman and u_boot_pylib are sent, each from its own directory
+        pylib_dir = os.path.dirname(os.path.realpath(u_boot_pylib.__file__))
+        self.assertEqual(
+            ['-C', os.path.dirname(pylib_dir), 'u_boot_pylib'], tar_cmd[-3:])
+        self.assertEqual('buildman', tar_cmd[-4])
         self.assertIn('host1', ssh_cmd)
         self.assertIn('/tmp/bm-worker-123/.tool', ssh_cmd[-1])
 

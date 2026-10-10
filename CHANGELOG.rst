@@ -8,6 +8,12 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Changed
+~~~~~~~
+- The U-Boot Python library is now a dependency, from the ``u-boot-pylib``
+  package, rather than a copy vendored into buildman. A distributed build
+  sends it to the workers along with buildman.
+
 Fixed
 ~~~~~
 - ``buildman --coverage`` runs the tests even when the path to buildman
