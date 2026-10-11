@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from buildman import board
 from buildman import boards
@@ -876,6 +876,28 @@ class TestBuildMisc(TestBuildBase):
         if pid not in self.valid_pids:
             raise OSError('Invalid PID')
 
+    @staticmethod
+    def lock_held():
+        """Make the next attempt to take the lock time out
+
+        This acts as though another process holds the lock. Holding a real
+        lock is not enough, since filelock waits for the timeout by sleeping
+        until its deadline and may not see the mock clock move past it
+
+        Returns:
+            Patch object to use as a context manager
+        """
+        real_acquire = FileLock.acquire
+        calls = []
+
+        def acquire(lock, *args, **kwargs):
+            calls.append(lock)
+            if len(calls) == 1:
+                raise Timeout(lock.lock_file)
+            return real_acquire(lock, *args, **kwargs)
+
+        return patch.object(FileLock, 'acquire', acquire)
+
     def test_process_limit(self):
         """Test wait_for_process_limit() function"""
         tmpdir = self.base_dir
@@ -926,10 +948,8 @@ class TestBuildMisc(TestBuildBase):
             # Check lock-busting
             self.cur_time = 0
             self.valid_pids = [1, 2]
-            lock_fname = os.path.join(tmpdir, control.LOCK_FNAME)
-            lock = FileLock(lock_fname)
-            lock.acquire(timeout=1)
-            control.wait_for_process_limit(1, tmpdir=tmpdir, pid=3)
+            with self.lock_held():
+                control.wait_for_process_limit(1, tmpdir=tmpdir, pid=3)
             lines = terminal.get_print_test_lines()
             self.assertEqual('Waiting for other buildman processes...',
                              lines[0].text)
@@ -941,7 +961,6 @@ class TestBuildMisc(TestBuildBase):
             self.assertEqual('starting build', lines[3].text)
             self.assertEqual([1, 2, 3], control.read_procs(tmpdir))
             self.assertEqual(control.RUN_WAIT_S, self.cur_time)
-            lock.release()
 
     def test_process_limit_dead(self):
         """Test wait_for_process_limit() with dead processes"""
@@ -957,11 +976,8 @@ class TestBuildMisc(TestBuildBase):
             self.valid_pids = [1]
             control.wait_for_process_limit(1, tmpdir=tmpdir, pid=2)
             self.valid_pids = [1, 2]
-            lock_fname = os.path.join(tmpdir, control.LOCK_FNAME)
-            lock = FileLock(lock_fname)
-            lock.acquire(timeout=1)
-            control.wait_for_process_limit(1, tmpdir=tmpdir, pid=3)
-            lock.release()
+            with self.lock_held():
+                control.wait_for_process_limit(1, tmpdir=tmpdir, pid=3)
 
             # Check handling of dead processes. Here we have PID 2 as a running
             # process, even though the PID file contains 1, 2 and 3. So we can
